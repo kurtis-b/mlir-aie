@@ -25,7 +25,7 @@ n?=64
 
 kernels=mm_${m}x${k}x${n}
 aieargs+=-m $m -k $k -n $n
-target_suffix=${M}x${K}x${N}_${m}x${k}x${n}
+target_suffix=${M}x${K}x${N}_${m}x${k}x${n}_${dtype_in}_${dtype_out}
 use_alt?=0
 use_iron?=0
 
