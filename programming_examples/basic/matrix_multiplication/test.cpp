@@ -212,6 +212,7 @@ int main(int argc, const char *argv[]) {
   float npu_time_total = 0;
   float npu_time_min = 9999999;
   float npu_time_max = 0;
+  float cpu_time_total = 0;
 
   int errors = 0;
   float macs = 2.0 * float(M) * float(K) * float(N);
@@ -278,6 +279,13 @@ int main(int argc, const char *argv[]) {
         std::chrono::duration_cast<std::chrono::microseconds>(stop - start)
             .count();
 
+    // if (iter % 10 == 0) {
+    //   cpu_time_total +=
+    //       matmul_common::time_matmul<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
+    //           M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol,
+    //           b_col_maj);
+    // }
+
     npu_time_total += npu_time;
     npu_time_min = (npu_time < npu_time_min) ? npu_time : npu_time_min;
     npu_time_max = (npu_time > npu_time_max) ? npu_time : npu_time_max;
@@ -302,6 +310,10 @@ int main(int argc, const char *argv[]) {
   std::cout << std::endl
             << "Max NPU matmul time: " << npu_time_max << "us." << std::endl;
   std::cout << "Min NPU gflops: " << macs / (1000 * npu_time_max) << std::endl;
+
+  //   std::cout << std::fixed << std::setprecision(2) << std::endl
+  //             << "Avg CPU matmul time: " << cpu_time_total / (num_iter / 5)
+  //             << "us." << std::endl;
 
   if (!errors) {
     std::cout << "\nPASS!\n\n";
