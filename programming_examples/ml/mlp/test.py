@@ -29,6 +29,7 @@ def main(opts):
     n_warmup_iterations = int(opts.warmup_iters)
     trace_size = int(opts.trace_size)
     b_col_maj = int(opts.b_col_maj)
+    quantize_model = True if int(opts.quantize_model) > 0 else False
 
     design = "mlp"
     xclbin_path = opts.xclbin
@@ -72,8 +73,8 @@ def main(opts):
     # ------------------------------------------------------
     min = -128
     max = 127
-    input_fp32 = torch.randint(0, 1, (M, K)).type(torch.FloatTensor)
-    weight_fp32 = torch.randint(0, 1, (K, N)).type(torch.FloatTensor)
+    input_fp32 = torch.randint(127, 128, (M, K)).type(torch.FloatTensor)
+    weight_fp32 = torch.randint(127, 128, (K, N)).type(torch.FloatTensor)
 
     # ------------------------------------------------------
     # Get device, load the xclbin & kernel and register them
@@ -120,43 +121,54 @@ def main(opts):
     model.eval()
     model.fc1.weight.data.copy_(weight_fp32)
 
-    # attach a global qconfig, which contains information about what kind
-    # of observers to attach. Use 'x86' for server inference and 'qnnpack'
-    # for mobile inference. Other quantization configurations such as selecting
-    # symmetric or asymmetric quantization and MinMax or L2Norm calibration techniques
-    # can be specified here.
-    # Note: the old 'fbgemm' is still available but 'x86' is the recommended default
-    # for server inference.
-    # model_fp32.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
-    model.qconfig = torch.ao.quantization.get_default_qconfig('x86')
+    if quantize_model:
+        # attach a global qconfig, which contains information about what kind
+        # of observers to attach. Use 'x86' for server inference and 'qnnpack'
+        # for mobile inference. Other quantization configurations such as selecting
+        # symmetric or asymmetric quantization and MinMax or L2Norm calibration techniques
+        # can be specified here.
+        # Note: the old 'fbgemm' is still available but 'x86' is the recommended default
+        # for server inference.
+        # model_fp32.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
+        model.qconfig = torch.ao.quantization.get_default_qconfig('onednn')
 
-    # Fuse the activations to preceding layers, where applicable.
-    # This needs to be done manually depending on the model architecture.
-    # Common fusions include `conv + relu` and `conv + batchnorm + relu`
-    # model_fp32_fused = torch.ao.quantization.fuse_modules(model, [['']])
+        # Fuse the activations to preceding layers, where applicable.
+        # This needs to be done manually depending on the model architecture.
+        # Common fusions include `conv + relu` and `conv + batchnorm + relu`
+        # model_fp32_fused = torch.ao.quantization.fuse_modules(model, [['']])
 
-    # Prepare the model for static quantization. This inserts observers in
-    # the model that will observe activation tensors during calibration.
-    # model_fp32_prepared = torch.ao.quantization.prepare(model_fp32_fused)
-    model_fp32_prepared = torch.ao.quantization.prepare(model)
+        # Prepare the model for static quantization. This inserts observers in
+        # the model that will observe activation tensors during calibration.
+        # model_fp32_prepared = torch.ao.quantization.prepare(model_fp32_fused)
+        model_fp32_prepared = torch.ao.quantization.prepare(model)
 
-    # calibrate the prepared model to determine quantization parameters for activations
-    # in a real world setting, the calibration would be done with a representative dataset
-    model_fp32_prepared(input_fp32)
+        # calibrate the prepared model to determine quantization parameters for activations
+        # in a real world setting, the calibration would be done with a representative dataset
+        model_fp32_prepared(input_fp32)
 
-    # Convert the observed model to a quantized model. This does several things:
-    # quantizes the weights, computes and stores the scale and bias value to be
-    # used with each activation tensor, and replaces key operators with quantized
-    # implementations.
-    model_int8 = torch.ao.quantization.convert(model_fp32_prepared)
+        # Convert the observed model to a quantized model. This does several things:
+        # quantizes the weights, computes and stores the scale and bias value to be
+        # used with each activation tensor, and replaces key operators with quantized
+        # implementations.
+        model_int8 = torch.ao.quantization.convert(model_fp32_prepared)
 
+        # Inspect data types of each layer in the model
+        print("\nData types of each layer in the model:")
+        model_int8_state_dict = model_int8.state_dict()
+        for key in model_int8_state_dict:
+            print(key, ":", model_int8_state_dict[key])
 
     # run the model, relevant calculations will happen in int8
     for i in range(n_iterations):
         input_fp32 = torch.randint(0, 1, (M, K)).type(torch.FloatTensor)
-        start = time.time_ns()
-        golden_output = model_int8(input_fp32)
-        stop = time.time_ns()
+        if quantize_model:
+            start = time.time_ns()
+            golden_output = model_int8(input_fp32)
+            stop = time.time_ns()
+        else:
+            start = time.time_ns()
+            golden_output = model(input_fp32)
+            stop = time.time_ns()
         cpu_time = stop - start
         if cpu_time < cpu_time_min:
             cpu_time_min = cpu_time
@@ -282,6 +294,12 @@ if __name__ == "__main__":
         dest="N",
         default=512,
         help="Matrix size N",
+    )
+    p.add_argument(
+        "--quantize_model",
+        dest="quantize_model",
+        default=1,
+        help="Whether to run a quantized model",
     )
     p.add_argument(
         "--b_col_maj",
