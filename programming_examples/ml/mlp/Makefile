@@ -46,7 +46,8 @@ n?=64
 
 n_aie_cols?=4
 b_col_maj?=0
-n_iterations?=1000
+quantize_model?=1
+n_iterations?=10
 
 kernels=mm_${m}x${k}x${n}
 target_suffix=${M}x${K}x${N}_${m}x${k}x${n}_${n_aie_cols}c
@@ -113,7 +114,7 @@ xclbin_target?=build/final_${target_suffix}.xclbin
 insts_target?=build/insts_${target_suffix}.txt
 aie_py_src?=${targetname}.py
 
-runargs?=-v 2 --warmup 0 --iters ${n_iterations} --b_col_maj ${b_col_maj}
+runargs?=-v 2 --warmup 0 --iters ${n_iterations} --b_col_maj ${b_col_maj} --quantize_model ${quantize_model}
 aieargs+=-M $M -K $K -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
 
 # TODO: Can't run with CHESS on my laptop because I don't have an ethernet connection with it
