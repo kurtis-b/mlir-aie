@@ -74,7 +74,7 @@ def main(opts):
     min = -128
     max = 127
     input_fp32 = torch.randint(127, 128, (M, K)).type(torch.FloatTensor)
-    weight_fp32 = torch.randint(127, 128, (K, N)).type(torch.FloatTensor)
+    weight_fp32 = torch.randint(127, 128, (N, K)).type(torch.FloatTensor)
 
     # ------------------------------------------------------
     # Get device, load the xclbin & kernel and register them
@@ -158,7 +158,7 @@ def main(opts):
         for key in model_int8_state_dict:
             print(key, ":", model_int8_state_dict[key])
 
-    # run the model, relevant calculations will happen in int8
+    # run the model, relevant calculations will happen in int8 if quantized
     for i in range(n_iterations):
         input_fp32 = torch.randint(0, 1, (M, K)).type(torch.FloatTensor)
         if quantize_model:
@@ -186,8 +186,8 @@ def main(opts):
     # Verify the weights
     # ------------------------------------------------------
     npu_weights_reshaped = npu_weights.reshape(K, N)
-    for row in range(M):
-        if not np.allclose(npu_weights_reshaped[row], weight_fp32.squeeze().data.numpy()[row], rtol=0, atol=2):
+    for row in range(K):
+        if not np.allclose(npu_weights_reshaped[row], weight_fp32.reshape(K,N).squeeze().data.numpy()[row], rtol=0, atol=2):
             print(f"\nFailed at row {row}.\n")
             print(f"NPU input row: {npu_weights_reshaped[row]}")
             print(f"FP32 input row: {weight_fp32.squeeze().data.numpy()[row]}")
