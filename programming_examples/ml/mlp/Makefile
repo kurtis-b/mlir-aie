@@ -117,7 +117,6 @@ aie_py_src?=${targetname}.py
 runargs?=-v 2 --warmup 0 --iters ${n_iterations} --b_col_maj ${b_col_maj} --quantize_model ${quantize_model}
 aieargs+=-M $M -K $K -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
 
-# TODO: Can't run with CHESS on my laptop because I don't have an ethernet connection with it
 CHESS?=false
 
 # default sequential buffer allocation, if not already defined
