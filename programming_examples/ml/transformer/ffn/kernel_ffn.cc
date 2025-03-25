@@ -20,7 +20,7 @@
 
 #include <aie_api/aie.hpp>
 
-#include "zero.cc"
+#include "kernel_zero.cc"
 
 template <typename T_in, typename T_out, int M, int K>
 void gemv_scalar(T_in *a, T_in *b, T_out *c) {
