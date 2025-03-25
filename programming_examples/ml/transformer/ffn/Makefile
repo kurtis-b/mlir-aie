@@ -56,8 +56,8 @@ CHESS?=false
 
 .PHONY: all
 all: ${xclbin_target} \
-	build/insts_256x256.txt \
-	build/insts_64x128.txt \
+	build/insts_288x288.txt \
+	build/insts_128x128.txt \
 	build/insts_64x64.txt \
 
 ${kernel_target}: kernel_ffn.cc kernel_zero.cc
@@ -68,7 +68,7 @@ else
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DDIM_M=${m} -DDIM_K=${k} -c ${<:%=../%} -o ${@F}
 endif
 
-${xclbin_target}: build/aie_64x128.mlir ${kernel_target} 
+${xclbin_target}: build/aie_64x64.mlir ${kernel_target} 
 	mkdir -p ${@D}
 	cd ${@D} && aiecc.py --alloc-scheme=${buffer_aloc_flag} --aie-generate-cdo --no-compile-host --xclbin-name=${@F} \
 				$(if $(shell [ $(CHESS) != true ] && echo true), \
@@ -76,17 +76,17 @@ ${xclbin_target}: build/aie_64x128.mlir ${kernel_target}
 				) \
 				$(<:%=../%)
 
-build/aie_opt.mlir: build/aie_64x128.mlir
+build/aie_opt.mlir: build/aie_128x128.mlir
 	mkdir -p ${@D}
 	cd ${@D} &&	aie-opt aie_64x64.mlir -aie-objectFifo-stateful-transform -aie-register-objectFifos > lowered.mlir
 
-build/aie_256x256.mlir: npu_design.py
+build/aie_288x288.mlir: npu_design.py
 	mkdir -p ${@D}
-	python3 $< -M 64 -K 128 $(aieargs) --trace_size ${trace_size} > $@
+	python3 $< -M 288 -K 288 $(aieargs) --trace_size ${trace_size} > $@
 
-build/aie_64x128.mlir: npu_design.py
+build/aie_128x128.mlir: npu_design.py
 	mkdir -p ${@D}
-	python3 $< -M 64 -K 128 $(aieargs) --trace_size ${trace_size} > $@
+	python3 $< -M 128 -K 128 $(aieargs) --trace_size ${trace_size} > $@
 
 build/aie_64x64.mlir: npu_design.py
 	mkdir -p ${@D}
