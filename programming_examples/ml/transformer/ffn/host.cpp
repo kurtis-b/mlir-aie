@@ -76,6 +76,7 @@ struct aie_state aie_gemm;
 struct aie_state aie_bias;
 std::vector<uint32_t> aie_gemm_64x64_insts;
 std::vector<uint32_t> aie_gemm_64x128_insts;
+std::vector<uint32_t> aie_gemm_256x256_insts;
 std::map<std::tuple<int, int>, struct aie_offload_gemm_info> aie_offload;
 
 std::vector<uint32_t> aie_load_instr_sequence(std::string instr_path) {
@@ -217,6 +218,7 @@ void aie_init() {
   // GEMM design
   aie_gemm_64x64_insts = load_insts("build/insts_64x64.txt");
   aie_gemm_64x128_insts = load_insts("build/insts_64x128.txt");
+  aie_gemm_64x128_insts = load_insts("build/insts_256x256.txt");
 
   aie_gemm.xclbin_path = "build/final.xclbin";
   aie_gemm.kernel_name = "MLIR_AIE";
@@ -230,10 +232,12 @@ void aie_init() {
   aie_gemm.bos[3].dir = IN_OUT;
   aie_init_design(&aie_gemm);
 
-  aie_offload[std::make_tuple(64, 128)] =
-      (struct aie_offload_gemm_info){&aie_gemm_64x128_insts};
   aie_offload[std::make_tuple(64, 64)] =
       (struct aie_offload_gemm_info){&aie_gemm_64x64_insts};
+  aie_offload[std::make_tuple(64, 128)] =
+      (struct aie_offload_gemm_info){&aie_gemm_64x128_insts};
+  aie_offload[std::make_tuple(256, 256)] =
+      (struct aie_offload_gemm_info){&aie_gemm_256x256_insts};
 }
 
 // --------------------------------------------------------------------------
