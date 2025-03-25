@@ -34,7 +34,6 @@ def get_memref_len_elems(memref):
         out *= s
     return out
 
-
 def main():
     argparser = argparse.ArgumentParser(
         prog="AIE Matrix Multiplication MLIR Design (Whole Array)",
