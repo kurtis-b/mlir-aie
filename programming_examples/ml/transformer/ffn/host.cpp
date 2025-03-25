@@ -75,8 +75,8 @@ struct aie_global_state aie_global;
 struct aie_state aie_gemm;
 struct aie_state aie_bias;
 std::vector<uint32_t> aie_gemm_64x64_insts;
-std::vector<uint32_t> aie_gemm_64x128_insts;
-std::vector<uint32_t> aie_gemm_256x256_insts;
+std::vector<uint32_t> aie_gemm_128x128_insts;
+std::vector<uint32_t> aie_gemm_288x288_insts;
 std::map<std::tuple<int, int>, struct aie_offload_gemm_info> aie_offload;
 
 std::vector<uint32_t> aie_load_instr_sequence(std::string instr_path) {
@@ -217,8 +217,8 @@ void aie_init() {
 
   // GEMM design
   aie_gemm_64x64_insts = load_insts("build/insts_64x64.txt");
-  aie_gemm_64x128_insts = load_insts("build/insts_64x128.txt");
-  aie_gemm_64x128_insts = load_insts("build/insts_256x256.txt");
+  aie_gemm_128x128_insts = load_insts("build/insts_128x128.txt");
+  aie_gemm_128x128_insts = load_insts("build/insts_288x288.txt");
 
   aie_gemm.xclbin_path = "build/final.xclbin";
   aie_gemm.kernel_name = "MLIR_AIE";
@@ -234,10 +234,10 @@ void aie_init() {
 
   aie_offload[std::make_tuple(64, 64)] =
       (struct aie_offload_gemm_info){&aie_gemm_64x64_insts};
-  aie_offload[std::make_tuple(64, 128)] =
-      (struct aie_offload_gemm_info){&aie_gemm_64x128_insts};
-  aie_offload[std::make_tuple(256, 256)] =
-      (struct aie_offload_gemm_info){&aie_gemm_256x256_insts};
+  aie_offload[std::make_tuple(128, 128)] =
+      (struct aie_offload_gemm_info){&aie_gemm_128x128_insts};
+  aie_offload[std::make_tuple(288, 288)] =
+      (struct aie_offload_gemm_info){&aie_gemm_288x288_insts};
 }
 
 // --------------------------------------------------------------------------
@@ -332,6 +332,16 @@ bool validate_matmul(long M, long K, const float *__restrict inp,
     matmul_common::print_matrix(CRef, 1);
     std::cout << std::endl << "Output:" << std::endl;
     matmul_common::print_matrix(C, 1);
+    for (int i = 0; i < M; i++) {
+      if (C[i] != CRef[i]) {
+        std::cout << "Mismatch at index " << i << ": " << C[i] << " vs "
+                  << CRef[i] << std::endl;
+        if (C[i] == 0.0f) {
+          std::cout << "Breaking at index " << i << std::endl;
+          break;
+        }
+      }
+    }
     return false;
   }
   return true;
@@ -389,6 +399,9 @@ int main(int argc, char **argv) {
       }
       for (int j = 0; j < K; j++) {
         B[j] = matmul_common::get_random<std::bfloat16_t>();
+      }
+      for (int j = 0; j < M; j++) {
+        C[j] = 0.0f;
       }
       printf("Running matmul: %4dx%4d ...", M, K);
       fflush(stdout);
