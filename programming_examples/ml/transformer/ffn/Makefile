@@ -40,8 +40,8 @@ kernel_target?=build/mv_${m}x${k}.o
 
 M=64
 K=64
-m=64
-k=64
+m=32
+k=32
 dtype_in=bf16
 dtype_out=f32
 trace_size = 0 # Set to 0 to disable tracing
@@ -56,10 +56,11 @@ CHESS?=false
 
 .PHONY: all
 all: ${xclbin_target} \
+	build/insts_256x256.txt \
 	build/insts_64x128.txt \
 	build/insts_64x64.txt \
 
-${kernel_target}: kernel.cc zero.cc
+${kernel_target}: kernel_ffn.cc kernel_zero.cc
 	mkdir -p ${@D}
 ifeq ($(CHESS), true)
 	cd ${@D} && xchesscc_wrapper ${CHESSCCWRAP2_FLAGS} -DDIM_M=${m} -DDIM_K=${k} -c ${<:%=../%}-o ${@F} 
@@ -79,11 +80,15 @@ build/aie_opt.mlir: build/aie_64x128.mlir
 	mkdir -p ${@D}
 	cd ${@D} &&	aie-opt aie_64x64.mlir -aie-objectFifo-stateful-transform -aie-register-objectFifos > lowered.mlir
 
-build/aie_64x128.mlir: aie2.py
+build/aie_256x256.mlir: npu_design.py
 	mkdir -p ${@D}
 	python3 $< -M 64 -K 128 $(aieargs) --trace_size ${trace_size} > $@
 
-build/aie_64x64.mlir: aie2.py
+build/aie_64x128.mlir: npu_design.py
+	mkdir -p ${@D}
+	python3 $< -M 64 -K 128 $(aieargs) --trace_size ${trace_size} > $@
+
+build/aie_64x64.mlir: npu_design.py
 	mkdir -p ${@D}
 	python3 $< -M 64 -K 64 $(aieargs) --trace_size ${trace_size} > $@
 
@@ -95,16 +100,16 @@ xclbin_sign=${XILINX_XRT}/amdxdna/setup_xclbin_firmware.sh
 sign: ${xclbin_target}
 	${xclbin_sign} -dev Phoenix -xclbin $<
 
-test: test.cpp 
+host: host.cpp 
 	${CXX} ${CXXFLAGS} ${TEST_UTILS_INCLUDE}/test_utils.cpp -o test_utils.o $^ -o $@  ${LDFLAGS} ${LDLIBS}
 
 .PHONY: run
-run: all test
-	./test
+run: all host
+	./host
 
 .PHONY: trace
-trace: test ${xclbin_target}
-	./test
+trace: host ${xclbin_target}
+	./host
 	${srcdir}/../../../utils/parse_trace.py --filename trace.txt --mlir build/aie_64x64.mlir --colshift 1 > trace_4b.json
 
 .PHONY: clean
@@ -114,4 +119,4 @@ clean_trace:
 .PHONY: clean
 clean: clean_trace
 	rm -rf build 
-	rm test
+	rm host
