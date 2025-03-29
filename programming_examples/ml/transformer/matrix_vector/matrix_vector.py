@@ -41,6 +41,9 @@ def main():
     argparser.add_argument(
         "--trace_size", type=int, default=0, help="Size of the trace buffer"
     )
+    argparser.add_argument(
+        "--n_cores_in_col", type=int, default=4, help="Number of cores in a column"
+    )
     args = argparser.parse_args()
     with mlir_mod_ctx() as ctx:
         my_matmul(
@@ -51,31 +54,30 @@ def main():
             args.dtype_in,
             args.dtype_out,
             args.trace_size,
+            args.n_cores_in_col,
         )
         # print(ctx.module.operation.verify())
         print(ctx.module)
 
 # TODOs:
-# 1) Modify external memory transfer to a loop based on the tiling
 # 2) Extend support for data type combinations other than i16/i32 in design and kernel
 #    - Make sure to adjust the combinations in the kernel code
-# 3) Add support for more than 1 core
-def my_matmul(M, K, m, k, dtype_in_str, dtype_out_str, trace_size):
+def my_matmul(M, K, m, k, dtype_in_str, dtype_out_str, trace_size, n_cores):
     enableTrace = trace_size > 0
-
-    n_cores = 1
 
     A_sz = M * K
     B_sz = K
     C_sz = M
     C_sz_div_n_cores = C_sz // n_cores
 
+    assert M % (m * n_cores) == 0, f"M ({M}) must be divisible by m ({m}) * n_cores ({n_cores})"
+    assert K % k == 0, f"K ({K}) must be divisible by k ({k})"
+
     M_div_m = M // m
-    M_div_m_div_n_cores = M // (m * n_cores)
+    M_div_m_div_n_cores = M_div_m // n_cores
     K_div_k = K // k
 
-    m_x_k = m * k
-    m_x_K = m * K
+    m_x_K_x_nc = m * K * n_cores
 
     vectorized = True
 
@@ -91,8 +93,10 @@ def my_matmul(M, K, m, k, dtype_in_str, dtype_out_str, trace_size):
     @device(AIEDevice.npu1_4col)
     def device_body():
         inA_ty = np.ndarray[(m * k,), np.dtype[dtype_in]]
+        memA_ty = np.ndarray[(m * k * n_cores,), np.dtype[dtype_in]]
         inB_ty = np.ndarray[(k,), np.dtype[dtype_in]]
         outC_ty = np.ndarray[(m,), np.dtype[dtype_out]]
+        memC_ty = np.ndarray[(m * n_cores,), np.dtype[dtype_out]]
         A_ty = np.ndarray[(m, k), np.dtype[dtype_in]]
 
         # AIE Core Function declarations
@@ -119,11 +123,8 @@ def my_matmul(M, K, m, k, dtype_in_str, dtype_out_str, trace_size):
         memC_fifos = []
 
         # AIE-array data movement with object fifos
-        # Input A
         for i in range(n_cores):
-            memA_fifos.append(
-                object_fifo(f"memA{i}", ShimTile, MemTile, 2, inA_ty)
-            )
+            # Input A core tiles
             inA_fifos.append(
                 object_fifo(
                     f"inA{i}",
@@ -142,25 +143,35 @@ def my_matmul(M, K, m, k, dtype_in_str, dtype_out_str, trace_size):
                     ),  # transpose at 4-byte (2xbf16) granularity
                 )
             )
-            object_fifo_link(memA_fifos[i], inA_fifos[i])
 
-            # Output C
-            memC_fifos.append(
-                object_fifo(f"outC{i}", MemTile, ShimTile, 2, outC_ty)
-            )
+            # Output C cpre tiles
             outC_fifos.append(
                 object_fifo(f"memC{i}", cores[i], MemTile, 2, outC_ty)
             )
-            object_fifo_link(outC_fifos[i], memC_fifos[i])
 
-            # Input B
-            memB_fifos.append(
-                object_fifo(f"memB{i}", ShimTile, MemTile, 2, inB_ty)
+        # Input A mem tile
+        memA_fifos.append(
+            object_fifo(f"memA", ShimTile, MemTile, 2, memA_ty)
+        )
+        object_fifo_link(memA_fifos[0], [inA_fifos[i] for i in range(n_cores)],
+                         [], [m * k * i for i in range(n_cores)])
+
+        # Input B
+        memB_fifos.append(
+            object_fifo(f"memB", ShimTile, MemTile, 2, inB_ty)
+        )           
+        
+        inB_fifos.append(
+                object_fifo(f"inB", MemTile, [cores[i] for i in range(n_cores)],
+                             [2] + [2 for i in range(n_cores)], inB_ty) 
             )
-            inB_fifos.append(
-                object_fifo(f"inB{i}", MemTile, cores[i], 2, inB_ty)
-            )
-            object_fifo_link(memB_fifos[i], inB_fifos[i])
+        object_fifo_link(memB_fifos[0], inB_fifos[0])
+
+        memC_fifos.append(
+            object_fifo(f"outC", MemTile, ShimTile, 2, memC_ty)
+        )
+        object_fifo_link([outC_fifos[i] for i in range(n_cores)], memC_fifos[0], 
+                         [m * i for i in range(n_cores)], [])
 
         # Set up compute tiles
         for i in range(n_cores):
@@ -176,10 +187,10 @@ def my_matmul(M, K, m, k, dtype_in_str, dtype_out_str, trace_size):
 
                     for _ in range_(K_div_k):
                         elem_in_a = inA_fifos[i].acquire(ObjectFifoPort.Consume, 1)
-                        elem_in_b = inB_fifos[i].acquire(ObjectFifoPort.Consume, 1)
+                        elem_in_b = inB_fifos[0].acquire(ObjectFifoPort.Consume, 1)
                         matvec(elem_in_a, elem_in_b, elem_out)
                         inA_fifos[i].release(ObjectFifoPort.Consume, 1)
-                        inB_fifos[i].release(ObjectFifoPort.Consume, 1)
+                        inB_fifos[0].release(ObjectFifoPort.Consume, 1)
 
                     outC_fifos[i].release(ObjectFifoPort.Produce, 1)
 
@@ -199,32 +210,29 @@ def my_matmul(M, K, m, k, dtype_in_str, dtype_out_str, trace_size):
                 trace_utils.configure_packet_tracing_aie2(
                     tiles_to_trace, ShimTile, trace_size, M * 4
                 )
-            for i in range(n_cores):
-                npu_dma_memcpy_nd(
-                    metadata=memB_fifos[i],
-                    bd_id=2,
-                    mem=B,
-                    sizes=[M_div_m_div_n_cores, 1, 1, K],
-                    strides=[0, 0, 0, 1],
-                )
-                A_offset = i * M_div_m_div_n_cores * m * K
-                C_offset = i * M_div_m_div_n_cores * m
-                npu_dma_memcpy_nd(
-                    metadata=memA_fifos[i],
-                    bd_id=1,
-                    mem=A,
-                    offsets=[0, 0, 0, A_offset],
-                    sizes=[M_div_m_div_n_cores, K_div_k, m, k],
-                    strides=[m_x_K, k, K, 1],
-                )
-                npu_dma_memcpy_nd(
-                    metadata=memC_fifos[i],
-                    bd_id=0,
-                    mem=C,
-                    offsets=[0, 0, 0, C_offset],
-                    sizes=[1, 1, 1, C_sz_div_n_cores],
-                    strides=[0, 0, 0, 1],
-                )
+            npu_dma_memcpy_nd(
+                metadata=memB_fifos[0],
+                bd_id=2,
+                mem=B,
+                sizes=[M_div_m_div_n_cores, 1, 1, K],
+                strides=[0, 0, 0, 1],
+            )
+            npu_dma_memcpy_nd(
+                metadata=memA_fifos[0],
+                bd_id=1,
+                mem=A,
+                offsets=[0, 0, 0, 0],
+                sizes=[M_div_m_div_n_cores, K_div_k, m * n_cores, k],
+                strides=[m_x_K_x_nc, k, K, 1],
+            )
+            npu_dma_memcpy_nd(
+                metadata=memC_fifos[0],
+                bd_id=0,
+                mem=C,
+                offsets=[0, 0, 0, 0],
+                sizes=[1, 1, 1, C_sz],
+                strides=[0, 0, 0, 1],
+            )
             dma_wait(*memC_fifos)
 
 
