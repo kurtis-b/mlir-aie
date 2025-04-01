@@ -15,6 +15,11 @@ from aie.dialects.aiex import *
 from aie.helpers.dialects.ext.scf import _for as range_
 import aie.utils.trace as trace_utils
 
+from aie.dialects.scf import WhileOp, ConditionOp, yield_, IfOp
+import aie.dialects.index as index_dialect
+from aie.dialects.arith import constant
+from aie.dialects._arith_ops_gen import SubIOp
+
 dtype_map = {
     "bf16": bfloat16,
     "i8": np.int8,
@@ -185,13 +190,46 @@ def my_matmul(M, K, m, k, dtype_in_str, dtype_out_str, trace_size, n_cores):
                     )
                     zero(elem_out)
 
-                    for _ in range_(K_div_k):
+                    c_0 = index_dialect.constant(0)
+                    total_col_tiles = index_dialect.constant(K_div_k)
+                    c_1 = index_dialect.constant(1)
+                    c_2 = index_dialect.constant(2)
+                    # Check if the total number of column tiles is an odd number
+                    # If so, we do an iteration before starting the while loop
+                    total_col_tiles_rems = index_dialect.rems(total_col_tiles, c_2)
+                    extra_iter_cond = index_dialect.cmp("ne", total_col_tiles_rems, c_0)
+                    while_loop_ub = IfOp(extra_iter_cond, [T.index()], hasElse=True)
+                    with InsertionPoint(while_loop_ub.thenRegion.blocks[0]):
+                        elem_in_a = inA_fifos[i].acquire(ObjectFifoPort.Consume, 1)
+                        elem_in_b = inB_fifos[0].acquire(ObjectFifoPort.Consume, 1)
+                        matvec(elem_in_a, elem_in_b, elem_out)
+                        inA_fifos[i].release(ObjectFifoPort.Consume, 1)
+                        inB_fifos[0].release(ObjectFifoPort.Consume, 1)
+                        total_col_tiles_minus_1 = index_dialect.sub(total_col_tiles, c_1)
+                        yield_([total_col_tiles_minus_1])
+                    with InsertionPoint(while_loop_ub.elseRegion.blocks[0]):
+                        yield_([total_col_tiles])
+                    while_K_div_k = WhileOp(results_=[T.index()], inits=[c_0])
+                    while_K_div_k.regions[0].blocks.append(while_K_div_k.operands[0].type)
+                    while_K_div_k.regions[1].blocks.append(while_K_div_k.operands[0].type)
+                    with InsertionPoint(while_K_div_k.regions[0].blocks[0]): 
+                        elem_in_a = inA_fifos[i].acquire(ObjectFifoPort.Consume, 1)
+                        elem_in_b = inB_fifos[0].acquire(ObjectFifoPort.Consume, 1)
+                        matvec(elem_in_a, elem_in_b, elem_out)
+                        inA_fifos[i].release(ObjectFifoPort.Consume, 1)
+                        inB_fifos[0].release(ObjectFifoPort.Consume, 1)
                         elem_in_a = inA_fifos[i].acquire(ObjectFifoPort.Consume, 1)
                         elem_in_b = inB_fifos[0].acquire(ObjectFifoPort.Consume, 1)
                         matvec(elem_in_a, elem_in_b, elem_out)
                         inA_fifos[i].release(ObjectFifoPort.Consume, 1)
                         inB_fifos[0].release(ObjectFifoPort.Consume, 1)
 
+                        # Load the loop condition
+                        col_tile_iters_count = index_dialect.add(lhs=while_K_div_k.regions[0].blocks[0].arguments[0], rhs=c_2)
+                        exit_col_tile_cond = index_dialect.cmp("slt", col_tile_iters_count, while_loop_ub.results_[0]) # Proceed to the "after" region if true
+                        ConditionOp(condition=exit_col_tile_cond, args=[col_tile_iters_count])
+                    with InsertionPoint(while_K_div_k.regions[1].blocks[0]):
+                        yield_([while_K_div_k.regions[1].blocks[0].arguments[0]])
                     outC_fifos[i].release(ObjectFifoPort.Produce, 1)
 
         tiles_to_trace = [cores[0]]
