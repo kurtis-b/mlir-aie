@@ -145,9 +145,18 @@ extern "C" {
 #define DIM_K 32
 #endif
 
+#ifndef combos
+#define combos(X) X(int16, i16, int32, i32, acc32)
+#endif
+
+#ifndef combos
 #define combos(X)                                                              \
-  X(bfloat16, bf16, float, f32, accfloat)                                      \
-  X(int16, i16, int32, i32, acc32)
+  X(int8, i8, int8, i8, acc32)                                                 \
+  X(int8, i8, int16, i16, acc32)                                               \
+  X(int16, i16, int16, i16, acc32)                                             \
+  X(int16, i16, int32, i32, acc32)                                             \
+  X(bfloat16, bf16, float, f32, accfloat)
+#endif
 
 #define matvec_scalar_c_func(ctype_in, mlir_type_in, ctype_out, mlir_type_out, \
                              ctype_acc)                                        \
