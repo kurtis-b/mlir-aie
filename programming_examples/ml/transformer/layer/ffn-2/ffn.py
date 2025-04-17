@@ -328,7 +328,7 @@ def my_matmul(
         for row in range(n_aie_rows):
             for col in range(n_aie_cols):
 
-                @core(core_tiles[row][col], f"mm_{m}x{k}x{n}.o")
+                @core(core_tiles[row][col], f"ffn2_mm_{m}x{k}x{n}.o")
                 def core_body():
                     for _ in range_(0xFFFFFFFF):
                         loop = (
