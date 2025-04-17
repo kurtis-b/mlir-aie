@@ -20,6 +20,7 @@
 
 #include <aie_api/aie.hpp>
 
+#include "relu.cc"
 #include "zero.cc"
 
 template <typename T_in, typename T_out, int rowA, int colA, int colB>
@@ -759,6 +760,13 @@ extern "C" {
   void zero_scalar_##mlir_type_out(ctype_out *c_out) {                         \
     zero_scalar<ctype_out, DIM_M, DIM_N>(c_out);                               \
   }
+
+void i16_relu(int16 *a_in, int16 *c_out) {
+  relu_i16<DIM_M, DIM_N>(a_in, c_out);
+}
+void bf16_relu(bfloat16 *a_in, bfloat16 *c_out) {
+  relu_bf16<DIM_M, DIM_N>(a_in, c_out);
+}
 
 combos(matmul_vectorized_c_func) combos(matmul_scalar_c_func)
     combos(zero_vectorized_c_func) combos(zero_scalar_c_func)

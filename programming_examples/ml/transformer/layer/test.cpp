@@ -57,9 +57,10 @@ float rel_tol = matmul_common::get_rel_tol<C_DATATYPE>();
 namespace po = boost::program_options;
 
 int ffn1(const po::variables_map &vm, xrt::device &device, xrt::xclbin &xclbin,
-         xrt::hw_context &context, const int verbosity, const int do_verify,
-         const int n_iterations, const int n_warmup_iterations,
-         const int trace_size, const int b_col_maj) {
+         xrt::hw_context &context, std::vector<C_DATATYPE> &outVec,
+         const int verbosity, const int do_verify, const int n_iterations,
+         const int n_warmup_iterations, const int trace_size,
+         const int b_col_maj) {
   // Fix the seed to ensure reproducibility in CI.
   srand(1726250518); // srand(time(NULL));
 
@@ -210,11 +211,12 @@ int ffn1(const po::variables_map &vm, xrt::device &device, xrt::xclbin &xclbin,
       if (do_verify_stochastic) {
         errors = matmul_common::verify_stochastic<A_DATATYPE, C_DATATYPE,
                                                   ACC_DATATYPE>(
-            M, N, K, AVec, BVec, CVec, verify_stochastic_n_samples, verbosity,
-            abs_tol, rel_tol, b_col_maj);
+            M, N, K, AVec, BVec, CVec, true, verify_stochastic_n_samples,
+            verbosity, abs_tol, rel_tol, b_col_maj);
       } else {
         errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
-            M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, b_col_maj);
+            M, N, K, AVec, BVec, CVec, true, verbosity, abs_tol, rel_tol,
+            b_col_maj);
       }
       auto vstop = std::chrono::system_clock::now();
       float vtime =
@@ -269,6 +271,7 @@ int ffn1(const po::variables_map &vm, xrt::device &device, xrt::xclbin &xclbin,
   //             << "Avg CPU matmul time: " << cpu_time_total / (num_iter / 5)
   //             << "us." << std::endl;
 
+  outVec = CVec;
   if (!errors) {
     std::cout << "\nPASS!\n\n";
     return 0;
@@ -286,9 +289,11 @@ int ffn1(const po::variables_map &vm, xrt::device &device, xrt::xclbin &xclbin,
 }
 
 int ffn2(const po::variables_map &vm, xrt::device &device, xrt::xclbin &xclbin,
-         xrt::hw_context &context, const int verbosity, const int do_verify,
-         const int n_iterations, const int n_warmup_iterations,
-         const int trace_size, const int b_col_maj) {
+         xrt::hw_context &context, std::vector<A_DATATYPE> &inVec,
+         std::vector<C_DATATYPE> &outVec, const int verbosity,
+         const int do_verify, const int n_iterations,
+         const int n_warmup_iterations, const int trace_size,
+         const int b_col_maj) {
   // Fix the seed to ensure reproducibility in CI.
   srand(1726250518); // srand(time(NULL));
 
@@ -353,7 +358,7 @@ int ffn2(const po::variables_map &vm, xrt::device &device, xrt::xclbin &xclbin,
   std::vector<A_DATATYPE> AVec(A_VOLUME);
   for (int i = 0; i < A_VOLUME; i++) {
     // AVec[i] = matmul_common::get_random<A_DATATYPE>();
-    AVec[i] = i;
+    AVec[i] = inVec[i];
   }
   memcpy(bufA, AVec.data(), (AVec.size() * sizeof(A_DATATYPE)));
   B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
@@ -439,11 +444,12 @@ int ffn2(const po::variables_map &vm, xrt::device &device, xrt::xclbin &xclbin,
       if (do_verify_stochastic) {
         errors = matmul_common::verify_stochastic<A_DATATYPE, C_DATATYPE,
                                                   ACC_DATATYPE>(
-            M, N, K, AVec, BVec, CVec, verify_stochastic_n_samples, verbosity,
-            abs_tol, rel_tol, b_col_maj);
+            M, N, K, AVec, BVec, CVec, false, verify_stochastic_n_samples,
+            verbosity, abs_tol, rel_tol, b_col_maj);
       } else {
         errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
-            M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, b_col_maj);
+            M, N, K, AVec, BVec, CVec, false, verbosity, abs_tol, rel_tol,
+            b_col_maj);
       }
       auto vstop = std::chrono::system_clock::now();
       float vtime =
@@ -498,6 +504,7 @@ int ffn2(const po::variables_map &vm, xrt::device &device, xrt::xclbin &xclbin,
   //             << "Avg CPU matmul time: " << cpu_time_total / (num_iter / 5)
   //             << "us." << std::endl;
 
+  outVec = CVec;
   if (!errors) {
     std::cout << "\nPASS!\n\n";
     return 0;
@@ -552,10 +559,11 @@ int main(int argc, const char *argv[]) {
   if (verbosity >= 1)
     std::cout << "Getting hardware context.\n";
   xrt::hw_context context(device, xclbin.get_uuid());
-
-  int fail = ffn1(vm, device, xclbin, context, verbosity, do_verify,
+  std::vector<A_DATATYPE> in;
+  std::vector<C_DATATYPE> out;
+  int fail = ffn1(vm, device, xclbin, context, in, verbosity, do_verify,
                   n_iterations, n_warmup_iterations, trace_size, b_col_maj);
-  fail |= ffn2(vm, device, xclbin, context, verbosity, do_verify, n_iterations,
-               n_warmup_iterations, trace_size, b_col_maj);
+  fail |= ffn2(vm, device, xclbin, context, in, out, verbosity, do_verify,
+               n_iterations, n_warmup_iterations, trace_size, b_col_maj);
   return fail;
 }
