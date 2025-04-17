@@ -46,7 +46,7 @@ n?=32
 n_aie_cols?=1
 b_col_maj?=0
 
-kernels=mm_${m}x${k}x${n}
+kernels=ffn1_mm_${m}x${k}x${n}
 aieargs+=-M $M -K $K -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
 runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1
 target_suffix=ffn-1
@@ -112,20 +112,20 @@ buffer_aloc_flag?=basic-sequential
 .PHONY: all
 all: ${xclbin_target} ${targetname}.exe
 
-build/mm_b_row_maj_${m}x${k}x${n}.o: ${srcdir}/mm.cc
+build/ffn1_mm_b_row_maj_${m}x${k}x${n}.o: ${srcdir}/mm.cc
 	mkdir -p ${@D}
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o ${@F}
 
-build/mm_b_col_maj_${m}x${k}x${n}.o: ${srcdir}/mm_b_col_maj.cc
+build/ffn1_mm_b_col_maj_${m}x${k}x${n}.o: ${srcdir}/mm_b_col_maj.cc
 	mkdir -p ${@D}
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o ${@F}
 
 ifneq (${b_col_maj}, 1)
-build/mm_${m}x${k}x${n}.o: build/mm_b_row_maj_${m}x${k}x${n}.o 
+build/ffn1_mm_${m}x${k}x${n}.o: build/ffn1_mm_b_row_maj_${m}x${k}x${n}.o 
 	mkdir -p ${@D}
 	ar rvs $@ $^
 else
-build/mm_${m}x${k}x${n}.o: build/mm_b_col_maj_${m}x${k}x${n}.o
+build/ffn1_mm_${m}x${k}x${n}.o: build/ffn1_mm_b_col_maj_${m}x${k}x${n}.o
 	mkdir -p ${@D}
 	ar rvs $@ $^
 endif

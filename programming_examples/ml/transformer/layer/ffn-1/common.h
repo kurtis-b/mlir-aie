@@ -150,6 +150,28 @@ void matmul(int M, int N, int K, const std::vector<Tin> A,
 }
 
 template <typename Tin, typename Tout, typename Tacc>
+void matmul_fused_relu(int M, int N, int K, const std::vector<Tin> A,
+                       const std::vector<Tin> B, std::vector<Tout> &C,
+                       int b_col_maj) {
+  for (int row = 0; row < M; row++) {
+    for (int col = 0; col < N; col++) {
+      Tacc running_sum = 0;
+      for (int k = 0; k < K; k++) {
+        if (!b_col_maj) {
+          running_sum += Tacc(A[row * K + k] * B[k * N + col]);
+        } else {
+          running_sum += Tacc(A[row * K + k] * B[k + col * K]);
+        }
+      }
+      if (running_sum < 0) {
+        running_sum = 0;
+      }
+      C[row * N + col] = Tout(running_sum);
+    }
+  }
+}
+
+template <typename Tin, typename Tout, typename Tacc>
 float matmul_timed(int M, int N, int K, const std::vector<Tin> A,
                    const std::vector<Tin> B, std::vector<Tout> &C,
                    int b_col_maj) {
@@ -211,6 +233,24 @@ Tout mul_acc(int M, int N, int K, int row, int col, const std::vector<Tin> A,
     } else {
       running_sum += Tacc(A[row * K + k] * B[k + col * K]);
     }
+  }
+  return (Tout)running_sum;
+}
+
+template <typename Tin, typename Tout, typename Tacc>
+Tout mul_acc_fused_relu(int M, int N, int K, int row, int col,
+                        const std::vector<Tin> A, const std::vector<Tin> B,
+                        int b_col_maj) {
+  Tacc running_sum = 0;
+  for (int k = 0; k < K; k++) {
+    if (!b_col_maj) {
+      running_sum += Tacc(A[row * K + k] * B[k * N + col]);
+    } else {
+      running_sum += Tacc(A[row * K + k] * B[k + col * K]);
+    }
+  }
+  if (running_sum < 0) {
+    running_sum = 0;
   }
   return (Tout)running_sum;
 }
@@ -428,7 +468,7 @@ int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
   Tout max_rel_error = (Tout)0.0f;
 
   std::vector<Tout> CRef(M * N);
-  matmul<Tin, Tout, Tacc>(M, N, K, A, B, CRef, b_col_maj);
+  matmul_fused_relu<Tin, Tout, Tacc>(M, N, K, A, B, CRef, b_col_maj);
 
   for (int row = 0; row < M; row++) {
     for (int col = 0; col < N; col++) {
@@ -490,7 +530,8 @@ int verify_stochastic(int M, int N, int K, std::vector<Tin> A,
       progress = (double)i / n_samples;
       print_progress_bar(std::cerr, progress);
     }
-    Tout ref = mul_acc<Tin, Tout, Tacc>(M, N, K, row, col, A, B, b_col_maj);
+    Tout ref =
+        mul_acc_fused_relu<Tin, Tout, Tacc>(M, N, K, row, col, A, B, b_col_maj);
     std::optional<struct error<Tout>> error = verify_single(
         std::cout, row, col, ref, C[row * N + col], abs_tol, rel_tol);
     if (error.has_value()) {
