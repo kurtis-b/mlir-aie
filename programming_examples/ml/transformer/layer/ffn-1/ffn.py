@@ -195,6 +195,7 @@ def my_matmul(
             matmul_vectorized_func_name,
             inputs=[A_l1_ty, B_l1_ty, C_l1_ty],
         )
+        relu = external_func(f"{dtype_out_str}_relu", inputs=[C_l1_ty, C_l1_ty])
 
         # Tile declarations as tile[row][col]
         tiles = [
@@ -328,7 +329,7 @@ def my_matmul(
         for row in range(n_aie_rows):
             for col in range(n_aie_cols):
 
-                @core(core_tiles[row][col], f"mm_{m}x{k}x{n}.o")
+                @core(core_tiles[row][col], f"ffn1_mm_{m}x{k}x{n}.o")
                 def core_body():
                     for _ in range_(0xFFFFFFFF):
                         loop = (
@@ -352,6 +353,7 @@ def my_matmul(
                                 matmul(elem_in_a, elem_in_b, elem_out)
                                 A_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
                                 B_l2l1_fifos[col].release(ObjectFifoPort.Consume, 1)
+                            relu(elem_out, elem_out)
 
                             C_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
 

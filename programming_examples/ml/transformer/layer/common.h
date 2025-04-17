@@ -90,6 +90,10 @@ void parse_options(int argc, const char *argv[], po::options_description &desc,
     std::cerr << "Usage:\n" << desc << "\n";
     std::exit(1);
   }
+
+  check_arg_file_exists(vm, "xclbin");
+  check_arg_file_exists(vm, "instr1");
+  check_arg_file_exists(vm, "instr2");
 }
 
 // --------------------------------------------------------------------------
@@ -147,6 +151,28 @@ void matmul(int M, int N, int K, const std::vector<Tin> A,
         } else {
           running_sum += Tacc(A[row * K + k] * B[k + col * K]);
         }
+      }
+      C[row * N + col] = Tout(running_sum);
+    }
+  }
+}
+
+template <typename Tin, typename Tout, typename Tacc>
+void matmul_fused_relu(int M, int N, int K, const std::vector<Tin> A,
+                       const std::vector<Tin> B, std::vector<Tout> &C,
+                       int b_col_maj) {
+  for (int row = 0; row < M; row++) {
+    for (int col = 0; col < N; col++) {
+      Tacc running_sum = 0;
+      for (int k = 0; k < K; k++) {
+        if (!b_col_maj) {
+          running_sum += Tacc(A[row * K + k] * B[k * N + col]);
+        } else {
+          running_sum += Tacc(A[row * K + k] * B[k + col * K]);
+        }
+      }
+      if (running_sum < 0) {
+        running_sum = 0;
       }
       C[row * N + col] = Tout(running_sum);
     }
@@ -215,6 +241,24 @@ Tout mul_acc(int M, int N, int K, int row, int col, const std::vector<Tin> A,
     } else {
       running_sum += Tacc(A[row * K + k] * B[k + col * K]);
     }
+  }
+  return (Tout)running_sum;
+}
+
+template <typename Tin, typename Tout, typename Tacc>
+Tout mul_acc_fused_relu(int M, int N, int K, int row, int col,
+                        const std::vector<Tin> A, const std::vector<Tin> B,
+                        int b_col_maj) {
+  Tacc running_sum = 0;
+  for (int k = 0; k < K; k++) {
+    if (!b_col_maj) {
+      running_sum += Tacc(A[row * K + k] * B[k * N + col]);
+    } else {
+      running_sum += Tacc(A[row * K + k] * B[k + col * K]);
+    }
+  }
+  if (running_sum < 0) {
+    running_sum = 0;
   }
   return (Tout)running_sum;
 }
@@ -425,14 +469,18 @@ void print_progress_bar(std::ostream &os, double progress, int len = 75) {
 
 template <typename Tin, typename Tout, typename Tacc>
 int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
-           std::vector<Tout> C, int verbosity = 0, float abs_tol = 0.5,
-           float rel_tol = 0.05, int b_col_maj = 0) {
+           std::vector<Tout> &C, bool fused_relu, int verbosity = 0,
+           float abs_tol = 0.5, float rel_tol = 0.05, int b_col_maj = 0) {
   int n_errors = 0;
   std::vector<struct error<Tout>> errors;
   Tout max_rel_error = (Tout)0.0f;
 
   std::vector<Tout> CRef(M * N);
-  matmul<Tin, Tout, Tacc>(M, N, K, A, B, CRef, b_col_maj);
+  if (fused_relu) {
+    matmul_fused_relu<Tin, Tout, Tacc>(M, N, K, A, B, CRef, b_col_maj);
+  } else {
+    matmul<Tin, Tout, Tacc>(M, N, K, A, B, CRef, b_col_maj);
+  }
 
   for (int row = 0; row < M; row++) {
     for (int col = 0; col < N; col++) {
@@ -467,8 +515,8 @@ int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
 
 template <typename Tin, typename Tout, typename Tacc>
 int verify_stochastic(int M, int N, int K, std::vector<Tin> A,
-                      std::vector<Tin> B, std::vector<Tout> C, int n_samples,
-                      int verbosity = 0, float abs_tol = 0.5,
+                      std::vector<Tin> B, std::vector<Tout> &C, bool fused_relu,
+                      int n_samples, int verbosity = 0, float abs_tol = 0.5,
                       float rel_tol = 0.05, int b_col_maj = 0) {
   std::mt19937 rng;
   auto rows = std::views::iota(0, M);
@@ -494,7 +542,13 @@ int verify_stochastic(int M, int N, int K, std::vector<Tin> A,
       progress = (double)i / n_samples;
       print_progress_bar(std::cerr, progress);
     }
-    Tout ref = mul_acc<Tin, Tout, Tacc>(M, N, K, row, col, A, B, b_col_maj);
+    Tout ref;
+    if (fused_relu) {
+      Tout ref = mul_acc_fused_relu<Tin, Tout, Tacc>(M, N, K, row, col, A, B,
+                                                     b_col_maj);
+    } else {
+      Tout ref = mul_acc<Tin, Tout, Tacc>(M, N, K, row, col, A, B, b_col_maj);
+    }
     std::optional<struct error<Tout>> error = verify_single(
         std::cout, row, col, ref, C[row * N + col], abs_tol, rel_tol);
     if (error.has_value()) {
