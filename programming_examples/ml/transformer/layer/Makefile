@@ -107,6 +107,8 @@ all: ${xclbin_target} ${targetname}.exe
 
 ${xclbin_target}: 
 	mkdir -p ${@D}
+	$(MAKE) -C ffn-1
+	$(MAKE) -C ffn-2
 	cp ffn-1/build/*.o build/
 	cp ffn-2/build/*.o build/
 	cd ${@D} && aiecc.py --xclbin-kernel-name=FFNONE --xclbin-kernel-id=0x901 --xclbin-instance-name=FFNONEINST --no-aiesim --alloc-scheme=basic-sequential --aie-generate-cdo --no-compile-host --xclbin-name=final_ffn-1.xclbin --no-xchesscc --no-xbridge --peano /home/cj/mlir-aie/my_install/llvm-aie --aie-generate-npu --npu-insts-name=insts_ffn-1.txt ../ffn-1/build/aie_ffn-1.mlir
