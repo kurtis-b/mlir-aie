@@ -199,7 +199,7 @@ def my_matmul(
 
         # Tile declarations as tile[row][col]
         tiles = [
-            [tile(0, row)] for row in range(0, 6)
+            [tile(0, row)] for row in range(0, 6) # 1st column only
         ]
         shim_tiles = tiles[0]
         mem_tiles = tiles[1]
