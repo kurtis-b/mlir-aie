@@ -1,0 +1,397 @@
+#
+# This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# (c) Copyright 2023 AMD Inc.
+import argparse
+from ml_dtypes import bfloat16
+import numpy as np
+import sys
+
+from aie.extras.context import mlir_mod_ctx
+
+from aie.dialects.aie import *
+from aie.dialects.aiex import *
+from aie.helpers.dialects.ext.scf import _for as range_
+from aie.helpers.taplib import TensorAccessPattern, TensorAccessSequence
+
+dtype_map = {
+    "bf16": bfloat16,
+    "i8": np.int8,
+    "i16": np.int16,
+    "f32": np.float32,
+    "i32": np.int32,
+}
+
+
+def main():
+    argparser = argparse.ArgumentParser(
+        prog="AIE Matrix Multiplication MLIR Design (Whole Array)",
+        description="Emits MLIR code for a matrix multiplication design of the given input size",
+    )
+    argparser.add_argument("-M", type=int, default=512)
+    argparser.add_argument("-N", type=int, default=512)
+    argparser.add_argument("-m", type=int, default=64)
+    argparser.add_argument("-n", type=int, default=32)
+    argparser.add_argument("--n-aie-cols", type=int, choices=[1, 2, 4], default=4)
+    argparser.add_argument("--b-col-maj", type=int, choices=[0, 1], default=0)
+    argparser.add_argument(
+        "--dtype_in", type=str, choices=["bf16", "i8", "i16"], default="i16"
+    )
+    argparser.add_argument(
+        "--dtype_out", type=str, choices=["bf16", "i8", "i16", "i32", "float"], default="i16"
+    )
+    argparser.add_argument("--trace_size", type=int, default=0)
+    argparser.add_argument(
+        "--generate-taps",
+        action="store_true",
+        help="Generate TensorAccessPatterns, a Python object to represent each data transfer"
+        "of the input/output matrices. These objects can be used for visualization.",
+    )
+    args = argparser.parse_args()
+    with mlir_mod_ctx() as ctx:
+        maybe_taps = my_matmul(
+            args.M,
+            args.N,
+            args.m,
+            args.n,
+            args.n_aie_cols,
+            args.dtype_in,
+            args.dtype_out,
+            args.b_col_maj,
+            args.trace_size,
+            args.generate_taps,
+        )
+        # print(ctx.module.operation.verify())
+        print(ctx.module)
+
+    if args.generate_taps:
+        return maybe_taps
+
+
+def ceildiv(a, b):
+    return (a + b - 1) // b
+
+
+def my_matmul(
+    M,
+    N,
+    m,
+    n,
+    n_aie_cols,
+    dtype_in_str,
+    dtype_out_str,
+    b_col_maj,
+    trace_size,
+    generate_taps=False,
+):
+    n_aie_rows = 4
+    n_aie_cores = n_aie_rows * n_aie_cols
+
+    dtype_in = dtype_map[dtype_in_str]
+    dtype_out = dtype_map[dtype_out_str]
+
+    # If you get errors during CDO generation due to running out of program
+    # memory, it may be because too much code is generated due to ObjectFIFO
+    # loop unrollings. Reducing the depth to 1 here will work around that at
+    # a big performance cost.
+    fifo_depth = 2
+
+    n_tiles_per_core = (M // m) * (N // n) // n_aie_cores
+
+    n_A_tiles_per_shim = n_aie_rows // n_aie_cols
+
+    dev = None
+    if n_aie_cols == 1:
+        dev = AIEDevice.npu1_4col # Use this virtualization to generate the xclbin, but the 
+        # design will only use one column of cores.
+    else:
+        ValueError(f"n_aie_cols must be 1. Got {n_aie_cols} instead.")
+
+
+    # These will hold TensorAccessPattern objects that represent the runtime
+    # npu_dma_memcpy_nd operations of this design. They are only used if generate_taps is true
+    A_taps = []
+    B_taps = []
+    C_taps = []
+
+    @device(dev)
+    def device_body():
+        in_l2_ty = np.ndarray[(m * n * n_aie_rows,), np.dtype[dtype_in]]
+        in_l1_ty = np.ndarray[(m, n), np.dtype[dtype_in]]
+        out_l2_ty = np.ndarray[(m * n * n_aie_rows,), np.dtype[dtype_out]]
+        out_l1_ty = np.ndarray[(m, n), np.dtype[dtype_out]]
+
+        # AIE Core Function declarations
+        add = external_func(f"eltwise_add_{dtype_in_str}_vector", inputs=[in_l1_ty, in_l1_ty, in_l1_ty])
+        norm = external_func(f"layer_norm_{dtype_in_str}_vector", inputs=[in_l1_ty, out_l1_ty])
+
+        # Tile declarations as tile[row][col]
+        tiles = [
+            [tile(2, row)] for row in range(0, 6) # 3rd column only
+        ]
+        shim_tiles = tiles[0]
+        mem_tiles = tiles[1]
+        core_tiles = tiles[2:]
+
+        # AIE-array data movement with object fifos
+        A_l3l2_fifos = [None] * n_aie_cols
+        A_l2l1_fifos = [None] * n_aie_rows
+
+        B_l3l2_fifos = [None] * n_aie_cols
+        B_l2l1_fifos = [None] * n_aie_cols
+
+        C_l1_fifos = [[None] * n_aie_cols for _ in range(n_aie_rows)]
+        C_l1l2_fifos = [[None] * n_aie_cols for _ in range(n_aie_rows)]
+        C_l2l3_fifos = [None] * n_aie_cols
+
+        # Input A
+        for row in range(n_aie_rows):
+            A_l2l1_fifos[row] = object_fifo(
+                f"A_L2L1_{row}",
+                mem_tiles[row // n_A_tiles_per_shim],
+                core_tiles[row][0:n_aie_cols],  # broadcast along one row
+                fifo_depth,
+                in_l1_ty,
+            )
+        for col in range(n_aie_cols):
+            A_l3l2_fifos[col] = object_fifo(
+                f"A_L3L2_{col}",
+                shim_tiles[col],
+                mem_tiles[col],
+                fifo_depth,
+                in_l2_ty,
+            )
+            # If n_cols == n_rows, n_A_tiles_per_shim is 1 and
+            # this simply links a_l3l2_fifos[col] to a_l2l1_fifos[row] directly,
+            # where col == row.
+            # If n_cols < n_rows, each column receives multiple rows of
+            # tiles; distribute it along rows of AIE cores.
+            start_row = col * n_A_tiles_per_shim
+            stop_row = start_row + n_A_tiles_per_shim
+            if stop_row - start_row > 1:
+                of_offsets = [m * n * i for i in range(stop_row - start_row)]
+            else:
+                of_offsets = []
+            object_fifo_link(
+                A_l3l2_fifos[col],
+                [A_l2l1_fifos[row] for row in range(start_row, stop_row)],
+                [],
+                of_offsets,
+            )
+
+        # Input B
+        for col in range(n_aie_cols):
+            B_l3l2_fifos[col] = object_fifo(
+                f"B_L3L2_{col}",
+                shim_tiles[col],
+                mem_tiles[col],
+                fifo_depth,
+                in_l2_ty,
+            )
+            B_l2l1_fifos[col] = object_fifo(
+                f"B_L2L1_{col}",
+                mem_tiles[col],
+                [
+                    core_tiles[j][col] for j in range(n_aie_rows)
+                ],  # broadcast along one column
+                fifo_depth,
+                in_l1_ty,
+            )
+            object_fifo_link(B_l3l2_fifos[col], B_l2l1_fifos[col])
+
+        # Output C
+        for col in range(n_aie_cols):
+            for row in range(n_aie_rows):
+                C_l1_fifos[row][col] = object_fifo(
+                    f"C_L1_{col}_{row}",
+                    core_tiles[row][col],
+                    core_tiles[row][col],
+                    fifo_depth,
+                    in_l1_ty,
+                )
+                C_l1l2_fifos[row][col] = object_fifo(
+                    f"C_L1L2_{col}_{row}",
+                    core_tiles[row][col],
+                    mem_tiles[col],
+                    fifo_depth,
+                    out_l1_ty,
+                )
+            C_l2l3_fifos[col] = object_fifo(
+                f"C_L2L3_{col}",
+                mem_tiles[col],
+                shim_tiles[col],
+                fifo_depth,
+                out_l2_ty,
+            )
+            if n_aie_rows > 1:
+                of_offsets = [m * n * i for i in range(n_aie_rows)]
+            else:
+                of_offsets = []
+            object_fifo_link(
+                [C_l1l2_fifos[j][col] for j in range(n_aie_rows)],
+                C_l2l3_fifos[col],
+                of_offsets,
+                [],
+            )  # join along one column
+
+        # Set up compute tiles
+        for row in range(n_aie_rows):
+            for col in range(n_aie_cols):
+
+                @core(core_tiles[row][col], f"addandnorm_{m}x{n}.o")
+                def core_body():
+                    for _ in range_(0xFFFFFFFF):
+                        loop = (
+                            range_(n_tiles_per_core)
+                            if n_tiles_per_core > 1
+                            else range(1)
+                        )  # Workaround for issue #1547
+                        for _ in loop:
+                            elem_c = C_l1_fifos[row][col].acquire(
+                                ObjectFifoPort.Produce, 1
+                            )
+                            elem_in_a = A_l2l1_fifos[row].acquire(
+                                ObjectFifoPort.Consume, 1
+                            )
+                            elem_in_b = B_l2l1_fifos[col].acquire(
+                                ObjectFifoPort.Consume, 1
+                            )
+                            add(elem_in_a, elem_in_b, elem_c)
+                            A_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
+                            B_l2l1_fifos[col].release(ObjectFifoPort.Consume, 1)
+                            elem_out = C_l1l2_fifos[row][col].acquire(
+                                ObjectFifoPort.Produce, 1
+                            )
+                            norm(elem_c, elem_out)
+
+                            C_l1_fifos[row][col].release(ObjectFifoPort.Produce, 1)
+                            C_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
+
+        # To/from AIE-array data movement
+        @runtime_sequence(
+            np.ndarray[(M * N,), np.dtype[dtype_in]],
+            np.ndarray[(M * N,), np.dtype[dtype_in]],
+            np.ndarray[(M * N,), np.dtype[dtype_out]],
+        )
+        def sequence(A, B, C):
+            # We are limited in the number of BDs. After synchronizing, we can reuse BDs.
+            # We only transfer 6 rows of tiles at once before starting a new transfer block.
+            tb_max_n_rows = (
+                4  # tb = transfer block; block of transfers before sync call
+            )
+            for tb in range(ceildiv(M // m // n_aie_rows, tb_max_n_rows)):
+                for pingpong in [0, 1]:
+                    M // m // n_aie_rows // tb_max_n_rows
+                    row_base = tb * tb_max_n_rows + pingpong * tb_max_n_rows // 2
+                    bd_id_base = 8 * pingpong
+                    tb_n_rows = min(
+                        [tb_max_n_rows // 2, M // m // n_aie_rows - row_base]
+                    )
+                    if tb_n_rows <= 0:
+                        # for small input sizes, we may not even need a "pong" iteration
+                        break
+                    for col in range(n_aie_cols):
+
+                        # C Output Transfer:
+                        # The smallest transfer unit is a (m*n_aie_rows)-x-(n)-sized sub-tile of the matrix.
+                        # Transfer one such tile for every (n_aie_cols)-th column, evenly spaced,
+                        # then repeat that (tb_n_rows) times for the next contiguous blocks of rows.
+                        # Each shim will start at a different column offset, transferring interleaved
+                        # columns. For example, shim 0 may transfer the blocks marked 0 below, and shim 1
+                        # may transfer the blocks marked 1.
+                        #
+                        #             N
+                        #      ----------------
+                        #     |0011    0011    |
+                        #     |0011    0011    |
+                        #     |0011    0011    |
+                        # M   |0011    0011    |
+                        #     |                |
+                        #     |                |
+                        #     |                |
+                        #     |                |
+                        #      ----------------
+                        row_offset = row_base * m * n_aie_rows * N
+                        col_offset = col * n
+                        offset = col_offset + row_offset
+                        sizes = [tb_n_rows, N // n // n_aie_cols, m * n_aie_rows, n]
+                        strides = [m * n_aie_rows * N, n * n_aie_cols, N, 1]
+                        npu_dma_memcpy_nd(
+                            metadata=C_l2l3_fifos[col],
+                            bd_id=bd_id_base,
+                            mem=C,
+                            offsets=[0, 0, 0, offset],
+                            sizes=sizes,
+                            strides=strides,
+                        )
+                        # Use the calculated sizes/strides/offsets to record the data movement
+                        # caused by the above call to npu_dma_memcpy_nd.
+                        # This line does not change MLIR output at all.
+                        C_taps.append(
+                            TensorAccessPattern(
+                                (M, N),
+                                offset=offset,
+                                sizes=sizes,
+                                strides=strides,
+                            )
+                        )
+
+                        # A input transfer:
+                        npu_dma_memcpy_nd(
+                            metadata=A_l3l2_fifos[col],
+                            bd_id=bd_id_base + 1,
+                            mem=A,
+                            offsets=[0, 0, 0, offset],
+                            sizes=sizes,
+                            strides=strides,
+                        )
+                        # Use the calculated sizes/strides/offsets to record the data movement
+                        # caused by the above call to npu_dma_memcpy_nd.
+                        # This line does not change MLIR output at all.
+                        A_taps.append(
+                            TensorAccessPattern(
+                                (M, N),
+                                offset=offset,
+                                sizes=sizes,
+                                strides=strides,
+                            )
+                        )
+
+                        # B input transfer:
+                        npu_dma_memcpy_nd(
+                            metadata=B_l3l2_fifos[col],
+                            bd_id=bd_id_base + 2,
+                            mem=B,
+                            offsets=[0, 0, 0, offset],
+                            sizes=sizes,
+                            strides=strides,
+                        )
+                        # Use the calculated sizes/strides/offsets to record the data movement
+                        # caused by the above call to npu_dma_memcpy_nd.
+                        # This line does not change MLIR output at all.
+                        B_taps.append(
+                            TensorAccessPattern(
+                                (M, N),
+                                offset=offset,
+                                sizes=sizes,
+                                strides=strides,
+                            )
+                        )
+                    if tb > 0 or (tb == 0 and pingpong > 0):
+                        dma_wait(*C_l2l3_fifos)
+            dma_wait(*C_l2l3_fifos)
+
+    if generate_taps:
+        # If generate_taps is true, return a representation of tensor tiles
+        # representing all the npu_dma_memcpy_nd runtime sequence operations per input/ouput tensor.
+        return (
+            TensorAccessSequence.from_taps(A_taps),
+            TensorAccessSequence.from_taps(B_taps),
+            TensorAccessSequence.from_taps(C_taps),
+        )
+
+
+if __name__ == "__main__":
+    main()
