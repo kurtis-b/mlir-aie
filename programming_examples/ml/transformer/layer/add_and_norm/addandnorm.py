@@ -86,7 +86,10 @@ def my_matmul(
     trace_size,
     generate_taps=False,
 ):
-    n_aie_rows = 4
+    # TODO: For now only using 2 rows because there's not enough channels to use 4 cores
+    # and 3 cores makes the tiling uneven. Need to look into using cascade and 
+    # running layer norm in one core that another core running add will cascade to.
+    n_aie_rows = 2 
     n_aie_cores = n_aie_rows * n_aie_cols
 
     dtype_in = dtype_map[dtype_in_str]
@@ -140,7 +143,7 @@ def my_matmul(
         A_l2l1_fifos = [None] * n_aie_rows
 
         B_l3l2_fifos = [None] * n_aie_cols
-        B_l2l1_fifos = [None] * n_aie_cols
+        B_l2l1_fifos = [None] * n_aie_rows
 
         C_l1_fifos = [[None] * n_aie_cols for _ in range(n_aie_rows)]
         C_l1l2_fifos = [[None] * n_aie_cols for _ in range(n_aie_rows)]
@@ -182,6 +185,14 @@ def my_matmul(
             )
 
         # Input B
+        for row in range(n_aie_rows):
+            B_l2l1_fifos[row] = object_fifo(
+                f"B_L2L1_{row}",
+                mem_tiles[row // n_A_tiles_per_shim],
+                core_tiles[row][0:n_aie_cols],  # broadcast along one row
+                fifo_depth,
+                in_l1_ty,
+            )
         for col in range(n_aie_cols):
             B_l3l2_fifos[col] = object_fifo(
                 f"B_L3L2_{col}",
@@ -190,16 +201,18 @@ def my_matmul(
                 fifo_depth,
                 in_l2_ty,
             )
-            B_l2l1_fifos[col] = object_fifo(
-                f"B_L2L1_{col}",
-                mem_tiles[col],
-                [
-                    core_tiles[j][col] for j in range(n_aie_rows)
-                ],  # broadcast along one column
-                fifo_depth,
-                in_l1_ty,
+            start_row = col * n_A_tiles_per_shim
+            stop_row = start_row + n_A_tiles_per_shim
+            if stop_row - start_row > 1:
+                of_offsets = [m * n * i for i in range(stop_row - start_row)]
+            else:
+                of_offsets = []
+            object_fifo_link(
+                B_l3l2_fifos[col],
+                [B_l2l1_fifos[row] for row in range(start_row, stop_row)],
+                [],
+                of_offsets,
             )
-            object_fifo_link(B_l3l2_fifos[col], B_l2l1_fifos[col])
 
         # Output C
         for col in range(n_aie_cols):
@@ -255,12 +268,12 @@ def my_matmul(
                             elem_in_a = A_l2l1_fifos[row].acquire(
                                 ObjectFifoPort.Consume, 1
                             )
-                            elem_in_b = B_l2l1_fifos[col].acquire(
+                            elem_in_b = B_l2l1_fifos[row].acquire(
                                 ObjectFifoPort.Consume, 1
                             )
                             add(elem_in_a, elem_in_b, elem_c)
                             A_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
-                            B_l2l1_fifos[col].release(ObjectFifoPort.Consume, 1)
+                            B_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
                             elem_out = C_l1l2_fifos[row][col].acquire(
                                 ObjectFifoPort.Produce, 1
                             )
