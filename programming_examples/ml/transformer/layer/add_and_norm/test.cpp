@@ -163,8 +163,7 @@ int main(int argc, const char *argv[]) {
   B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
   std::vector<B_DATATYPE> BVec(B_VOLUME);
   for (int i = 0; i < B_VOLUME; i++) {
-    // BVec[i] = matmul_common::get_random<B_DATATYPE>();
-    BVec[i] = 0;
+    BVec[i] = matmul_common::get_random<B_DATATYPE>();
     // Diagonal:
     // if(i % N == i / N) {
     //   BVec[i] = 1.0;
