@@ -27,6 +27,12 @@ namespace matmul_common {
 
 namespace po = boost::program_options;
 
+typedef enum {
+  MATMUL_OP = 0,
+  MATMUL_FUSED_OP = 1,
+  ADD_AND_NORM_OP = 2,
+} kernel_op_t;
+
 // --------------------------------------------------------------------------
 // Command Line Argument Handling
 // --------------------------------------------------------------------------
@@ -52,11 +58,15 @@ void add_default_options(po::options_description &desc) {
       "the kernel name in the XCLBIN (for instance PP_PRE_FD)")(
       "kernel2", po::value<std::string>()->required(),
       "the kernel name in the XCLBIN (for instance PP_PRE_FD)")(
+      "kernel3", po::value<std::string>()->required(),
+      "the kernel name in the XCLBIN (for instance PP_PRE_FD)")(
       "verbosity,v", po::value<int>()->default_value(0),
       "the verbosity of the output")(
       "instr1", po::value<std::string>()->required(),
       "path of file containing userspace instructions sent to the NPU")(
       "instr2", po::value<std::string>()->required(),
+      "path of file containing userspace instructions sent to the NPU")(
+      "instr3", po::value<std::string>()->required(),
       "path of file containing userspace instructions sent to the NPU")(
       "verify", po::value<bool>()->default_value(true),
       "whether to verify the AIE computed output")(
@@ -94,6 +104,7 @@ void parse_options(int argc, const char *argv[], po::options_description &desc,
   check_arg_file_exists(vm, "xclbin");
   check_arg_file_exists(vm, "instr1");
   check_arg_file_exists(vm, "instr2");
+  check_arg_file_exists(vm, "instr3");
 }
 
 // --------------------------------------------------------------------------
@@ -124,12 +135,12 @@ static inline T get_random();
 
 template <>
 std::int16_t get_random<std::int16_t>() {
-  return (std::int16_t)rand() % 0x10000;
+  return (std::int16_t)rand() % 0x100;
 }
 
 template <>
 int8_t get_random<int8_t>() {
-  return (int8_t)rand() % 0x100;
+  return (int8_t)rand() % 0x10;
 }
 
 template <>
@@ -261,6 +272,112 @@ Tout mul_acc_fused_relu(int M, int N, int K, int row, int col,
     running_sum = 0;
   }
   return (Tout)running_sum;
+}
+
+template <typename Tin, typename Tout, typename Tacc>
+void addandnorm(int M, int N, const std::vector<Tin> A,
+                const std::vector<Tin> B, std::vector<Tout> &C, int b_col_maj) {
+  std::vector<Tin> add_result(M * N);
+  for (int row = 0; row < M; row++) {
+    for (int col = 0; col < N; col++) {
+      float sum = 0;
+      if (!b_col_maj) {
+        sum = float(A[row * N + col] + B[row * N + col]);
+      } else {
+        sum = float(A[row * N + col] + B[row * N + col]);
+      }
+      add_result[row * N + col] = Tin(sum);
+    }
+  }
+  for (int row = 0; row < M; row++) {
+    float sum = 0;
+    float sumsq = 0;
+    for (int col = 0; col < N; col++) {
+      sum += (float)add_result[row * N + col];
+      sumsq +=
+          (float)add_result[row * N + col] * (float)add_result[row * N + col];
+    }
+    float mean = sum / (float)N;
+    float var = (sumsq / (float)N) - (mean * mean);
+    for (int col = 0; col < N; col++) {
+      //   if (row == 0 && col < 10) {
+      //     std::cout << add_result[row * N + col] << ", ";
+      //     std::cout << mean << " " << var << ", ";
+      //   }
+      C[row * N + col] =
+          Tout((add_result[row * N + col] - mean) / std::sqrt(var));
+      //   if (row == 0 && col < 10) {
+      //     std::cout << "result: " << C[row * N + col] << std::endl;
+      //   }
+    }
+  }
+}
+
+template <typename Tin, typename Tout, typename Tacc>
+float addandnorm_timed(int M, int N, const std::vector<Tin> A,
+                       const std::vector<Tin> B, std::vector<Tout> &C,
+                       int b_col_maj) {
+  auto start = std::chrono::high_resolution_clock::now();
+  std::vector<Tacc> add_result(M * N);
+  for (int row = 0; row < M; row++) {
+    for (int col = 0; col < N; col++) {
+      float sum = 0;
+      if (!b_col_maj) {
+        sum = float(A[row * N + col] + B[row * N + col]);
+      } else {
+        sum = float(A[row * N + col] + B[row * N + col]);
+      }
+      add_result[row * N + col] = Tacc(sum);
+    }
+  }
+  for (int row = 0; row < M; row++) {
+    float sum = 0;
+    float sumsq = 0;
+    for (int col = 0; col < N; col++) {
+      sum += add_result[row * N + col];
+      sumsq += add_result[row * N + col] * add_result[row * N + col];
+    }
+    float mean = sum / N;
+    float var = (sumsq / N) - (mean * mean);
+    for (int col = 0; col < N; col++) {
+      //   if (row == 0 && col < 10) {
+      //     std::cout << add_result[row * N + col] << ", ";
+      //     std::cout << mean << " " << var << ", ";
+      //   }
+      C[row * N + col] =
+          Tout((add_result[row * N + col] - mean) / std::sqrt(var));
+      //   if (row == 0 && col < 10) {
+      //     std::cout << "result: " << C[row * N + col] << std::endl;
+      //   }
+    }
+  }
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+             std::chrono::high_resolution_clock::now() - start)
+      .count();
+}
+
+template <typename Tin, typename Tout, typename Tacc>
+Tout addandnorm_acc(int M, int N, int row, int col, const std::vector<Tin> A,
+                    const std::vector<Tin> B, int b_col_maj) {
+  Tout outVal = 0;
+  float sum = 0;
+  if (!b_col_maj) {
+    sum = float(A[row * N + col] + B[row * N + col]);
+  } else {
+    sum = float(A[row * N + col] + B[row * N + col]);
+  }
+  Tacc add_result = Tacc(sum);
+  sum = 0;
+  float sumsq = 0;
+  for (int i = 0; i < N; i++) {
+    float add = A[row * N + i] + B[row * N + i];
+    sum += add;
+    sumsq += add * add;
+  }
+  float mean = sum / N;
+  float var = (sumsq / N) - (mean * mean);
+  outVal = (outVal - mean) / std::sqrt(var);
+  return (Tout)outVal;
 }
 
 // nearly_equal function adapted from Stack Overflow, License CC BY-SA 4.0
@@ -469,17 +586,24 @@ void print_progress_bar(std::ostream &os, double progress, int len = 75) {
 
 template <typename Tin, typename Tout, typename Tacc>
 int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
-           std::vector<Tout> &C, bool fused_relu, int verbosity = 0,
-           float abs_tol = 0.5, float rel_tol = 0.05, int b_col_maj = 0) {
+           std::vector<Tout> &C, matmul_common::kernel_op_t op,
+           int verbosity = 0, float abs_tol = 0.5, float rel_tol = 0.05,
+           int b_col_maj = 0) {
   int n_errors = 0;
   std::vector<struct error<Tout>> errors;
   Tout max_rel_error = (Tout)0.0f;
 
   std::vector<Tout> CRef(M * N);
-  if (fused_relu) {
-    matmul_fused_relu<Tin, Tout, Tacc>(M, N, K, A, B, CRef, b_col_maj);
-  } else {
+  switch (op) {
+  case MATMUL_OP:
     matmul<Tin, Tout, Tacc>(M, N, K, A, B, CRef, b_col_maj);
+    break;
+  case MATMUL_FUSED_OP:
+    matmul_fused_relu<Tin, Tout, Tacc>(M, N, K, A, B, CRef, b_col_maj);
+    break;
+  case ADD_AND_NORM_OP:
+    addandnorm<Tin, Tout, Tacc>(M, N, A, B, CRef, b_col_maj);
+    break;
   }
 
   for (int row = 0; row < M; row++) {
@@ -503,7 +627,8 @@ int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
   }
   print_error_summary(std::cout, n_errors, errors, max_rel_error);
 
-  if (n_errors > 0) {
+  //   if (n_errors > 0) {
+  if (1) {
     std::cout << std::endl << "Reference:" << std::endl;
     matmul_common::print_matrix(CRef, N);
     std::cout << std::endl << "Output:" << std::endl;
@@ -515,8 +640,9 @@ int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
 
 template <typename Tin, typename Tout, typename Tacc>
 int verify_stochastic(int M, int N, int K, std::vector<Tin> A,
-                      std::vector<Tin> B, std::vector<Tout> &C, bool fused_relu,
-                      int n_samples, int verbosity = 0, float abs_tol = 0.5,
+                      std::vector<Tin> B, std::vector<Tout> &C,
+                      matmul_common::kernel_op_t op, int n_samples,
+                      int verbosity = 0, float abs_tol = 0.5,
                       float rel_tol = 0.05, int b_col_maj = 0) {
   std::mt19937 rng;
   auto rows = std::views::iota(0, M);
@@ -543,11 +669,20 @@ int verify_stochastic(int M, int N, int K, std::vector<Tin> A,
       print_progress_bar(std::cerr, progress);
     }
     Tout ref;
-    if (fused_relu) {
-      Tout ref = mul_acc_fused_relu<Tin, Tout, Tacc>(M, N, K, row, col, A, B,
-                                                     b_col_maj);
-    } else {
-      Tout ref = mul_acc<Tin, Tout, Tacc>(M, N, K, row, col, A, B, b_col_maj);
+    switch (op) {
+    case MATMUL_OP:
+      ref = mul_acc<Tin, Tout, Tacc>(M, N, K, row, col, A, B, b_col_maj);
+      break;
+    case MATMUL_FUSED_OP:
+      ref = mul_acc_fused_relu<Tin, Tout, Tacc>(M, N, K, row, col, A, B,
+                                                b_col_maj);
+      break;
+    case ADD_AND_NORM_OP:
+      ref = addandnorm_acc<Tin, Tout, Tacc>(M, N, row, col, A, B, b_col_maj);
+      break;
+    default:
+      std::cerr << "Unknown operation" << std::endl;
+      return -1;
     }
     std::optional<struct error<Tout>> error = verify_single(
         std::cout, row, col, ref, C[row * N + col], abs_tol, rel_tol);
