@@ -34,12 +34,12 @@ current_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 include ${current_dir}../../../../makefile-common
 
 # M, N: final GEMM dimensions
-M?=32
-N?=64
+M?=8
+N?=512
 
 # m, k, n: single AIE core GEMM dimensions
-m?=8
-n?=64
+m?=4
+n?=512
 
 # set this flag to 1 for linear buffer allocation
 # else, 0 for bank-aware

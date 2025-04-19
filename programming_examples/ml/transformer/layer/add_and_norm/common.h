@@ -152,19 +152,27 @@ void addandnorm(int M, int N, const std::vector<Tin> A,
       sum += (float)add_result[row * N + col];
       sumsq +=
           (float)add_result[row * N + col] * (float)add_result[row * N + col];
+      if ((row == 0) && ((col + 1) % 16 == 0)) {
+        float mean = sum / (float)N;
+        float var = (sumsq / (float)N) - (mean * mean);
+        std::cout << sum << ", " << sumsq << ", " << mean << ", " << var
+                  << std::endl;
+      }
     }
     float mean = sum / (float)N;
     float var = (sumsq / (float)N) - (mean * mean);
     for (int col = 0; col < N; col++) {
-      //   if (row == 0 && col < 10) {
-      //     std::cout << add_result[row * N + col] << ", ";
-      //     std::cout << mean << " " << var << ", ";
-      //   }
+      if (row == 0 && col < 10) {
+        std::cout << std::endl;
+        std::cout << add_result[row * N + col] << ", ";
+        std::cout << sum << " " << sumsq << ", ";
+        std::cout << mean << " " << var << ", ";
+      }
       C[row * N + col] =
           Tout((add_result[row * N + col] - mean) / std::sqrt(var));
-      //   if (row == 0 && col < 10) {
-      //     std::cout << "result: " << C[row * N + col] << std::endl;
-      //   }
+      if (row == 0 && col < 10) {
+        std::cout << "result: " << C[row * N + col] << std::endl;
+      }
     }
   }
 }
@@ -478,6 +486,10 @@ int verify(int M, int N, std::vector<Tin> A, std::vector<Tin> B,
     matmul_common::print_matrix(CRef, N);
     std::cout << std::endl << "Output:" << std::endl;
     matmul_common::print_matrix(C, N);
+    for (int i = 0; i < N; i++) {
+      std::cout << C[i] << ", " << A[i] << ", " << C[i] - A[i] << std::endl;
+    }
+    std::cout << std::endl;
   }
 
   return n_errors;
