@@ -34,7 +34,7 @@ current_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 include ${current_dir}../../../../makefile-common
 
 # M, N: final GEMM dimensions
-M?=8
+M?=256
 N?=512
 
 # m, k, n: single AIE core GEMM dimensions
