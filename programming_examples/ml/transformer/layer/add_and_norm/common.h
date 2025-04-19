@@ -155,24 +155,24 @@ void addandnorm(int M, int N, const std::vector<Tin> A,
       if ((row == 0) && ((col + 1) % 16 == 0)) {
         float mean = sum / (float)N;
         float var = (sumsq / (float)N) - (mean * mean);
-        std::cout << sum << ", " << sumsq << ", " << mean << ", " << var
-                  << std::endl;
+        // std::cout << sum << ", " << sumsq << ", " << mean << ", " << var
+        //           << std::endl;
       }
     }
     float mean = sum / (float)N;
     float var = (sumsq / (float)N) - (mean * mean);
     for (int col = 0; col < N; col++) {
-      if (row == 0 && col < 10) {
-        std::cout << std::endl;
-        std::cout << add_result[row * N + col] << ", ";
-        std::cout << sum << " " << sumsq << ", ";
-        std::cout << mean << " " << var << ", ";
-      }
+      //   if (row == 0 && col < 10) {
+      //     std::cout << std::endl;
+      //     std::cout << add_result[row * N + col] << ", ";
+      //     std::cout << sum << " " << sumsq << ", ";
+      //     std::cout << mean << " " << var << ", ";
+      //   }
       C[row * N + col] =
           Tout((add_result[row * N + col] - mean) / std::sqrt(var));
-      if (row == 0 && col < 10) {
-        std::cout << "result: " << C[row * N + col] << std::endl;
-      }
+      //   if (row == 0 && col < 10) {
+      //     std::cout << "result: " << C[row * N + col] << std::endl;
+      //   }
     }
   }
 }
@@ -481,17 +481,14 @@ int verify(int M, int N, std::vector<Tin> A, std::vector<Tin> B,
   }
   print_error_summary(std::cout, n_errors, errors, max_rel_error);
 
-  if (n_errors > 0) {
-    std::cout << std::endl << "Reference:" << std::endl;
-    matmul_common::print_matrix(CRef, N);
-    std::cout << std::endl << "Output:" << std::endl;
-    matmul_common::print_matrix(C, N);
-    for (int i = 0; i < N; i++) {
-      std::cout << C[i] << ", " << A[i] << ", " << C[i] - A[i] << std::endl;
-    }
-    std::cout << std::endl;
-  }
-
+  std::cout << std::endl << "Reference:" << std::endl;
+  matmul_common::print_matrix(CRef, N);
+  std::cout << std::endl << "Output:" << std::endl;
+  matmul_common::print_matrix(C, N);
+  //   for (int i = 0; i < N; i++) {
+  //     std::cout << C[i] << ", " << A[i] << ", " << C[i] - A[i] << std::endl;
+  //   }
+  //   std::cout << std::endl;
   return n_errors;
 }
 
