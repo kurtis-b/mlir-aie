@@ -94,8 +94,10 @@ xclbin_target1?=build/final_ffn-1.xclbin
 insts_target1?=build/insts_ffn-1.txt
 xclbin_target2?=build/final_ffn-2.xclbin
 insts_target2?=build/insts_ffn-2.txt
+xclbin_target3?=build/final_addandnorm.xclbin
+insts_target3?=build/insts_addandnorm.txt
 
-xclbin_target?=${xclbin_target2}
+xclbin_target?=${xclbin_target3}
 
 CHESS?=false
 
@@ -109,11 +111,13 @@ ${xclbin_target}:
 	mkdir -p ${@D}
 	$(MAKE) -C ffn-1
 	$(MAKE) -C ffn-2
+	$(MAKE) -C add_and_norm
 	cp ffn-1/build/*.o build/
 	cp ffn-2/build/*.o build/
+	cp add_and_norm/build/*.o build/
 	cd ${@D} && aiecc.py --xclbin-kernel-name=FFNONE --xclbin-kernel-id=0x901 --xclbin-instance-name=FFNONEINST --no-aiesim --alloc-scheme=basic-sequential --aie-generate-cdo --no-compile-host --xclbin-name=final_ffn-1.xclbin --no-xchesscc --no-xbridge --peano /home/cj/mlir-aie/my_install/llvm-aie --aie-generate-npu --npu-insts-name=insts_ffn-1.txt ../ffn-1/build/aie_ffn-1.mlir
 	cd ${@D} && aiecc.py --xclbin-kernel-name=FFNTWO --xclbin-kernel-id=0x902 --xclbin-instance-name=FFNTWOINST --no-aiesim  --alloc-scheme=basic-sequential --aie-generate-cdo --no-compile-host --xclbin-input=final_ffn-1.xclbin --xclbin-name=final_ffn-2.xclbin --no-xchesscc --no-xbridge --peano /home/cj/mlir-aie/my_install/llvm-aie --aie-generate-npu --npu-insts-name=insts_ffn-2.txt ../ffn-2/build/aie_ffn-2.mlir
-
+	cd ${@D} && aiecc.py --xclbin-kernel-name=ADDANDNORM --xclbin-kernel-id=0x903 --xclbin-instance-name=ADDANDNORMINST --no-aiesim  --alloc-scheme=basic-sequential --aie-generate-cdo --no-compile-host --xclbin-input=final_ffn-2.xclbin --xclbin-name=final_addandnorm.xclbin --no-xchesscc --no-xbridge --peano /home/cj/mlir-aie/my_install/llvm-aie --aie-generate-npu --npu-insts-name=insts_addandnorm.txt ../add_and_norm/build/aie_addandnorm.mlir
 
 ${targetname}.exe: ${srcdir}/test.cpp ${srcdir}/common.h
 	rm -rf _build
@@ -135,7 +139,7 @@ sign: ${xclbin_target}
 .PHONY: run
 run: ${targetname}.exe ${xclbin_target}
 	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
-	${powershell} ./$< -x ${xclbin_target} --instr1 ${insts_target1} --kernel1 FFNONE --M1 ${M1} --K1 ${K1} --N1 ${N1} --instr2 ${insts_target2} --kernel2 FFNTWO --M2 ${M2} --K2 ${K2} --N2 ${N2} ${runargs}
+	${powershell} ./$< -x ${xclbin_target} --instr1 ${insts_target1} --kernel1 FFNONE --M1 ${M1} --K1 ${K1} --N1 ${N1} --instr2 ${insts_target2} --kernel2 FFNTWO --M2 ${M2} --K2 ${K2} --N2 ${N2} --instr3 ${insts_target3} --kernel3 ADDANDNORM ${runargs}
 
 .PHONY: clean
 clean:
