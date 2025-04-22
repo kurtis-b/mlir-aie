@@ -85,7 +85,7 @@ int main(int argc, const char *argv[]) {
   }
 
   int A_VOLUME = M * K;
-  int B_VOLUME = N * K;
+  int B_VOLUME = 4 * N * K; // 4 weight matrices in MHA
   int C_VOLUME = M * N;
 
   size_t A_SIZE = (A_VOLUME * sizeof(A_DATATYPE));
