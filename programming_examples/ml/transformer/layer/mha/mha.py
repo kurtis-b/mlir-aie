@@ -33,6 +33,7 @@ def main():
     argparser.add_argument("-M", type=int, default=512)
     argparser.add_argument("-K", type=int, default=512)
     argparser.add_argument("-N", type=int, default=512)
+    argparser.add_argument("-H", type=int, default=512)
     argparser.add_argument("-m", type=int, default=64)
     argparser.add_argument("-k", type=int, default=64)
     argparser.add_argument("-n", type=int, default=32)
@@ -60,6 +61,7 @@ def main():
             args.M,
             args.K,
             args.N,
+            args.H,
             args.m,
             args.k,
             args.n,
@@ -85,6 +87,7 @@ def my_matmul(
     M,
     K,
     N,
+    H,
     m,
     k,
     n,
@@ -97,6 +100,7 @@ def my_matmul(
 ):
     n_aie_rows = 4
     n_aie_cores = n_aie_rows * n_aie_cols
+    head_dim = K // H
 
     dtype_in = dtype_map[dtype_in_str]
     dtype_out = dtype_map[dtype_out_str]
@@ -157,7 +161,8 @@ def my_matmul(
     # a big performance cost.
     fifo_depth = 2
 
-    n_tiles_per_core = (M // m) * (N // n) // n_aie_cores
+    n_out_tiles_per_core = (M // m) * (N // n) // n_aie_cores
+    n_loop_out_h_reduce_per_core = head_dim // k
 
     n_A_tiles_per_shim = n_aie_rows // n_aie_cols
 
@@ -168,24 +173,18 @@ def my_matmul(
     else:
         ValueError(f"n_aie_cols must be 1. Got {n_aie_cols} instead.")
 
-
-    # These will hold TensorAccessPattern objects that represent the runtime
-    # npu_dma_memcpy_nd operations of this design. They are only used if generate_taps is true
-    A_taps = []
-    B_taps = []
-    C_taps = []
-
     @device(dev)
     def device_body():
-        A_l2_ty = np.ndarray[(m * k * n_A_tiles_per_shim,), np.dtype[dtype_in]]
-        B_l2_ty = np.ndarray[(k * n,), np.dtype[dtype_in]]
-        C_l2_ty = np.ndarray[(m * n * n_aie_rows,), np.dtype[dtype_out]]
-        A_l1_ty = np.ndarray[(m, k), np.dtype[dtype_in]]
-        B_l1_ty = np.ndarray[(k, n), np.dtype[dtype_in]]
-        C_l1_ty = np.ndarray[(m, n), np.dtype[dtype_out]]
+        in_l2_ty = np.ndarray[(m * k * n_A_tiles_per_shim,), np.dtype[dtype_in]]
+        weight_l2_ty = np.ndarray[(k * n,), np.dtype[dtype_in]]
+        out_l2_ty = np.ndarray[(m * n * n_aie_rows,), np.dtype[dtype_out]]
+        in_l1_ty = np.ndarray[(m, k), np.dtype[dtype_in]]
+        weight_l1_ty = np.ndarray[(k, n), np.dtype[dtype_in]]
+        proj_l1_ty = np.ndarray[(m, n), np.dtype[dtype_in]]
+        out_l1_ty = np.ndarray[(m, n), np.dtype[dtype_out]]
 
         # AIE Core Function declarations
-        zero = external_func(f"zero_{dtype_out_str}", inputs=[C_l1_ty])
+        zero = external_func(f"zero_{dtype_out_str}", inputs=[out_l1_ty])
         matmul_vectorized_func_name = (
             f"matmul_{dtype_in_str}_{dtype_out_str}"
             if not b_col_maj
@@ -193,35 +192,36 @@ def my_matmul(
         )
         matmul = external_func(
             matmul_vectorized_func_name,
-            inputs=[A_l1_ty, B_l1_ty, C_l1_ty],
+            inputs=[in_l1_ty, weight_l1_ty, out_l1_ty],
         )
 
         # Tile declarations as tile[row][col]
         tiles = [
-            [tile(1, row)] for row in range(0, 6) # 2nd column only
+            [tile(3, row)] for row in range(0, 6) # 4th column only
         ]
         shim_tiles = tiles[0]
         mem_tiles = tiles[1]
         core_tiles = tiles[2:]
 
         # AIE-array data movement with object fifos
-        A_l3l2_fifos = [None] * n_aie_cols
-        A_l2l1_fifos = [None] * n_aie_rows
+        in_l32l2_fifos = [None] * n_aie_cols
+        in_l2l1_fifos = [None] * n_aie_rows
 
-        B_l3l2_fifos = [None] * n_aie_cols
-        B_l2l1_fifos = [None] * n_aie_cols
+        weight_l3l2_fifos = [None] * n_aie_cols
+        weight_l2l1_fifos = [None] * n_aie_cols
 
-        C_l1l2_fifos = [[None] * n_aie_cols for _ in range(n_aie_rows)]
-        C_l2l3_fifos = [None] * n_aie_cols
+        out_l1l2_fifos = [[None] * n_aie_cols for _ in range(n_aie_rows)]
+        out_h_l1l2_fifos = [[None] * n_aie_cols for _ in range(n_aie_rows)]
+        out_l2l3_fifos = [None] * n_aie_cols
 
         # Input A
         for row in range(n_aie_rows):
-            A_l2l1_fifos[row] = object_fifo(
-                f"A_L2L1_{row}",
+            in_l2l1_fifos[row] = object_fifo(
+                f"In_L2L1_{row}",
                 mem_tiles[row // n_A_tiles_per_shim],
                 core_tiles[row][0:n_aie_cols],  # broadcast along one row
                 fifo_depth,
-                A_l1_ty,
+                in_l1_ty,
                 [
                     (m // r, r * k),
                     (k // s, s),
@@ -230,12 +230,12 @@ def my_matmul(
                 ],
             )
         for col in range(n_aie_cols):
-            A_l3l2_fifos[col] = object_fifo(
-                f"A_L3L2_{col}",
+            in_l32l2_fifos[col] = object_fifo(
+                f"In_L3L2_{col}",
                 shim_tiles[col],
                 mem_tiles[col],
                 fifo_depth,
-                A_l2_ty,
+                in_l2_ty,
             )
             # If n_cols == n_rows, n_A_tiles_per_shim is 1 and
             # this simply links a_l3l2_fifos[col] to a_l2l1_fifos[row] directly,
@@ -249,29 +249,29 @@ def my_matmul(
             else:
                 of_offsets = []
             object_fifo_link(
-                A_l3l2_fifos[col],
-                [A_l2l1_fifos[row] for row in range(start_row, stop_row)],
+                in_l32l2_fifos[col],
+                [in_l2l1_fifos[row] for row in range(start_row, stop_row)],
                 [],
                 of_offsets,
             )
 
         # Input B
         for col in range(n_aie_cols):
-            B_l3l2_fifos[col] = object_fifo(
-                f"B_L3L2_{col}",
+            weight_l3l2_fifos[col] = object_fifo(
+                f"W_L3L2_{col}",
                 shim_tiles[col],
                 mem_tiles[col],
                 fifo_depth,
-                B_l2_ty,
+                weight_l2_ty,
             )
-            B_l2l1_fifos[col] = object_fifo(
-                f"B_L2L1_{col}",
+            weight_l2l1_fifos[col] = object_fifo(
+                f"W_L2L1_{col}",
                 mem_tiles[col],
                 [
                     core_tiles[j][col] for j in range(n_aie_rows)
                 ],  # broadcast along one column
                 fifo_depth,
-                B_l1_ty,
+                weight_l1_ty,
                 (
                     [
                         (k // s, s * n),
@@ -288,24 +288,31 @@ def my_matmul(
                     ]
                 ),
             )
-            object_fifo_link(B_l3l2_fifos[col], B_l2l1_fifos[col])
+            object_fifo_link(weight_l3l2_fifos[col], weight_l2l1_fifos[col])
 
         # Output C
         for col in range(n_aie_cols):
             for row in range(n_aie_rows):
-                C_l1l2_fifos[row][col] = object_fifo(
-                    f"C_L1L2_{col}_{row}",
+                out_l1l2_fifos[row][col] = object_fifo(
+                    f"Out_L1L2_{col}_{row}",
                     core_tiles[row][col],
                     mem_tiles[col],
                     fifo_depth,
-                    C_l1_ty,
+                    out_l1_ty,
                 )
-            C_l2l3_fifos[col] = object_fifo(
-                f"C_L2L3_{col}",
+                out_h_l1l2_fifos[row][col] = object_fifo(
+                    f"Out_H_L1L2_{col}_{row}",
+                    core_tiles[row][col],
+                    core_tiles[row][col],
+                    fifo_depth,
+                    proj_l1_ty,
+                )
+            out_l2l3_fifos[col] = object_fifo(
+                f"Out_L2L3_{col}",
                 mem_tiles[col],
                 shim_tiles[col],
                 fifo_depth,
-                C_l2_ty,
+                out_l2_ty,
                 [
                     (m // r, r * n),
                     (r, t),
@@ -318,8 +325,8 @@ def my_matmul(
             else:
                 of_offsets = []
             object_fifo_link(
-                [C_l1l2_fifos[j][col] for j in range(n_aie_rows)],
-                C_l2l3_fifos[col],
+                [out_l1l2_fifos[j][col] for j in range(n_aie_rows)],
+                out_l2l3_fifos[col],
                 of_offsets,
                 [],
             )  # join along one column
@@ -327,38 +334,31 @@ def my_matmul(
         # Set up compute tiles
         for row in range(n_aie_rows):
             for col in range(n_aie_cols):
-
                 @core(core_tiles[row][col], f"mha_mm_{m}x{k}x{n}.o")
                 def core_body():
                     for _ in range_(0xFFFFFFFF):
-                        loop = (
-                            range_(n_tiles_per_core)
-                            if n_tiles_per_core > 1
-                            else range(1)
-                        )  # Workaround for issue #1547
-                        for _ in loop:
-                            elem_out = C_l1l2_fifos[row][col].acquire(
-                                ObjectFifoPort.Produce, 1
-                            )
+                        loop_out_tiles = (range_(n_out_tiles_per_core) if n_out_tiles_per_core > 1 else range(1))
+                        for _ in loop_out_tiles:
+                            elem_out = out_l1l2_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
                             zero(elem_out)
+                            for _ in range_(H):
+                                for _ in range_(n_loop_out_h_reduce_per_core):
+                                    elem_out_h = out_h_l1l2_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
+                                    zero(elem_out_h) # TODO: Add a loop to calculate the out tile for current head
+                                    out_h_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
 
-                            for _ in range_(K // k):
-                                elem_in_a = A_l2l1_fifos[row].acquire(
-                                    ObjectFifoPort.Consume, 1
-                                )
-                                elem_in_b = B_l2l1_fifos[col].acquire(
-                                    ObjectFifoPort.Consume, 1
-                                )
-                                matmul(elem_in_a, elem_in_b, elem_out)
-                                A_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
-                                B_l2l1_fifos[col].release(ObjectFifoPort.Consume, 1)
-
-                            C_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
+                                    elem_out_h = out_h_l1l2_fifos[row][col].acquire(ObjectFifoPort.Consume, 1)
+                                    elem_weight_o = weight_l2l1_fifos[col].acquire(ObjectFifoPort.Consume, 1)
+                                    matmul(elem_out_h, elem_weight_o, elem_out)
+                                    out_h_l1l2_fifos[row][col].release(ObjectFifoPort.Consume, 1)
+                                    weight_l2l1_fifos[col].release(ObjectFifoPort.Consume, 1)
+                            out_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
 
         # To/from AIE-array data movement
         @runtime_sequence(
             np.ndarray[(M * K,), np.dtype[dtype_in]],
-            np.ndarray[(K * N,), np.dtype[dtype_in]],
+            # np.ndarray[(4 * K * N,), np.dtype[dtype_in]], # Order: W_Q, W_K, W_V, W_O 
+            np.ndarray[(K * N,), np.dtype[dtype_in]], # Order: W_Q, W_K, W_V, W_O 
             np.ndarray[(M * N,), np.dtype[dtype_out]],
         )
         def sequence(A, B, C):
@@ -405,23 +405,12 @@ def my_matmul(
                         C_sizes = [tb_n_rows, N // n // n_aie_cols, m * n_aie_rows, n]
                         C_strides = [m * n_aie_rows * N, n * n_aie_cols, N, 1]
                         npu_dma_memcpy_nd(
-                            metadata=C_l2l3_fifos[col],
+                            metadata=out_l2l3_fifos[col],
                             bd_id=bd_id_base,
                             mem=C,
                             offsets=[0, 0, 0, C_offset],
                             sizes=C_sizes,
                             strides=C_strides,
-                        )
-                        # Use the calculated sizes/strides/offsets to record the data movement
-                        # caused by the above call to npu_dma_memcpy_nd.
-                        # This line does not change MLIR output at all.
-                        C_taps.append(
-                            TensorAccessPattern(
-                                (M, N),
-                                offset=C_offset,
-                                sizes=C_sizes,
-                                strides=C_strides,
-                            )
                         )
 
                         for tile_row in range(tb_n_rows):
@@ -459,23 +448,12 @@ def my_matmul(
                             ]
                             A_strides = [0, k, K, 1]
                             npu_dma_memcpy_nd(
-                                metadata=A_l3l2_fifos[col],
+                                metadata=in_l32l2_fifos[col],
                                 bd_id=bd_id_base + 2 * tile_row + 1,
                                 mem=A,
                                 offsets=[0, 0, 0, A_offset],
                                 sizes=A_sizes,
                                 strides=A_strides,
-                            )
-                            # Use the calculated sizes/strides/offsets to record the data movement
-                            # caused by the above call to npu_dma_memcpy_nd.
-                            # This line does not change MLIR output at all.
-                            A_taps.append(
-                                TensorAccessPattern(
-                                    (M, K),
-                                    offset=A_offset,
-                                    sizes=A_sizes,
-                                    strides=A_strides,
-                                )
                             )
 
                             # B input transfer:
@@ -496,7 +474,8 @@ def my_matmul(
                             #     |0011    0011    |
                             #     |0011    0011    |
                             #      ----------------
-                            B_col_offset = col * n if not b_col_maj else col * n * K
+                            # B_col_offset = (col * n if not b_col_maj else col * n * K) + 3 * K * N 
+                            B_col_offset = (col * n if not b_col_maj else col * n * K) 
                             if not b_col_maj:
                                 B_sizes = [N // n // n_aie_cols, K // k, k, n]
                                 B_strides = [n * n_aie_cols, k * N, N, 1]
@@ -505,36 +484,16 @@ def my_matmul(
                                 B_strides = [n * n_aie_cols * K, k, K, 1]
 
                             npu_dma_memcpy_nd(
-                                metadata=B_l3l2_fifos[col],
+                                metadata=weight_l3l2_fifos[col],
                                 bd_id=bd_id_base + 2 * tile_row + 2,
                                 mem=B,
                                 offsets=[0, 0, 0, B_col_offset],
                                 sizes=B_sizes,
                                 strides=B_strides,
                             )
-                            # Use the calculated sizes/strides/offsets to record the data movement
-                            # caused by the above call to npu_dma_memcpy_nd.
-                            # This line does not change MLIR output at all.
-                            B_taps.append(
-                                TensorAccessPattern(
-                                    (K, N),
-                                    offset=B_col_offset,
-                                    sizes=B_sizes,
-                                    strides=B_strides,
-                                )
-                            )
                     if tb > 0 or (tb == 0 and pingpong > 0):
-                        dma_wait(*C_l2l3_fifos)
-            dma_wait(*C_l2l3_fifos)
-
-    if generate_taps:
-        # If generate_taps is true, return a representation of tensor tiles
-        # representing all the npu_dma_memcpy_nd runtime sequence operations per input/ouput tensor.
-        return (
-            TensorAccessSequence.from_taps(A_taps),
-            TensorAccessSequence.from_taps(B_taps),
-            TensorAccessSequence.from_taps(C_taps),
-        )
+                        dma_wait(*out_l2l3_fifos)
+            dma_wait(*out_l2l3_fifos)
 
 
 if __name__ == "__main__":

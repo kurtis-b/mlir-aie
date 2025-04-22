@@ -34,21 +34,24 @@ current_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 include ${current_dir}../../../../makefile-common
 
 # M, N, H: final GEMM dimensions
-M?=64
-K?=192
+M?=128
+K?=384
 N?=192
 H?=12
 
-# m, k, n: single AIE core GEMM dimensions
-m?=16
-k?=16
-n?=16
+# m, k, n: single AIE core GEMM dimensions. Seems like m,k,n=16 leads to 
+# overflow of program memory, so using m,k,n=32
+# NOTE: Make sure that M / 4 >= m
+# NOTE: Make sure that K/H >= k
+m?=32
+k?=32
+n?=32
 
 n_aie_cols?=1
 b_col_maj?=0
 
 kernels=mha_mm_${m}x${k}x${n}
-aieargs+=-M $M -K $K -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
+aieargs+=-M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
 runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1
 target_suffix=mha
 
