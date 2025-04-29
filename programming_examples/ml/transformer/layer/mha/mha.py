@@ -175,12 +175,13 @@ def my_matmul(
 
     @device(dev)
     def device_body():
-        in_l2_ty = np.ndarray[(m * k * n_A_tiles_per_shim,), np.dtype[dtype_in]]
+        in_l2_ty = np.ndarray[(m * k,), np.dtype[dtype_in]]
         weight_l2_ty = np.ndarray[(k * n,), np.dtype[dtype_in]]
         out_l2_ty = np.ndarray[(m * n * n_aie_rows,), np.dtype[dtype_out]]
         in_l1_ty = np.ndarray[(m, k), np.dtype[dtype_in]]
         weight_l1_ty = np.ndarray[(k, n), np.dtype[dtype_in]]
         proj_l1_ty = np.ndarray[(m, n), np.dtype[dtype_in]]
+        scores_l1_ty = np.ndarray[(m, m), np.dtype[dtype_out]]
         out_l1_ty = np.ndarray[(m, n), np.dtype[dtype_out]]
 
         # AIE Core Function declarations
@@ -205,21 +206,32 @@ def my_matmul(
 
         # AIE-array data movement with object fifos
         in_l32l2_fifos = [None] * n_aie_cols
-        in_l2l1_fifos = [None] * n_aie_rows
+        in_l2l1_fifos = [None] * n_aie_cols
 
         weight_l3l2_fifos = [None] * n_aie_cols
         weight_l2l1_fifos = [None] * n_aie_cols
 
         out_l1l2_fifos = [[None] * n_aie_cols for _ in range(n_aie_rows)]
         out_h_l1l2_fifos = [[None] * n_aie_cols for _ in range(n_aie_rows)]
+        scores_l1l2_fifos = [[None] * n_aie_cols for _ in range(n_aie_rows)]
+        v_h_l1l2_fifos = [[None] * n_aie_cols for _ in range(n_aie_rows)]
         out_l2l3_fifos = [None] * n_aie_cols
 
         # Input A
-        for row in range(n_aie_rows):
-            in_l2l1_fifos[row] = object_fifo(
-                f"In_L2L1_{row}",
-                mem_tiles[row // n_A_tiles_per_shim],
-                core_tiles[row][0:n_aie_cols],  # broadcast along one row
+        for col in range(n_aie_cols):
+            in_l32l2_fifos[col] = object_fifo(
+                f"In_L3L2_{col}",
+                shim_tiles[col],
+                mem_tiles[col],
+                fifo_depth,
+                in_l2_ty,
+            )
+            in_l2l1_fifos[col] = object_fifo(
+                f"In_L2L1_{col}",
+                mem_tiles[col],
+                [
+                    core_tiles[j][col] for j in range(n_aie_rows)
+                ],  # broadcast along one column
                 fifo_depth,
                 in_l1_ty,
                 [
@@ -228,14 +240,6 @@ def my_matmul(
                     (r, k),
                     (s, 1),
                 ],
-            )
-        for col in range(n_aie_cols):
-            in_l32l2_fifos[col] = object_fifo(
-                f"In_L3L2_{col}",
-                shim_tiles[col],
-                mem_tiles[col],
-                fifo_depth,
-                in_l2_ty,
             )
             # If n_cols == n_rows, n_A_tiles_per_shim is 1 and
             # this simply links a_l3l2_fifos[col] to a_l2l1_fifos[row] directly,
@@ -248,12 +252,7 @@ def my_matmul(
                 of_offsets = [m * k * i for i in range(stop_row - start_row)]
             else:
                 of_offsets = []
-            object_fifo_link(
-                in_l32l2_fifos[col],
-                [in_l2l1_fifos[row] for row in range(start_row, stop_row)],
-                [],
-                of_offsets,
-            )
+            object_fifo_link(in_l32l2_fifos[col], in_l2l1_fifos[col])
 
         # Input B
         for col in range(n_aie_cols):
@@ -307,6 +306,20 @@ def my_matmul(
                     fifo_depth,
                     proj_l1_ty,
                 )
+                scores_l1l2_fifos[row][col] = object_fifo(
+                    f"Scores_L1L2_{col}_{row}",
+                    core_tiles[row][col],
+                    core_tiles[row][col],
+                    fifo_depth,
+                    scores_l1_ty,
+                )
+                v_h_l1l2_fifos[row][col] = object_fifo(
+                    f"V_H_L1L2_{col}_{row}",
+                    core_tiles[row][col],
+                    core_tiles[row][col],
+                    fifo_depth,
+                    proj_l1_ty,
+                )
             out_l2l3_fifos[col] = object_fifo(
                 f"Out_L2L3_{col}",
                 mem_tiles[col],
@@ -338,13 +351,32 @@ def my_matmul(
                 def core_body():
                     for _ in range_(0xFFFFFFFF):
                         loop_out_tiles = (range_(n_out_tiles_per_core) if n_out_tiles_per_core > 1 else range(1))
-                        for _ in loop_out_tiles:
+                        for _ in loop_out_tiles: # Loop M * K
                             elem_out = out_l1l2_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
                             zero(elem_out)
                             for _ in range_(H):
-                                for _ in range_(n_loop_out_h_reduce_per_core):
+                                for _ in range_(n_loop_out_h_reduce_per_core): # This loop and above is K // k
                                     elem_out_h = out_h_l1l2_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
-                                    zero(elem_out_h) # TODO: Add a loop to calculate the out tile for current head
+                                    zero(elem_out_h) 
+                                    # for _ in range_(M // k): # Reduce through sequence length for attention scores
+                                    #     elem_v_h = v_h_l1l2_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
+                                    #     zero(elem_v_h)
+                                    #     for _ in range_(K // k): # Reduce through embedding dim for V head tile
+                                    #         elem_in = in_l2l1_fifos[col].acquire(ObjectFifoPort.Produce, 1)
+                                    #         elem_weight_v = weight_l2l1_fifos[col].acquire(ObjectFifoPort.Produce, 1) 
+                                    #         matmul(elem_in, elem_weight_v, elem_v_h)
+                                    #         in_l2l1_fifos[col].release(ObjectFifoPort.Produce, 1)
+                                    #         weight_l2l1_fifos[col].release(ObjectFifoPort.Produce, 1)
+                                    #     v_h_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
+                                    #     elem_scores = scores_l1l2_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
+                                    #     zero(elem_scores)
+                                    #     scores_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
+
+                                    #     elem_scores = scores_l1l2_fifos[row][col].acquire(ObjectFifoPort.Consume, 1)
+                                    #     elem_v_h = v_h_l1l2_fifos[row][col].acquire(ObjectFifoPort.Consume, 1)
+                                    #     matmul(elem_scores, elem_v_h, elem_out_h)
+                                    #     scores_l1l2_fifos[row][col].release(ObjectFifoPort.Consume, 1)
+                                    #     v_h_l1l2_fifos[row][col].release(ObjectFifoPort.Consume, 1)
                                     out_h_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
 
                                     elem_out_h = out_h_l1l2_fifos[row][col].acquire(ObjectFifoPort.Consume, 1)
@@ -357,8 +389,7 @@ def my_matmul(
         # To/from AIE-array data movement
         @runtime_sequence(
             np.ndarray[(M * K,), np.dtype[dtype_in]],
-            # np.ndarray[(4 * K * N,), np.dtype[dtype_in]], # Order: W_Q, W_K, W_V, W_O 
-            np.ndarray[(K * N,), np.dtype[dtype_in]], # Order: W_Q, W_K, W_V, W_O 
+            np.ndarray[(4 * K * N,), np.dtype[dtype_in]], # Order: W_Q, W_K, W_V, W_O 
             np.ndarray[(M * N,), np.dtype[dtype_out]],
         )
         def sequence(A, B, C):
@@ -414,25 +445,6 @@ def my_matmul(
                         )
 
                         for tile_row in range(tb_n_rows):
-
-                            # A input transfer:
-                            #
-                            # The smallest transfer unit is a (m*n_A_tiles_per_shim)-sized sub-tile of the input matrix.
-                            # Transfer one such tile for every column, contiguously.
-                            # Repeat this transfer with identical tiles a total of (N//n//n_aie_cols) times.
-                            # Each shim transfers the tiles for separate rows. For example, shim 0 may transfer the
-                            # tiles marked 0 below, and shim 1 may transfer the tiles marked 1.
-                            #             K
-                            #      ----------------
-                            #     |0000000000000000|    (repeated N//n//n_aie_cols times)
-                            #     |0000000000000000|
-                            #     |1111111111111111|
-                            # M   |1111111111111111|
-                            #     |                |
-                            #     |                |
-                            #     |                |
-                            #     |                |
-                            #      ----------------
                             A_block_offset = (
                                 (row_base + tile_row) * n_aie_rows * m * K
                             )  # base address for this transfer block for all BDs
@@ -443,7 +455,7 @@ def my_matmul(
                             A_sizes = [
                                 N // n // n_aie_cols,
                                 K // k,
-                                m * n_A_tiles_per_shim,
+                                m,
                                 k,
                             ]
                             A_strides = [0, k, K, 1]
@@ -454,9 +466,30 @@ def my_matmul(
                                 offsets=[0, 0, 0, A_offset],
                                 sizes=A_sizes,
                                 strides=A_strides,
+                                # issue_token=True,
                             )
+                            # dma_wait(in_l32l2_fifos[col])
+                            # B_col_offset = (col * n if not b_col_maj else col * n * K) + 2 * K * N 
+                            # if not b_col_maj:
+                            #     B_sizes = [N // n // n_aie_cols, K // k, k, n]
+                            #     B_strides = [n * n_aie_cols, k * N, N, 1]
+                            # else:
+                            #     B_sizes = [N // n // n_aie_cols, K // k, n, k]
+                            #     B_strides = [n * n_aie_cols * K, k, K, 1]
 
-                            # B input transfer:
+                            # npu_dma_memcpy_nd(
+                            #     metadata=weight_l3l2_fifos[col],
+                            #     bd_id=bd_id_base + 2 * tile_row + 2,
+                            #     mem=B,
+                            #     offsets=[0, 0, 0, B_col_offset],
+                            #     sizes=B_sizes,
+                            #     strides=B_strides,
+                            #     issue_token=True,
+                            # )
+                            # dma_wait(weight_l3l2_fifos[col])
+
+
+                            # Output weights transfer:
                             # Transfer the first a (n)-wide block of columns of B,
                             # Then transfer the (n_aie_columns)-th such block, and so on.
                             # Each shim will start at a different column offset.
@@ -474,8 +507,7 @@ def my_matmul(
                             #     |0011    0011    |
                             #     |0011    0011    |
                             #      ----------------
-                            # B_col_offset = (col * n if not b_col_maj else col * n * K) + 3 * K * N 
-                            B_col_offset = (col * n if not b_col_maj else col * n * K) 
+                            B_col_offset = (col * n if not b_col_maj else col * n * K) + 3 * K * N 
                             if not b_col_maj:
                                 B_sizes = [N // n // n_aie_cols, K // k, k, n]
                                 B_strides = [n * n_aie_cols, k * N, N, 1]

@@ -317,6 +317,7 @@ def multi_head_attention_tiling_with_kernel_unrolled(Q, K, V, num_heads, in_proj
                     for out_tile_reduce in range(0, seq_len, k_ot):
                         # Get the V tile
                         v_h_tile = torch.zeros(batch_size, k_ot, k_o, device=Q.device)
+                        print("v_h_tile for row:", out_tile_reduce, "col:", out_reduce)
                         for v_tile_reduce in range(0, d_model, k_v):
                             v_h_tile += torch.matmul(V[:, out_tile_reduce:out_tile_reduce+k_ot, v_tile_reduce:v_tile_reduce+k_v], in_proj_weight[v_tile_reduce:v_tile_reduce+k_v, out_reduce:out_reduce+k_o]) 
                         v_h_tile += in_proj_bias[out_reduce:out_reduce+k_o].unsqueeze(0)
