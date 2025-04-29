@@ -6,6 +6,7 @@
 #include <vec_math.h>
 
 #include "add.cc"
+#include "zero.cc"
 
 // NOTE: The scalar version doesn't work
 // float Q_rsqrt(float number) {
@@ -160,4 +161,12 @@ void eltwise_add_i16_vector(int16 *a_in, int16 *b_in, int16 *c_out) {
 // {
 //   eltwise_vadd<bfloat16, bfloat16, DIM_M, DIM_N>(a_in, b_in, c_out);
 // }
+
+void zero_i16_vector(int16 *c_out) {
+  zero_vectorized<int16, DIM_M, DIM_N>(c_out);
+}
+
+void zero_bf16_vector(bfloat16 *c_out) {
+  zero_vectorized<bfloat16, DIM_M, DIM_N>(c_out);
+}
 } // extern "C"
