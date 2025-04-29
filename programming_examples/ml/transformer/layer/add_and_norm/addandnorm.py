@@ -127,6 +127,8 @@ def my_matmul(
         out_l1_ty = np.ndarray[(m, n), np.dtype[dtype_out]]
 
         # AIE Core Function declarations
+        zero0 = external_func(f"zero_{dtype_in_str}_vector", inputs=[in_l1_ty])
+        zero1 = external_func(f"zero_{dtype_out_str}_vector", inputs=[out_l1_ty])
         add = external_func(f"eltwise_add_{dtype_in_str}_vector", inputs=[in_l1_ty, in_l1_ty, in_l1_ty])
         norm = external_func(f"layer_norm_{dtype_in_str}_vector", inputs=[in_l1_ty, out_l1_ty])
 
@@ -265,6 +267,7 @@ def my_matmul(
                             elem_c = C_l1_fifos[row][col].acquire(
                                 ObjectFifoPort.Produce, 1
                             )
+                            zero0(elem_c)
                             elem_in_a = A_l2l1_fifos[row].acquire(
                                 ObjectFifoPort.Consume, 1
                             )
@@ -281,6 +284,11 @@ def my_matmul(
                             elem_out = C_l1l2_fifos[row][col].acquire(
                                 ObjectFifoPort.Produce, 1
                             )
+                            zero1(elem_out)
+                            # TODO: Split up the LayerNorm into a step to generate
+                            # the sums of each row and then a step to normalize.
+                            # This would remove the need to tile across the whole
+                            # workload's rows.
                             norm(elem_c, elem_out)
 
                             C_l1_fifos[row][col].release(ObjectFifoPort.Consume, 1)
@@ -293,94 +301,96 @@ def my_matmul(
             np.ndarray[(M * N,), np.dtype[dtype_out]],
         )
         def sequence(A, B, C):
-            for row_tile in range(M // m // n_aie_rows):
-                for col in range(n_aie_cols):
-                    # C Output Transfer:
-                    # The smallest transfer unit is a (m*n_aie_rows)-x-(n)-sized sub-tile of the matrix.
-                    # Transfer one such tile for every (n_aie_cols)-th column, evenly spaced,
-                    # then repeat that (tb_n_rows) times for the next contiguous blocks of rows.
-                    # Each shim will start at a different column offset, transferring interleaved
-                    # columns. For example, shim 0 may transfer the blocks marked 0 below, and shim 1
-                    # may transfer the blocks marked 1.
-                    #
-                    #             N
-                    #      ----------------
-                    #     |0011    0011    |
-                    #     |0011    0011    |
-                    #     |0011    0011    |
-                    # M   |0011    0011    |
-                    #     |                |
-                    #     |                |
-                    #     |                |
-                    #     |                |
-                    #      ----------------
-                    row_offset = row_tile * m * n_aie_rows * N
-                    col_offset = col * n
-                    offset = col_offset + row_offset
-                    sizes = [1, 1, m * n_aie_rows, n * n_aie_cols]
-                    strides = [0, 0, N, 1]
-                    npu_dma_memcpy_nd(
-                        metadata=C_l2l3_fifos[col],
-                        bd_id=0,
-                        mem=C,
-                        offsets=[0, 0, 0, offset],
+            # for row_tile in range(M // m // n_aie_rows):
+            #     for col_tile in range(N // n // n_aie_cols):
+            for col in range(n_aie_cols):
+                # C Output Transfer:
+                # The smallest transfer unit is a (m*n_aie_rows)-x-(n)-sized sub-tile of the matrix.
+                # Transfer one such tile for every (n_aie_cols)-th column, evenly spaced,
+                # then repeat that (tb_n_rows) times for the next contiguous blocks of rows.
+                # Each shim will start at a different column offset, transferring interleaved
+                # columns. For example, shim 0 may transfer the blocks marked 0 below, and shim 1
+                # may transfer the blocks marked 1.
+                #
+                #             N
+                #      ----------------
+                #     |0011    0011    |
+                #     |0011    0011    |
+                #     |0011    0011    |
+                # M   |0011    0011    |
+                #     |                |
+                #     |                |
+                #     |                |
+                #     |                |
+                #      ----------------
+                # row_offset = row_tile * m * n_aie_rows * N
+                # col_offset = col_tile * n + col * n
+                # offset = col_offset + row_offset
+                offset = 0
+                sizes = [M // m // n_aie_rows, N // n // n_aie_cols, m * n_aie_rows, n * n_aie_cols]
+                strides = [m * n_aie_rows * N, n * n_aie_cols, N, 1]
+                npu_dma_memcpy_nd(
+                    metadata=C_l2l3_fifos[col],
+                    bd_id=0,
+                    mem=C,
+                    offsets=[0, 0, 0, offset],
+                    sizes=sizes,
+                    strides=strides,
+                )
+                # Use the calculated sizes/strides/offsets to record the data movement
+                # caused by the above call to npu_dma_memcpy_nd.
+                # This line does not change MLIR output at all.
+                C_taps.append(
+                    TensorAccessPattern(
+                        (M, N),
+                        offset=offset,
                         sizes=sizes,
                         strides=strides,
                     )
-                    # Use the calculated sizes/strides/offsets to record the data movement
-                    # caused by the above call to npu_dma_memcpy_nd.
-                    # This line does not change MLIR output at all.
-                    C_taps.append(
-                        TensorAccessPattern(
-                            (M, N),
-                            offset=offset,
-                            sizes=sizes,
-                            strides=strides,
-                        )
-                    )
+                )
 
-                    # A input transfer:
-                    npu_dma_memcpy_nd(
-                        metadata=A_l3l2_fifos[col],
-                        bd_id=1,
-                        mem=A,
-                        offsets=[0, 0, 0, offset],
+                # A input transfer:
+                npu_dma_memcpy_nd(
+                    metadata=A_l3l2_fifos[col],
+                    bd_id=1,
+                    mem=A,
+                    offsets=[0, 0, 0, offset],
+                    sizes=sizes,
+                    strides=strides,
+                )
+                # Use the calculated sizes/strides/offsets to record the data movement
+                # caused by the above call to npu_dma_memcpy_nd.
+                # This line does not change MLIR output at all.
+                A_taps.append(
+                    TensorAccessPattern(
+                        (M, N),
+                        offset=offset,
                         sizes=sizes,
                         strides=strides,
                     )
-                    # Use the calculated sizes/strides/offsets to record the data movement
-                    # caused by the above call to npu_dma_memcpy_nd.
-                    # This line does not change MLIR output at all.
-                    A_taps.append(
-                        TensorAccessPattern(
-                            (M, N),
-                            offset=offset,
-                            sizes=sizes,
-                            strides=strides,
-                        )
-                    )
+                )
 
-                    # B input transfer:
-                    npu_dma_memcpy_nd(
-                        metadata=B_l3l2_fifos[col],
-                        bd_id=2,
-                        mem=B,
-                        offsets=[0, 0, 0, offset],
+                # B input transfer:
+                npu_dma_memcpy_nd(
+                    metadata=B_l3l2_fifos[col],
+                    bd_id=2,
+                    mem=B,
+                    offsets=[0, 0, 0, offset],
+                    sizes=sizes,
+                    strides=strides,
+                )
+                # Use the calculated sizes/strides/offsets to record the data movement
+                # caused by the above call to npu_dma_memcpy_nd.
+                # This line does not change MLIR output at all.
+                B_taps.append(
+                    TensorAccessPattern(
+                        (M, N),
+                        offset=offset,
                         sizes=sizes,
                         strides=strides,
                     )
-                    # Use the calculated sizes/strides/offsets to record the data movement
-                    # caused by the above call to npu_dma_memcpy_nd.
-                    # This line does not change MLIR output at all.
-                    B_taps.append(
-                        TensorAccessPattern(
-                            (M, N),
-                            offset=offset,
-                            sizes=sizes,
-                            strides=strides,
-                        )
-                    )
-                    dma_wait(*C_l2l3_fifos)
+                )
+                dma_wait(*C_l2l3_fifos)
 
     if generate_taps:
         # If generate_taps is true, return a representation of tensor tiles
