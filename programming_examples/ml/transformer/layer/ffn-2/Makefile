@@ -35,20 +35,20 @@ include ${current_dir}../../../../makefile-common
 
 # M, K, N: final GEMM dimensions
 M?=256
-K?=2048
-N?=512
+K?=3072
+N?=768
 
 # m, k, n: single AIE core GEMM dimensions
 m?=32
 k?=64
-n?=32
+n?=64
 
 n_aie_cols?=1
 b_col_maj?=0
 
 kernels=ffn2_mm_${m}x${k}x${n}
 aieargs+=-M $M -K $K -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1
+runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 100
 target_suffix=ffn-2
 
 # set this flag to 1 for linear buffer allocation
@@ -63,7 +63,7 @@ endif
 
 dtype_in?=i16
 dtype_out?=i16
-trace_size?=4096
+trace_size?=0
 
 
 ifeq ($(dtype_in),bf16)

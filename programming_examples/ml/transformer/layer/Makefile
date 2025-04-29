@@ -35,14 +35,14 @@ include ${current_dir}../../../makefile-common
 
 # M, K, N: final GEMM dimensions
 M1?=256
-K1?=512
-N1?=2048
+K1?=768
+N1?=3072
 M2?=256
-K2?=2048
-N2?=512
+K2?=3072
+N2?=768
 b_col_maj?=0
 
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1
+runargs=--b_col_maj ${b_col_maj} -v 1 --warmup 10 --iters 100
 
 # set this flag to 1 for linear buffer allocation
 # else, 0 for bank-aware
