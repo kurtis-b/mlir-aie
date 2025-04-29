@@ -627,8 +627,7 @@ int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
   }
   print_error_summary(std::cout, n_errors, errors, max_rel_error);
 
-  //   if (n_errors > 0) {
-  if (1) {
+  if (n_errors > 0) {
     std::cout << std::endl << "Reference:" << std::endl;
     matmul_common::print_matrix(CRef, N);
     std::cout << std::endl << "Output:" << std::endl;

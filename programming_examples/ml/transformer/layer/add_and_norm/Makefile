@@ -35,11 +35,13 @@ include ${current_dir}../../../../makefile-common
 
 # M, N: final GEMM dimensions
 M?=256
-N?=512
+N?=768
 
 # m, k, n: single AIE core GEMM dimensions
+# NOTE: Make sure N-n. For now, the implementation requires the width of the 
+# tiles to be the width of the workload
 m?=4
-n?=512
+n?=768
 
 # set this flag to 1 for linear buffer allocation
 # else, 0 for bank-aware
@@ -55,11 +57,11 @@ n_aie_cols?=1
 b_col_maj?=0
 dtype_in?=i16
 dtype_out?=bf16
-trace_size?=4096
+trace_size?=0
 
 kernels=addandnorm_${m}x${n}
 aieargs+=-M $M -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1
+runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 100
 target_suffix=addandnorm
 
 ifeq ($(dtype_in),bf16)
