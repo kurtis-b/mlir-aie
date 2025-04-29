@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
-# Copyright (C) 2024, Advanced Micro Devices, Inc.
+# Copyright (C) 2025, Advanced Micro Devices, Inc.
 # 
 ##===----------------------------------------------------------------------===##
 
@@ -55,14 +55,15 @@ endif
 
 n_aie_cols?=1
 b_col_maj?=0
+
+kernels=addandnorm_${m}x${n}
+target_suffix=addandnorm
+
 dtype_in?=i16
 dtype_out?=bf16
 trace_size?=0
 
-kernels=addandnorm_${m}x${n}
-aieargs+=-M $M -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 100
-target_suffix=addandnorm
+devicename ?= $(if $(filter 1,$(NPU2)),npu2,npu)
 
 ifeq ($(dtype_in),bf16)
 	dtype_in_cpp=std::bfloat16_t
@@ -90,18 +91,28 @@ ifeq ($(dtype_in),i8)
 	dtype_acc_cpp=std::bfloat16_t
 endif
 
+targetname=addandnorm
 mlir_target?=build/aie_${target_suffix}.mlir
 trace_mlir_target?=build/aie_trace_${target_suffix}.mlir
 xclbin_target?=build/final_${target_suffix}.xclbin
 trace_xclbin_target?=build/trace_${target_suffix}.xclbin
 insts_target?=build/insts_${target_suffix}.txt
-targetname=addandnorm
 aie_py_src?=${targetname}.py
+
+runargs?=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 100
+aieargs+=--dev ${devicename} -M $M -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
 
 CHESS?=false
 
 # default sequential buffer allocation, if not already defined
 buffer_aloc_flag?=basic-sequential
+
+ifeq ($(devicename),npu2)
+col_shift?=0
+else 
+#shift first column in Phoenix/Hawk, because deosn't have shimTile 
+col_shift?=1
+endif
 
 .PHONY: all
 all: ${xclbin_target} ${targetname}.exe
@@ -132,19 +143,19 @@ ${trace_mlir_target}: ${srcdir}/${aie_py_src}
 
 ${xclbin_target}: ${mlir_target} ${kernels:%=build/%.o}
 	mkdir -p ${@D}
-	cd ${@D} && aiecc.py --alloc-scheme=${buffer_aloc_flag} --aie-generate-cdo --no-compile-host --xclbin-name=${@F} \
+	cd ${@D} && aiecc.py --aie-generate-xclbin --alloc-scheme=${buffer_aloc_flag} --no-compile-host --xclbin-name=${@F} \
 				$(if $(shell [ $(CHESS) != true ] && echo true), \
 					--no-xchesscc --no-xbridge --peano ${PEANO_INSTALL_DIR}, \
 				) \
-				--aie-generate-npu --npu-insts-name=${insts_target:build/%=%} $(<:%=../%)
+				--aie-generate-npu-insts --npu-insts-name=${insts_target:build/%=%} $(<:%=../%)
 
 ${trace_xclbin_target}: ${trace_mlir_target} ${kernels:%=build/%.o}
 	mkdir -p ${@D}
-	cd ${@D} && aiecc.py --alloc-scheme=${buffer_aloc_flag} --aie-generate-cdo --no-compile-host --xclbin-name=${@F} \
+	cd ${@D} && aiecc.py --aie-generate-xclbin --alloc-scheme=${buffer_aloc_flag} --no-compile-host --xclbin-name=${@F} \
 				$(if $(shell [ $(CHESS) != true ] && echo true), \
 					--no-xchesscc --no-xbridge --peano ${PEANO_INSTALL_DIR}, \
 				) \
-				--aie-generate-npu --npu-insts-name=${insts_target:build/%=%} $(<:%=../%)
+				--aie-generate-npu-insts --npu-insts-name=${insts_target:build/%=%} $(<:%=../%)
 
 ${targetname}.exe: ${srcdir}/test.cpp ${srcdir}/common.h
 	rm -rf _build
