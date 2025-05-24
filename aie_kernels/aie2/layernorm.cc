@@ -142,26 +142,6 @@ void layer_norm_i16_vector(int16 *in, bfloat16 *out) {
 //   layer_norm_scalar<int16, bfloat16, DIM_M, DIM_N>(in, out);
 // }
 
-// void eltwise_add_i16_scalar(int16 *a_in, int16 *b_in, int16 *c_out) {
-//   eltwise_add<int16, int16, DIM_M, DIM_N>(a_in, b_in, c_out);
-// }
-
-void eltwise_add_i16_vector(int16 *a_in, int16 *b_in, int16 *c_out) {
-  eltwise_vadd<int16, int16, DIM_M, DIM_N>(a_in, b_in, c_out);
-}
-
-// void eltwise_add_bf16_scalar(bfloat16 *a_in, bfloat16 *b_in, bfloat16
-// *c_out)
-// {
-//   eltwise_add<bfloat16, bfloat16, DIM_M, DIM_N>(a_in, b_in, c_out);
-// }
-
-// void eltwise_add_bf16_vector(bfloat16 *a_in, bfloat16 *b_in, bfloat16
-// *c_out)
-// {
-//   eltwise_vadd<bfloat16, bfloat16, DIM_M, DIM_N>(a_in, b_in, c_out);
-// }
-
 void zero_i16_vector(int16 *c_out) {
   zero_vectorized<int16, DIM_M, DIM_N>(c_out);
 }

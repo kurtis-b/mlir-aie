@@ -18,21 +18,19 @@
 #include "../aie_kernel_utils.h"
 #include <aie_api/aie.hpp>
 
-template <typename T_in, typename T_out, const int N>
+template <typename T_in, typename T_out, const int M, const int N>
 void eltwise_add(T_in *a, T_in *b, T_out *c) {
-  for (int i = 0; i < N; i++) {
-    c[i] = a[i] + b[i];
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      c[i * N + j] = (T_out)(a[i * N + j] + b[i * N + j]);
+    }
   }
 }
 
-template <typename T_in, typename T_out, const int N>
+template <typename T_in, typename T_out, const int M, const int N>
 void eltwise_vadd(T_in *a, T_in *b, T_out *c) {
-
   constexpr int vec_factor = 16;
   event0();
-  T_in *__restrict pA1 = a;
-  T_in *__restrict pB1 = b;
-  T_out *__restrict pC1 = c;
   const int F = N / vec_factor;
   AIE_PREPARE_FOR_PIPELINING
   AIE_LOOP_MIN_ITERATION_COUNT(16)
@@ -50,12 +48,32 @@ void eltwise_vadd(T_in *a, T_in *b, T_out *c) {
 
 extern "C" {
 
-void eltwise_add_bf16_scalar(bfloat16 *a_in, bfloat16 *b_in, bfloat16 *c_out) {
-  eltwise_add<bfloat16, bfloat16, 1024>(a_in, b_in, c_out);
+#ifndef DIM_M
+#define DIM_M 8
+#endif
+
+#ifndef DIM_N
+#define DIM_N 512
+#endif
+
+// void eltwise_add_i16_scalar(int16 *a_in, int16 *b_in, int16 *c_out) {
+//   eltwise_add<int16, int16, DIM_M, DIM_N>(a_in, b_in, c_out);
+// }
+
+void eltwise_add_i16_vector(int16 *a_in, int16 *b_in, int16 *c_out) {
+  eltwise_vadd<int16, int16, DIM_M, DIM_N>(a_in, b_in, c_out);
 }
 
-void eltwise_add_bf16_vector(bfloat16 *a_in, bfloat16 *b_in, bfloat16 *c_out) {
-  eltwise_vadd<bfloat16, bfloat16, 1024>(a_in, b_in, c_out);
-}
+// void eltwise_add_bf16_scalar(bfloat16 *a_in, bfloat16 *b_in, bfloat16
+// *c_out)
+// {
+//   eltwise_add<bfloat16, bfloat16, DIM_M, DIM_N>(a_in, b_in, c_out);
+// }
+
+// void eltwise_add_bf16_vector(bfloat16 *a_in, bfloat16 *b_in, bfloat16
+// *c_out)
+// {
+//   eltwise_vadd<bfloat16, bfloat16, DIM_M, DIM_N>(a_in, b_in, c_out);
+// }
 
 } // extern "C"
