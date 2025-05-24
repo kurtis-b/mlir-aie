@@ -9,7 +9,7 @@
 ##===----------------------------------------------------------------------===##
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 subdir=ffn-1
-targetname=ffn
+targetname=ffn-1
 
 
 # M, K, N: final GEMM dimensions
@@ -29,7 +29,7 @@ n_aie_cols?=1
 endif
 b_col_maj?=0
 
-kernels=ffn1_mm_${m}x${k}x${n}
+kernels=ffn-1_mm_${m}x${k}x${n}
 aieargs=--dev ${devicename} -M $M -K $K -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
 runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 100
 target_suffix=ffn-1_${m}x${k}x${n}
@@ -58,7 +58,7 @@ endif
 
 
 
-build/ffn1_mm_b_row_maj_${m}x${k}x${n}.o: ${kernels_dir}/mm.cc
+build/ffn-1_mm_b_row_maj_${m}x${k}x${n}.o: ${kernels_dir}/mm.cc
 	mkdir -p ${@D}
 ifeq (${devicename}, npu)
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o ${@F}
@@ -66,7 +66,7 @@ else ifeq (${devicename}, npu2)
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o ${@F}
 endif
 
-build/ffn1_mm_b_col_maj_${m}x${k}x${n}.o: ${kernels_dir}/mm_b_col_maj.cc
+build/ffn-1_mm_b_col_maj_${m}x${k}x${n}.o: ${kernels_dir}/mm_b_col_maj.cc
 	mkdir -p ${@D}
 ifeq (${devicename}, npu)
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o ${@F}
@@ -83,11 +83,11 @@ else ifeq (${devicename}, npu2)
 endif
 
 ifneq (${b_col_maj}, 1)
-build/ffn1_mm_${m}x${k}x${n}.o: build/ffn1_mm_b_row_maj_${m}x${k}x${n}.o build/relu_${m}x${n}.o
+build/ffn-1_mm_${m}x${k}x${n}.o: build/ffn-1_mm_b_row_maj_${m}x${k}x${n}.o build/relu_${m}x${n}.o
 	mkdir -p ${@D}
 	ar rvs $@ $^
 else
-build/ffn1_mm_${m}x${k}x${n}.o: build/ffn1_mm_b_col_maj_${m}x${k}x${n}.o build/relu_${m}x${n}.o
+build/ffn-1_mm_${m}x${k}x${n}.o: build/ffn-1_mm_b_col_maj_${m}x${k}x${n}.o build/relu_${m}x${n}.o
 	mkdir -p ${@D}
 	ar rvs $@ $^
 endif
