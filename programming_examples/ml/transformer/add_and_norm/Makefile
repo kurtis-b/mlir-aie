@@ -31,7 +31,7 @@
 
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 current_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
-include ${current_dir}../../../../makefile-common
+include ${current_dir}../../../makefile-common
 
 # M, N: final GEMM dimensions
 M?=256
@@ -119,9 +119,9 @@ all: ${xclbin_target} ${targetname}.exe
 
 build/addandnorm_${m}x${n}.o: ${srcdir}/layernorm.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DDIM_M=${m} -DDIM_N=${n} -I${srcdir}/../../../../../aie_runtime_lib/AIE2 -c $< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DDIM_M=${m} -DDIM_N=${n} -I${srcdir}/../../../../aie_runtime_lib/AIE2 -c $< -o ${@F}
 
-# build/lut_based_ops.o: ${srcdir}/../../../../../aie_runtime_lib/AIE2/vec_math.h
+# build/lut_based_ops.o: ${srcdir}/../../../../aie_runtime_lib/AIE2/vec_math.h
 # 	mkdir -p ${@D}
 # 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -I. -c $< -o ${@F}
 
@@ -131,7 +131,7 @@ build/aie_opt.mlir: ${mlir_target}
 
 build/%.o: %.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -I${srcdir}/../../../aie_runtime_lib/AIE2 -c $< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -I${srcdir}/../../../../aie_runtime_lib/AIE2 -c $< -o ${@F}
 
 ${mlir_target}: ${srcdir}/${aie_py_src}
 	mkdir -p ${@D}
