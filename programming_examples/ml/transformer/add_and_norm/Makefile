@@ -112,7 +112,3 @@ trace: ${targetname}.exe ${trace_xclbin_target} ${insts_target}
 	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
 	${powershell} ./$< -x ${trace_xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M-N $N ${runargs} -t ${trace_size}
 	${srcdir}/../../../utils/parse_trace.py --filename trace.txt --mlir ${trace_mlir_target} --colshift ${col_shift} > trace_${target_suffix}.json
-
-build/aie_opt.mlir: ${mlir_target}
-	mkdir -p ${@D}
-	cd ${@D} && aie-opt aie_${target_suffix}.mlir -aie-objectFifo-stateful-transform -aie-register-objectFifos 

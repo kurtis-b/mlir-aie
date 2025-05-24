@@ -140,3 +140,7 @@ clean: clean_trace
 .PHONY: clean_trace
 clean_trace:
 	rm -rf tmpTrace parse*.json traces/trace_${target_suffix}.json trace.txt
+
+build/aie_opt.mlir: ${mlir_target}
+	mkdir -p ${@D}
+	cd ${@D} && aie-opt aie_${target_suffix}.mlir -aie-objectFifo-stateful-transform -aie-register-objectFifos 

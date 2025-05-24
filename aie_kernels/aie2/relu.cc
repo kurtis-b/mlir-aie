@@ -60,6 +60,13 @@ void relu_bf16(bfloat16 *__restrict pA, bfloat16 *__restrict pC) {
 }
 
 extern "C" {
+#ifndef DIM_M
+#define DIM_M 256
+#endif
+
+#ifndef DIM_N
+#define DIM_N 3072
+#endif
 
 void i16_relu(int16 *a_in, int16 *c_out) {
   relu_i16<DIM_M, DIM_N>(a_in, c_out);
