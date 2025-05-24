@@ -47,15 +47,9 @@ def main():
         default="i16",
     )
     argparser.add_argument("--trace_size", type=int, default=0)
-    argparser.add_argument(
-        "--generate-taps",
-        action="store_true",
-        help="Generate TensorAccessPatterns, a Python object to represent each data transfer"
-        "of the input/output matrices. These objects can be used for visualization.",
-    )
     args = argparser.parse_args()
     with mlir_mod_ctx() as ctx:
-        maybe_taps = my_matmul(
+        maybe_taps = my_addandnorm(
             args.dev,
             args.M,
             args.N,
@@ -66,20 +60,16 @@ def main():
             args.dtype_out,
             args.b_col_maj,
             args.trace_size,
-            args.generate_taps,
         )
         # print(ctx.module.operation.verify())
         print(ctx.module)
-
-    if args.generate_taps:
-        return maybe_taps
 
 
 def ceildiv(a, b):
     return (a + b - 1) // b
 
 
-def my_matmul(
+def my_addandnorm(
     dev,
     M,
     N,
@@ -90,11 +80,10 @@ def my_matmul(
     dtype_out_str,
     b_col_maj,
     trace_size,
-    generate_taps=False,
 ):
-    # TODO: For now only using 2 rows because there's not enough channels to use 4 cores
-    # and 3 cores makes the tiling uneven. Need to look into using cascade and 
-    # running layer norm in one core that another core running add will cascade to.
+    # Using 2 rows because there's not enough channels to use 4 cores and 3 cores makes the tiling uneven. 
+    # But Layernorm is much faster than the other transformer operations even with 2 rows, so will likely 
+    # move to 1 row at some point.
     n_aie_rows = 2 
     n_aie_cores = n_aie_rows * n_aie_cols
 
@@ -122,17 +111,12 @@ def my_matmul(
 
     if dev == "npu":
         if n_aie_cols == 1:
-            dev_ty = AIEDevice.npu1_4col # Use this virtualization to generate the xclbin, but the 
+            # Use this virtualization to generate the xclbin, but the 
             # design will only use one column of cores.
+            dev_ty = AIEDevice.npu1_4col
     else:
         dev_ty = AIEDevice.npu2
 
-
-    # These will hold TensorAccessPattern objects that represent the runtime
-    # npu_dma_memcpy_nd operations of this design. They are only used if generate_taps is true
-    A_taps = []
-    B_taps = []
-    C_taps = []
 
     @device(dev_ty)
     def device_body():
@@ -142,15 +126,18 @@ def my_matmul(
         out_l1_ty = np.ndarray[(m, n), np.dtype[dtype_out]]
 
         # AIE Core Function declarations
-        zero0 = external_func(f"zero_{dtype_in_str}_vector", inputs=[in_l1_ty])
-        zero1 = external_func(f"zero_{dtype_out_str}_vector", inputs=[out_l1_ty])
         add = external_func(f"eltwise_add_{dtype_in_str}_vector", inputs=[in_l1_ty, in_l1_ty, in_l1_ty])
         norm = external_func(f"layer_norm_{dtype_in_str}_vector", inputs=[in_l1_ty, out_l1_ty])
 
         # Tile declarations as tile[row][col]
-        tiles = [
-            [tile(2, row)] for row in range(0, 6) # 3rd column only
-        ]
+        if dev == "npu":
+            tiles = [
+                [tile(2, row)] for row in range(0, 6) # 3rd column only
+            ]
+        else:
+            tiles = [
+                [tile(7, row)] for row in range(0, 6) # 8th column only
+            ]
         shim_tiles = tiles[0]
         mem_tiles = tiles[1]
         core_tiles = tiles[2:]
@@ -266,10 +253,10 @@ def my_matmul(
                 [],
             )  # join along one column
 
+
         # Set up compute tiles
         for row in range(n_aie_rows):
             for col in range(n_aie_cols):
-
                 @core(core_tiles[row][col], f"addandnorm_{m}x{n}.o")
                 def core_body():
                     for _ in range_(0xFFFFFFFF):
@@ -279,35 +266,24 @@ def my_matmul(
                             else range(1)
                         )  # Workaround for issue #1547
                         for _ in loop:
-                            elem_c = C_l1_fifos[row][col].acquire(
-                                ObjectFifoPort.Produce, 1
-                            )
-                            zero0(elem_c)
-                            elem_in_a = A_l2l1_fifos[row].acquire(
-                                ObjectFifoPort.Consume, 1
-                            )
-                            elem_in_b = B_l2l1_fifos[row].acquire(
-                                ObjectFifoPort.Consume, 1
-                            )
+                            elem_in_a = A_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_b = B_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
+                            elem_c = C_l1_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
                             add(elem_in_a, elem_in_b, elem_c)
                             A_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
                             B_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
                             C_l1_fifos[row][col].release(ObjectFifoPort.Produce, 1)
-                            elem_c = C_l1_fifos[row][col].acquire(
-                                ObjectFifoPort.Consume, 1
-                            )
-                            elem_out = C_l1l2_fifos[row][col].acquire(
-                                ObjectFifoPort.Produce, 1
-                            )
-                            zero1(elem_out)
+
+                            elem_c = C_l1_fifos[row][col].acquire(ObjectFifoPort.Consume, 1)
+                            elem_out = C_l1l2_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
                             # TODO: Split up the LayerNorm into a step to generate
                             # the sums of each row and then a step to normalize.
                             # This would remove the need to tile across the whole
                             # workload's rows.
                             norm(elem_c, elem_out)
-
                             C_l1_fifos[row][col].release(ObjectFifoPort.Consume, 1)
                             C_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
+
 
         # To/from AIE-array data movement
         @runtime_sequence(
@@ -352,17 +328,6 @@ def my_matmul(
                     sizes=sizes,
                     strides=strides,
                 )
-                # Use the calculated sizes/strides/offsets to record the data movement
-                # caused by the above call to npu_dma_memcpy_nd.
-                # This line does not change MLIR output at all.
-                C_taps.append(
-                    TensorAccessPattern(
-                        (M, N),
-                        offset=offset,
-                        sizes=sizes,
-                        strides=strides,
-                    )
-                )
 
                 # A input transfer:
                 npu_dma_memcpy_nd(
@@ -372,17 +337,6 @@ def my_matmul(
                     offsets=[0, 0, 0, offset],
                     sizes=sizes,
                     strides=strides,
-                )
-                # Use the calculated sizes/strides/offsets to record the data movement
-                # caused by the above call to npu_dma_memcpy_nd.
-                # This line does not change MLIR output at all.
-                A_taps.append(
-                    TensorAccessPattern(
-                        (M, N),
-                        offset=offset,
-                        sizes=sizes,
-                        strides=strides,
-                    )
                 )
 
                 # B input transfer:
@@ -394,27 +348,7 @@ def my_matmul(
                     sizes=sizes,
                     strides=strides,
                 )
-                # Use the calculated sizes/strides/offsets to record the data movement
-                # caused by the above call to npu_dma_memcpy_nd.
-                # This line does not change MLIR output at all.
-                B_taps.append(
-                    TensorAccessPattern(
-                        (M, N),
-                        offset=offset,
-                        sizes=sizes,
-                        strides=strides,
-                    )
-                )
                 dma_wait(*C_l2l3_fifos)
-
-    if generate_taps:
-        # If generate_taps is true, return a representation of tensor tiles
-        # representing all the npu_dma_memcpy_nd runtime sequence operations per input/ouput tensor.
-        return (
-            TensorAccessSequence.from_taps(A_taps),
-            TensorAccessSequence.from_taps(B_taps),
-            TensorAccessSequence.from_taps(C_taps),
-        )
 
 
 if __name__ == "__main__":
