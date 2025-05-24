@@ -109,13 +109,13 @@ def my_addandnorm(
 
     n_A_tiles_per_shim = n_aie_rows // n_aie_cols
 
-    if dev == "npu":
-        if n_aie_cols == 1:
+    if n_aie_cols == 1:
+        if dev == "npu":
             # Use this virtualization to generate the xclbin, but the 
             # design will only use one column of cores.
             dev_ty = AIEDevice.npu1_4col
-    else:
-        dev_ty = AIEDevice.npu2
+        else:
+            dev_ty = AIEDevice.npu2
 
 
     @device(dev_ty)
