@@ -13,7 +13,7 @@ from aie.extras.context import mlir_mod_ctx
 from aie.dialects.aie import *
 from aie.dialects.aiex import *
 from aie.helpers.dialects.ext.scf import _for as range_
-from aie.helpers.taplib import TensorTiler2D, TensorAccessSequence
+from aie.helpers.taplib import TensorAccessPattern, TensorTiler2D, TensorAccessSequence
 
 dtype_map = {
     "bf16": bfloat16,
@@ -233,11 +233,11 @@ def my_matmul(
         # Tile declarations as tile[row][col]
         if dev == "npu":
             tiles = [
-                [tile(col + 0, row) for col in range(0, n_aie_cols)] for row in range(0, 6) # 1st column only
+                [tile(col + 1, row) for col in range(0, n_aie_cols)] for row in range(0, 6) # 2nd column only
             ]
         else:
             tiles = [
-                [tile(col + 3, row) for col in range(0, n_aie_cols)] for row in range(0, 6) # 4th and 5th columns
+                [tile(col + 5, row) for col in range(0, n_aie_cols)] for row in range(0, 6) # 6th and 7th columns
             ]
         shim_tiles = tiles[0]
         mem_tiles = tiles[1]
@@ -381,7 +381,7 @@ def my_matmul(
         for row in range(n_aie_rows):
             for col in range(n_aie_cols):
 
-                @core(core_tiles[row][col], f"ffn1_mm_{m}x{k}x{n}.o")
+                @core(core_tiles[row][col], f"ffn-2_mm_{m}x{k}x{n}.o")
                 def core_body():
                     for _ in range_(0xFFFFFFFF):
                         loop = (
@@ -405,11 +405,15 @@ def my_matmul(
                                 matmul(elem_in_a, elem_in_b, elem_out)
                                 A_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
                                 B_l2l1_fifos[col].release(ObjectFifoPort.Consume, 1)
-                            relu(elem_out, elem_out)
 
                             C_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
 
         # To/from AIE-array data movement
+        # TODO: Need to update the runtime_sequence to use TensorTiler2D like in FFN-1 and 
+        # the matrix multiplication example. Found that using TensorTiler2D as done in those
+        # examples causes an error during compilation, as the shim_dma_single_bd_task for the B
+        # tiles has size 3072 for a part of the dma_bd, which is larger than the allowed
+        # amount of 1024. 
         @runtime_sequence(
             np.ndarray[(M * K,), np.dtype[dtype_in]],
             np.ndarray[(K * N,), np.dtype[dtype_in]],
@@ -417,77 +421,22 @@ def my_matmul(
         )
         def sequence(A, B, C):
             # We are limited in the number of BDs. After synchronizing, we can reuse BDs.
-            # We only transfer 4 rows of tiles at once before starting a new transfer block.
+            # We only transfer 6 rows of tiles at once before starting a new transfer block.
             tb_max_n_rows = (
                 4  # tb = transfer block; block of transfers before sync call
             )
-            tb_n_rows = tb_max_n_rows // 2
-
-            A_tiles = TensorTiler2D.group_tiler(
-                (M, K),  # Size of A matrix
-                (m * n_A_tiles_per_shim, k),  # Size of A (smallest) tile
-                (1, K // k),  # Size of "group" of tiles
-                pattern_repeat=N
-                // n
-                // n_aie_cols,  # Repeat data so can distribute across whole column
-            )
-            if b_col_maj:
-                B_tiles = TensorTiler2D.step_tiler(
-                    (K, N),  # Size of B matrix
-                    (k, n),  # Size of B tile
-                    tile_group_repeats=(
-                        K // k // n_aie_cols,
-                        N // n,
-                    ),  # Number of tiles per transfer in each dimension (whole col, partial row)
-                    tile_group_steps=(
-                        n_aie_cols,
-                        1,
-                    ),  # Contiguous tile group in col, but send every n_aie_cols-th tile in the row
-                )
-            else:
-                B_tiles = TensorTiler2D.step_tiler(
-                    (K, N),  # Size of B matrix
-                    (k, n),  # Size of B tile
-                    tile_group_repeats=(
-                        K // k,
-                        N // n // n_aie_cols,
-                    ),  # Number of tiles per transfer in each dimension (whole col, partial row)
-                    tile_group_steps=(
-                        1,
-                        n_aie_cols,
-                    ),  # Contiguous tile group in col, but send every n_aie_cols-th tile in the row
-                    tile_group_col_major=True,  # Send all tiles in column before moving on to next column
-                )
-            C_tiles = TensorTiler2D.step_tiler(
-                (M, N),  # Size of C matrix
-                (m * n_aie_rows, n),  # Size of C tile
-                tile_group_repeats=(
-                    tb_n_rows,
-                    N // n // n_aie_cols,
-                ),  # Number of tiles per transfer in each dimension (partial col, partial row)
-                tile_group_steps=(
-                    1,
-                    n_aie_cols,
-                ),  # Collect every n_aie_cols row at a time (mirroring how we sent in B data)
-            )
-            c_index = 0
-
-            in_tasks = []
-            out_tasks = []
             for tb in range(ceildiv(M // m // n_aie_rows, tb_max_n_rows)):
                 for pingpong in [0, 1]:
-                    if c_index >= len(C_tiles):
-                        # May not have pong iteration in some cases
-                        break
+                    M // m // n_aie_rows // tb_max_n_rows
                     row_base = tb * tb_max_n_rows + pingpong * tb_max_n_rows // 2
-                    current_tb_n_rows = min(
+                    bd_id_base = 8 * pingpong
+                    tb_n_rows = min(
                         [tb_max_n_rows // 2, M // m // n_aie_rows - row_base]
                     )
-
+                    if tb_n_rows <= 0:
+                        # for small input sizes, we may not even need a "pong" iteration
+                        break
                     for col in range(n_aie_cols):
-
-                        # This line does not change MLIR output at all - it's just for recording data movement
-                        C_taps.append(C_tiles[c_index])
 
                         # C Output Transfer:
                         # The smallest transfer unit is a (m*n_aie_rows)-x-(n)-sized sub-tile of the matrix.
@@ -508,17 +457,32 @@ def my_matmul(
                         #     |                |
                         #     |                |
                         #      ----------------
-                        c_task = shim_dma_single_bd_task(
-                            C_l2l3_fifos[col],
-                            C,
-                            tap=C_tiles[c_index],
-                            issue_token=True,
+                        C_row_offset = row_base * m * n_aie_rows * N
+                        C_col_offset = col * n
+                        C_offset = C_col_offset + C_row_offset
+                        C_sizes = [tb_n_rows, N // n // n_aie_cols, m * n_aie_rows, n]
+                        C_strides = [m * n_aie_rows * N, n * n_aie_cols, N, 1]
+                        npu_dma_memcpy_nd(
+                            metadata=C_l2l3_fifos[col],
+                            bd_id=bd_id_base,
+                            mem=C,
+                            offsets=[0, 0, 0, C_offset],
+                            sizes=C_sizes,
+                            strides=C_strides,
                         )
-                        dma_start_task(c_task)
-                        out_tasks.append(c_task)
-                        c_index += 1
+                        # Use the calculated sizes/strides/offsets to record the data movement
+                        # caused by the above call to npu_dma_memcpy_nd.
+                        # This line does not change MLIR output at all.
+                        C_taps.append(
+                            TensorAccessPattern(
+                                (M, N),
+                                offset=C_offset,
+                                sizes=C_sizes,
+                                strides=C_strides,
+                            )
+                        )
 
-                        for tile_row in range(current_tb_n_rows):
+                        for tile_row in range(tb_n_rows):
 
                             # A input transfer:
                             #
@@ -538,22 +502,39 @@ def my_matmul(
                             #     |                |
                             #     |                |
                             #      ----------------
-                            tile_offset = (
-                                (row_base + tile_row) * n_aie_cols + col
-                            ) % len(A_tiles)
-
-                            # always equal to n_aie_rows since we have n_aie_rows row tiles for matrix A
-                            if col < n_aie_rows:
-                                a_task = shim_dma_single_bd_task(
-                                    A_l3l2_fifos[col],
-                                    A,
-                                    tap=A_tiles[tile_offset],
-                                )
-                                dma_start_task(a_task)
-                                in_tasks.append(a_task)
+                            A_block_offset = (
+                                (row_base + tile_row) * n_aie_rows * m * K
+                            )  # base address for this transfer block for all BDs
+                            A_row_offset = (
+                                col * n_A_tiles_per_shim * m * K
+                            )  # base address for the shim in this column
+                            A_offset = A_block_offset + A_row_offset
+                            A_sizes = [
+                                N // n // n_aie_cols,
+                                K // k,
+                                m * n_A_tiles_per_shim,
+                                k,
+                            ]
+                            A_strides = [0, k, K, 1]
+                            npu_dma_memcpy_nd(
+                                metadata=A_l3l2_fifos[col],
+                                bd_id=bd_id_base + 2 * tile_row + 1,
+                                mem=A,
+                                offsets=[0, 0, 0, A_offset],
+                                sizes=A_sizes,
+                                strides=A_strides,
+                            )
                             # Use the calculated sizes/strides/offsets to record the data movement
                             # caused by the above call to npu_dma_memcpy_nd.
                             # This line does not change MLIR output at all.
+                            A_taps.append(
+                                TensorAccessPattern(
+                                    (M, K),
+                                    offset=A_offset,
+                                    sizes=A_sizes,
+                                    strides=A_strides,
+                                )
+                            )
 
                             # B input transfer:
                             # Transfer the first a (n)-wide block of columns of B,
@@ -573,29 +554,39 @@ def my_matmul(
                             #     |0011    0011    |
                             #     |0011    0011    |
                             #      ----------------
-                            b_task = shim_dma_single_bd_task(
-                                B_l3l2_fifos[col],
-                                B,
-                                tap=B_tiles[col],
-                            )
-                            dma_start_task(b_task)
-                            in_tasks.append(b_task)
+                            B_col_offset = col * n if not b_col_maj else col * n * K
+                            if not b_col_maj:
+                                B_sizes = [N // n // n_aie_cols, K // k, k, n]
+                                B_strides = [n * n_aie_cols, k * N, N, 1]
+                            else:
+                                B_sizes = [N // n // n_aie_cols, K // k, n, k]
+                                B_strides = [n * n_aie_cols * K, k, K, 1]
 
-                            # These lines do not change MLIR output at all - they are just for recording data movement
-                            A_taps.append(A_tiles[tile_offset])
-                            B_taps.append(B_tiles[col])
+                            npu_dma_memcpy_nd(
+                                metadata=B_l3l2_fifos[col],
+                                bd_id=bd_id_base + 2 * tile_row + 2,
+                                mem=B,
+                                offsets=[0, 0, 0, B_col_offset],
+                                sizes=B_sizes,
+                                strides=B_strides,
+                            )
+                            # Use the calculated sizes/strides/offsets to record the data movement
+                            # caused by the above call to npu_dma_memcpy_nd.
+                            # This line does not change MLIR output at all.
+                            B_taps.append(
+                                TensorAccessPattern(
+                                    (K, N),
+                                    offset=B_col_offset,
+                                    sizes=B_sizes,
+                                    strides=B_strides,
+                                )
+                            )
                     if tb > 0 or (tb == 0 and pingpong > 0):
-                        dma_await_task(*out_tasks)
-                        out_tasks = []
-                        dma_free_task(*in_tasks)
-                        in_tasks = []
-            if len(out_tasks) > 0:
-                dma_await_task(*out_tasks)
-            if len(in_tasks) > 0:
-                dma_free_task(*in_tasks)
+                        dma_wait(*C_l2l3_fifos)
+            dma_wait(*C_l2l3_fifos)
 
     if generate_taps:
-        # If generate taps is true, return a representation of tensor access patterns
+        # If generate_taps is true, return a representation of tensor tiles
         # representing all the npu_dma_memcpy_nd runtime sequence operations per input/ouput tensor.
         return (
             TensorAccessSequence.from_taps(A_taps),
