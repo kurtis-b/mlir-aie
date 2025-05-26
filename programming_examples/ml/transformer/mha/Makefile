@@ -49,7 +49,7 @@ buffer_aloc_flag=bank-aware
 endif
 
 dtype_in?=i8
-dtype_out?=i16
+dtype_out?=i8
 trace_size?=0
 
 include ${srcdir}/../makefile-common
@@ -67,11 +67,11 @@ aie2_runtime_dir = ${AIEOPT_DIR}/aie_runtime_lib/AIE2
 ifeq (${devicename}, npu)
 build/mha_mm_b_row_maj_${m}x${k}x${n}.o: ${srcdir}/mm_aie2.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c $< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c $< -o ${@F}
 else ifeq (${devicename}, npu2)
 build/mha_mm_b_row_maj_${m}x${k}x${n}.o: ${srcdir}/mm_aie2p.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c $< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c $< -o ${@F}
 endif
 
 ifeq (${devicename}, npu)
