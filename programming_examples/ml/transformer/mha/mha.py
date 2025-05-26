@@ -228,9 +228,7 @@ def my_mha(
         v_l1l1_fifos = object_fifo(f"v_L1L1", core_tiles[3][0], core_tiles[3][1], fifo_depth, v_l1_ty)
         o1_l1l1_fifos = object_fifo(f"o1_L1L1", core_tiles[1][1], core_tiles[2][1], fifo_depth, o1_l1_ty)
         o2_l1l1_fifos = object_fifo(f"o2_L1L1", core_tiles[2][1], core_tiles[3][1], fifo_depth, o2_l1_ty)
-        o3_l1l1_fifos = object_fifo(f"o3_L1L1", core_tiles[3][1], core_tiles[3][0], fifo_depth, o3_l1_ty)
-        o3_l1l2_fifos = object_fifo(f"o3_L1L2", core_tiles[3][0], mem_tiles[2], fifo_depth, o3_l1_ty)
-        o3_l2l1_fifos = object_fifo(f"o3_L2L1", mem_tiles[2], [core_tiles[j][2] for j in range(n_aie_rows)], fifo_depth, o3_l1_ty) # broadcast along one column
+        o3_l1l1_fifos = object_fifo(f"o3_L1L1", core_tiles[3][1], [core_tiles[j][2] for j in range(n_aie_rows)], fifo_depth, o3_l1_ty) # broadcast along one column
         Wo_l3l2_fifos = object_fifo(f"Wo_L3L2", shim_tiles[2], mem_tiles[2], fifo_depth, Wo_l2_ty)
         Wo_l2l1_fifos = [None] * n_aie_rows
         for row in range(n_aie_rows):
@@ -251,12 +249,12 @@ def my_mha(
                     for _ in range_(head_dim // 32):
                         elem_q = q_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
                         zero_q(elem_q)
-                        # for _ in range_(K // 192):
-                        #     elem_in_xq = Xq_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                        #     elem_in_wq = Wq_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                        #     matmul_q(elem_in_xq, elem_in_wq, elem_q)
-                        #     Wq_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
-                        #     Xq_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                        for _ in range_(K // 192):
+                            elem_in_xq = Xq_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_wq = Wq_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            matmul_q(elem_in_xq, elem_in_wq, elem_q)
+                            Wq_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            Xq_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
                         q_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
 
         @core(core_tiles[0][1], f"mha.o")
@@ -266,12 +264,12 @@ def my_mha(
                     for _ in range_(head_dim // 32):
                         elem_k = k_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
                         zero_k(elem_k)
-                        # for _ in range_(K // 48):
-                        #     elem_in_xk = Xk_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                        #     elem_in_wk = Wk_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                        #     matmul_k(elem_in_xk, elem_in_wk, elem_k)
-                        #     Wk_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
-                        #     Xk_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
+                        for _ in range_(K // 48):
+                            elem_in_xk = Xk_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_wk = Wk_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            matmul_k(elem_in_xk, elem_in_wk, elem_k)
+                            Wk_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            Xk_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
                         k_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
 
         @core(core_tiles[1][1], f"mha.o")
@@ -279,12 +277,12 @@ def my_mha(
             for _ in range_(0xFFFFFFFF):
                 elem_o1 = o1_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
                 zero_o1(elem_o1)
-                # for _ in range_(head_dim // 32):
-                #     elem_in_q = q_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                #     elem_in_k = k_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                #     matmul_o1(elem_in_q, elem_in_k, elem_o1)
-                #     q_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
-                #     k_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
+                for _ in range_(head_dim // 32):
+                    elem_in_q = q_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                    elem_in_k = k_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                    matmul_o1(elem_in_q, elem_in_k, elem_o1)
+                    q_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
+                    k_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
                 o1_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
 
         @core(core_tiles[2][1], f"mha.o")
@@ -303,12 +301,12 @@ def my_mha(
                     for _ in range_(head_dim // 32):
                         elem_v = v_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
                         zero_v(elem_v)
-                        # for _ in range_(K // 48):
-                        #     elem_in_xv = Xv_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                        #     elem_in_wv = Wv_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                        #     matmul_v(elem_in_xv, elem_in_wv, elem_v)
-                        #     Wv_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
-                        #     Xv_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
+                        for _ in range_(K // 48):
+                            elem_in_xv = Xv_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_wv = Wv_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            matmul_v(elem_in_xv, elem_in_wv, elem_v)
+                            Wv_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            Xv_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
                         v_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
 
         @core(core_tiles[3][1], f"mha.o")
@@ -331,12 +329,12 @@ def my_mha(
                 for _ in range_(0xFFFFFFFF):
                     elem_o4 = o4_l1l2_fifos[row].acquire(ObjectFifoPort.Produce, 1)
                     zero_o4(elem_o4)
-                    # for _ in range_(K // 32):
-                    #     elem_in_o3 = o3_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                    #     elem_in_wo = Wo_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
-                    #     matmul_o4(elem_in_o3, elem_in_wo, elem_o4)
-                    #     Wo_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
-                    #     o3_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                    for _ in range_(K // 32):
+                        elem_in_o3 = o3_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                        elem_in_wo = Wo_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
+                        matmul_o4(elem_in_o3, elem_in_wo, elem_o4)
+                        Wo_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
+                        o3_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
                     o4_l1l2_fifos[row].release(ObjectFifoPort.Produce, 1)
 
 
@@ -411,8 +409,8 @@ def my_mha(
                     bd_id=6,
                     mem=C,
                     offsets=[0, 0, 0, 0],
-                    sizes=[1, N // 768, 32, 768],
-                    strides=[0, 768, N, 1],
+                    sizes=[1, 1, 32, N],
+                    strides=[0, 0, N, 1],
                 )
                 dma_wait(o4_l2l3_fifos)
 
