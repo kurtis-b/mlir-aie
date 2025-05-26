@@ -4,56 +4,39 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
-# Copyright (C) 2024, Advanced Micro Devices, Inc.
+# Copyright (C) 2025, Advanced Micro Devices, Inc.
 # 
 ##===----------------------------------------------------------------------===##
-
-# This file is to be included from one of the subdirectories, e.g. 
-# /matrix_vector/, after defining at least the targetname and kernels variable.
-#
-# The build steps for these matrix and matrix-vector multiplication designs all
-# look the same. We need to build:
-#  - A common host test code, 
-#  - a kernel implemented in C using AIE intrinsics,
-#  - the actual design implemented in MLIR.
-# There are also targets for signing the resulting xclbin, extracting traces 
-# and cleaning everything.
-#
-# Since the targets are all the same for all designs, they are defined here.
-# Subdirectories need only include this makefile-common after defining the 
-# following variables:
-# - subdir	    -- subdirectory you are including this from
-# - targetname  -- resulting test host code will be named targetname.exe
-# - kernels	    -- which kernels in kernels folder to compile and link in
-#					  (without file extension)
-# - M, K, N	    -- final dimensions of matrices, set in each makefile separately 
-#				      may be used by design; N=1 for matrix-vector
-
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
-current_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
-include ${current_dir}../../../../makefile-common
+subdir=mha
+targetname=mha
 
-# M, N, H: final GEMM dimensions
-M?=128
-K?=384
-N?=192
+
+# M, K, N, H: final GEMM dimensions
+# NOTE: The maximum sequence length is 256. If the sequence length is larger than 256,
+# the sequence should be split into multiple segments of size 256.
+M?=256
+K?=768
+N?=768
 H?=12
 
-# m, k, n: single AIE core GEMM dimensions. Seems like m,k,n=16 leads to 
-# overflow of program memory, so using m,k,n=32
-# NOTE: Make sure that M / 4 >= m
-# NOTE: Make sure that K/H >= k
+# m, k, n: single AIE core GEMM dimensions
 m?=32
 k?=32
 n?=32
 
-n_aie_cols?=1
+ifeq ($(devicename),npu2)
+n_aie_cols?=3
+else 
+n_aie_cols?=3
+endif
 b_col_maj?=0
 
-kernels=mha_mm_${m}x${k}x${n}
-aieargs+=-M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
+operations=mm_32x48x256 mm_32x192x32 mm_32x32x256 mm_256x48x16 mm_32x256x16 mm_32x16x192 softmax_32x256
+kernels=mha
+aieargs=--dev ${devicename} -M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
 runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1
-target_suffix=mha
+target_suffix=mha_${m}x${k}x${n}
 
 # set this flag to 1 for linear buffer allocation
 # else, 0 for bank-aware
@@ -65,141 +48,92 @@ else
 buffer_aloc_flag=bank-aware
 endif
 
-dtype_in?=i16
+dtype_in?=i8
 dtype_out?=i16
-trace_size?=4096
+trace_size?=0
+
+include ${srcdir}/../makefile-common
+
+ifeq ($(devicename),npu2)
+kernels_dir=${srcdir}/../../../../aie_kernels/aie2p
+else 
+kernels_dir=${srcdir}/../../../../aie_kernels/aie2
+endif
 
 
-ifeq ($(dtype_in),bf16)
-	dtype_in_cpp=std::bfloat16_t
-endif
-ifeq ($(dtype_out),bf16)
-	dtype_out_cpp=std::bfloat16_t
-	dtype_acc_cpp=float
-endif
-ifeq ($(dtype_in),i16)
-	dtype_in_cpp=int16_t
-endif
-ifeq ($(dtype_out),i16)
-	dtype_out_cpp=int16_t
-	dtype_acc_cpp=int16_t
-endif
-ifeq ($(dtype_out),i32)
-	dtype_out_cpp=int32_t
-	dtype_acc_cpp=int32_t
-endif
-ifeq ($(dtype_out),f32)
-	dtype_out_cpp=float
-	dtype_acc_cpp=float
-endif
-ifeq ($(dtype_in),i8)
-	dtype_in_cpp=int8_t
-endif
-ifeq ($(dtype_out),i8)
-	dtype_out_cpp=int8_t
-	dtype_acc_cpp=int8_t
-endif
 
-targetname=mha
-mlir_target?=build/aie_${target_suffix}.mlir
-trace_mlir_target?=build/aie_trace_${target_suffix}.mlir
-xclbin_target?=build/final_${target_suffix}.xclbin
-trace_xclbin_target?=build/trace_${target_suffix}.xclbin
-insts_target?=build/insts_${target_suffix}.txt
-aie_py_src?=${targetname}.py
-
-CHESS?=false
-
-# default sequential buffer allocation, if not already defined
-buffer_aloc_flag?=basic-sequential
-
-.PHONY: all
-all: ${xclbin_target} ${targetname}.exe
-
-build/mha_mm_b_row_maj_${m}x${k}x${n}.o: ${srcdir}/mm.cc
+# Add "nm ${@D}/${@F}" at the end of the command to see the symbols in the object file 
+aie2_runtime_dir = ${AIEOPT_DIR}/aie_runtime_lib/AIE2
+ifeq (${devicename}, npu)
+build/mha_mm_b_row_maj_${m}x${k}x${n}.o: ${srcdir}/mm_aie2.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o ${@F}
-
-build/mha_mm_b_col_maj_${m}x${k}x${n}.o: ${srcdir}/mm_b_col_maj.cc
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c $< -o ${@F}
+else ifeq (${devicename}, npu2)
+build/mha_mm_b_row_maj_${m}x${k}x${n}.o: ${srcdir}/mm_aie2p.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c $< -o ${@F}
+endif
 
+ifeq (${devicename}, npu)
+build/mha_mm_b_col_maj_${m}x${k}x${n}.o: ${srcdir}/mm_b_col_maj_aie2.cc
+	mkdir -p ${@D}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c $< -o ${@F}
+else ifeq (${devicename}, npu2)
+build/mha_mm_b_col_maj_${m}x${k}x${n}.o: ${srcdir}/mm_b_col_maj_aie2p.cc
+	mkdir -p ${@D}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c $< -o ${@F}
+endif
+
+ifeq ($(devicename),npu)
+build/lut_based_ops.o: ${aie2_runtime_dir}/lut_based_ops.cpp
+	mkdir -p ${@D}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -c $< -o ${@F}
+endif
+
+build/softmax_${m}x${n}.o: ${kernels_dir}/softmax.cc
+	mkdir -p ${@D}
+ifeq (${devicename}, npu)
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -I${aie2_runtime_dir} -c $< -o ${@F}
+else ifeq (${devicename}, npu2)
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -I${aie2_runtime_dir} -c $< -o ${@F}
+endif
+
+ifeq (${devicename}, npu)
 ifneq (${b_col_maj}, 1)
-build/mha_mm_${m}x${k}x${n}.o: build/mha_mm_b_row_maj_${m}x${k}x${n}.o 
+build/mha.o: build/mha_mm_b_row_maj_${m}x${k}x${n}.o build/softmax_${m}x${n}.o build/lut_based_ops.o
 	mkdir -p ${@D}
 	ar rvs $@ $^
 else
-build/mha_mm_${m}x${k}x${n}.o: build/mha_mm_b_col_maj_${m}x${k}x${n}.o
+build/mha.o: build/mha_mm_b_col_maj_${m}x${k}x${n}.o build/softmax_${m}x${n}.o build/lut_based_ops.o
 	mkdir -p ${@D}
 	ar rvs $@ $^
 endif
-
-build/aie_opt.mlir: ${mlir_target}
+else ifeq (${devicename}, npu2)
+ifneq (${b_col_maj}, 1)
+build/mha.o: build/mha_mm_b_row_maj_${m}x${k}x${n}.o build/softmax_${m}x${n}.o
 	mkdir -p ${@D}
-	cd ${@D} &&	aie-opt aie_${target_suffix}.mlir -aie-objectFifo-stateful-transform -aie-register-objectFifos 
+	ar rvs $@ $^
+else
+build/mha.o: build/mha_mm_b_col_maj_${m}x${k}x${n}.o build/softmax_${m}x${n}.o
+	mkdir -p ${@D}
+	ar rvs $@ $^
+endif
+endif
 
 build/%.o: %.cc
 	mkdir -p ${@D}
+ifeq (${devicename}, npu)
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -c $< -o ${@F}
-
-${mlir_target}: ${srcdir}/${aie_py_src}
-	mkdir -p ${@D}
-	python3 $< ${aieargs} --trace_size 0 > $@
-
-${trace_mlir_target}: ${srcdir}/${aie_py_src}
-	mkdir -p ${@D}
-	python3 $< ${aieargs} --trace_size ${trace_size} > $@
-
-${xclbin_target}: ${mlir_target} ${kernels:%=build/%.o}
-	mkdir -p ${@D}
-	cd ${@D} && aiecc.py --alloc-scheme=${buffer_aloc_flag} --aie-generate-cdo --no-compile-host --xclbin-name=${@F} \
-				$(if $(shell [ $(CHESS) != true ] && echo true), \
-					--no-xchesscc --no-xbridge --peano ${PEANO_INSTALL_DIR}, \
-				) \
-				--aie-generate-npu --npu-insts-name=${insts_target:build/%=%} $(<:%=../%)
-
-${trace_xclbin_target}: ${trace_mlir_target} ${kernels:%=build/%.o}
-	mkdir -p ${@D}
-	cd ${@D} && aiecc.py --alloc-scheme=${buffer_aloc_flag} --aie-generate-cdo --no-compile-host --xclbin-name=${@F} \
-				$(if $(shell [ $(CHESS) != true ] && echo true), \
-					--no-xchesscc --no-xbridge --peano ${PEANO_INSTALL_DIR}, \
-				) \
-				--aie-generate-npu --npu-insts-name=${insts_target:build/%=%} $(<:%=../%)
-
-${targetname}.exe: ${srcdir}/test.cpp ${srcdir}/common.h
-	rm -rf _build
-	mkdir -p _build
-	cd _build && ${powershell} cmake -E env CXXFLAGS="-std=c++23 -ggdb -DDTYPE_IN=${dtype_in_cpp} -DDTYPE_OUT=${dtype_out_cpp} -DDTYPE_ACC=${dtype_acc_cpp}" \
-		cmake ${srcdir} -D CMAKE_C_COMPILER=gcc-13 -D CMAKE_CXX_COMPILER=g++-13 -DTARGET_NAME=${targetname}
-	cd _build && ${powershell} cmake --build . --config Release
-ifeq "${powershell}" "powershell.exe"
-	cp _build/${targetname}.exe $@
-else
-	cp _build/${targetname} $@ 
+else ifeq (${devicename}, npu2)
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -c $< -o ${@F}
 endif
-
-xclbin_sign=/opt/xilinx/xrt/amdxdna/setup_xclbin_firmware.sh 
-.PHONY: sign
-sign: ${xclbin_target}
-	${xclbin_sign} -dev Phoenix -xclbin $<
 
 .PHONY: run
 run: ${targetname}.exe ${xclbin_target}
 	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
-	${powershell} ./$< -x ${xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N ${runargs}
+	${powershell} ./$< -x ${xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N -H $H ${runargs}
 
 trace: ${targetname}.exe ${trace_xclbin_target} ${insts_target}
 	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
-	${powershell} ./$< -x ${trace_xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N ${runargs} -t ${trace_size}
-
-.PHONY: parse_trace
-parse_trace:
-	../../../../utils/parse_trace.py --filename trace.txt --mlir ${trace_mlir_target} --colshift 1 > traces/trace_mm_${target_suffix}.json
-
-.PHONY: clean
-clean: clean_trace
-	rm -rf build _build ${targetname}.exe
-
-.PHONY: clean_trace
-clean_trace:
-	rm -rf tmpTrace parse*.json traces/trace_mm_${target_suffix}.json trace.txt
+	${powershell} ./$< -x ${trace_xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N -H $H ${runargs} -t ${trace_size}
+	${srcdir}/../../../utils/parse_trace.py --filename trace.txt --mlir ${trace_mlir_target} --colshift ${col_shift} > trace_${target_suffix}.json
