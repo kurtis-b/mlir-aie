@@ -16,95 +16,71 @@
 
 #include <algorithm>
 #include <bits/stdc++.h>
-#include <boost/program_options.hpp>
 #include <cmath>
 #include <fstream>
 #include <optional>
 #include <ostream>
 #include <stdfloat>
 
-namespace matmul_common {
+#include "test_utils.h"
 
-namespace po = boost::program_options;
+namespace matmul_common {
 
 // --------------------------------------------------------------------------
 // Command Line Argument Handling
 // --------------------------------------------------------------------------
 
-void check_arg_file_exists(po::variables_map &vm_in, std::string name) {
-  if (!vm_in.count(name)) {
-    throw std::runtime_error("Error: no " + name + " file was provided\n");
-  } else {
-    std::ifstream test(vm_in[name].as<std::string>());
-    if (!test) {
-      throw std::runtime_error("The " + name + " file " +
-                               vm_in[name].as<std::string>() +
-                               " does not exist.\n");
-    }
-  }
+void add_default_options(cxxopts::Options &options) {
+  options.add_options()("help,h", "produce help message")(
+      "xclbin,x", "the input xclbin path", cxxopts::value<std::string>())(
+      "kernel,k", "the kernel name in the XCLBIN (for instance PP_PRE_FD)",
+      cxxopts::value<std::string>())("verbosity,v",
+                                     "the verbosity of the output",
+                                     cxxopts::value<int>()->default_value("0"))(
+      "instr,i",
+      "path of file containing userspace instructions sent to the NPU",
+      cxxopts::value<std::string>())(
+      "verify", "whether to verify the AIE computed output",
+      cxxopts::value<bool>()->default_value("true"))(
+      "rows,M", "Matrix size M", cxxopts::value<int>()->default_value("512"))(
+      "inner,K", "Matrix size K", cxxopts::value<int>()->default_value("512"))(
+      "columns,N", "Matrix size N",
+      cxxopts::value<int>()->default_value("512"))(
+      "heads,H", "Number of heads", cxxopts::value<int>()->default_value("12"))(
+      "iters", "number of iterations",
+      cxxopts::value<int>()->default_value("1"))(
+      "warmup", "number of warmup iterations",
+      cxxopts::value<int>()->default_value("0"))(
+      "trace_sz,t", "trace size", cxxopts::value<int>()->default_value("0"))(
+      "trace_file", "where to store trace output",
+      cxxopts::value<std::string>()->default_value("trace.txt"))(
+      "b_col_maj", "Is B matrix in colum-major format?",
+      cxxopts::value<int>()->default_value("0"));
 }
 
-void add_default_options(po::options_description &desc) {
-  desc.add_options()("help,h", "produce help message")(
-      "xclbin,x", po::value<std::string>()->required(),
-      "the input xclbin path")(
-      "kernel,k", po::value<std::string>()->required(),
-      "the kernel name in the XCLBIN (for instance PP_PRE_FD)")(
-      "verbosity,v", po::value<int>()->default_value(0),
-      "the verbosity of the output")(
-      "instr,i", po::value<std::string>()->required(),
-      "path of file containing userspace instructions sent to the NPU")(
-      "verify", po::value<bool>()->default_value(true),
-      "whether to verify the AIE computed output")(
-      "M,M", po::value<int>()->default_value(512), "Matrix size M")(
-      "K,K", po::value<int>()->default_value(512), "Matrix size K")(
-      "N,N", po::value<int>()->default_value(512),
-      "Matrix size N")("iters", po::value<int>()->default_value(1))(
-      "warmup", po::value<int>()->default_value(0))(
-      "trace_sz,t", po::value<int>()->default_value(0))(
-      "trace_file", po::value<std::string>()->default_value("trace.txt"),
-      "where to store trace output")("b_col_maj",
-                                     po::value<int>()->default_value(0),
-                                     "Is B matrix in colum-major format?");
-}
-
-void parse_options(int argc, const char *argv[], po::options_description &desc,
-                   po::variables_map &vm) {
+void parse_options(int argc, const char *argv[], cxxopts::Options &options,
+                   cxxopts::ParseResult &result) {
   try {
-    po::store(po::parse_command_line(argc, argv, desc), vm);
-    po::notify(vm);
+    result = options.parse(argc, argv);
 
-    if (vm.count("help")) {
-      std::cout << desc << "\n";
+    if (result.count("help")) {
+      std::cout << options.help() << "\n";
       std::exit(1);
     }
-  } catch (const std::exception &ex) {
-    std::cerr << ex.what() << "\n\n";
-    std::cerr << "Usage:\n" << desc << "\n";
+
+    // Check required options
+    if (!result.count("xclbin") || !result.count("kernel") ||
+        !result.count("instr")) {
+      std::cerr << "Error: Required options missing\n\n";
+      std::cerr << "Usage:\n" << options.help() << "\n";
+      std::exit(1);
+    }
+
+  } catch (const cxxopts::exceptions::parsing &e) {
+    std::cerr << e.what() << "\n\n";
+    std::cerr << "Usage:\n" << options.help() << "\n";
     std::exit(1);
   }
-
-  check_arg_file_exists(vm, "xclbin");
-  check_arg_file_exists(vm, "instr");
-}
-
-// --------------------------------------------------------------------------
-// AIE Specifics
-// --------------------------------------------------------------------------
-
-std::vector<uint32_t> load_instr_sequence(std::string instr_path) {
-  std::ifstream instr_file(instr_path);
-  std::string line;
-  std::vector<uint32_t> instr_v;
-  while (std::getline(instr_file, line)) {
-    std::istringstream iss(line);
-    uint32_t a;
-    if (!(iss >> std::hex >> a)) {
-      throw std::runtime_error("Unable to parse instruction file\n");
-    }
-    instr_v.push_back(a);
-  }
-  return instr_v;
 }
 
 // --------------------------------------------------------------------------

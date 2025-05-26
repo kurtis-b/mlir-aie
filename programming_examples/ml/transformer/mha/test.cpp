@@ -8,8 +8,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "cxxopts.hpp"
 #include <bits/stdc++.h>
-#include <boost/program_options.hpp>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -24,7 +24,7 @@
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_kernel.h"
 
-#include "common.h"
+#include "utils.h"
 
 #ifndef DATATYPES_USING_DEFINED
 #define DATATYPES_USING_DEFINED
@@ -54,16 +54,13 @@ constexpr int verify_stochastic_n_samples = 1000;
 float abs_tol = matmul_common::get_abs_tol<C_DATATYPE>();
 float rel_tol = matmul_common::get_rel_tol<C_DATATYPE>();
 
-namespace po = boost::program_options;
-
 int main(int argc, const char *argv[]) {
-
   // Program arguments parsing
-  po::options_description desc("Allowed options");
-  po::variables_map vm;
-  matmul_common::add_default_options(desc);
+  cxxopts::Options options("Matrix Matrix Multiplication Test");
+  cxxopts::ParseResult vm;
+  matmul_common::add_default_options(options);
 
-  matmul_common::parse_options(argc, argv, desc, vm);
+  matmul_common::parse_options(argc, argv, options, vm);
   int verbosity = vm["verbosity"].as<int>();
   int do_verify = vm["verify"].as<bool>();
   int n_iterations = vm["iters"].as<int>();
@@ -84,8 +81,9 @@ int main(int argc, const char *argv[]) {
     std::cout << "Matrix size " << M << "x" << K << "x" << N << std::endl;
   }
 
-  int A_VOLUME = M * K;
-  int B_VOLUME = 4 * N * K; // 4 weight matrices in MHA
+  // 4 weight matrices in MHA
+  int A_VOLUME = M * K + 2 * N * K;
+  int B_VOLUME = 2 * N * K; 
   int C_VOLUME = M * N;
 
   size_t A_SIZE = (A_VOLUME * sizeof(A_DATATYPE));
@@ -95,7 +93,7 @@ int main(int argc, const char *argv[]) {
   size_t OUT_SIZE = C_SIZE + trace_size;
 
   std::vector<uint32_t> instr_v =
-      matmul_common::load_instr_sequence(vm["instr"].as<std::string>());
+      test_utils::load_instr_binary(vm["instr"].as<std::string>());
 
   if (verbosity >= 1)
     std::cout << "Sequence instr count: " << instr_v.size() << "\n";
@@ -149,7 +147,14 @@ int main(int argc, const char *argv[]) {
   auto bo_b =
       xrt::bo(device, B_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(4));
   auto bo_out =
-      xrt::bo(device, OUT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(5));
+      xrt::bo(device, C_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(5));
+
+  auto bo_tmp1 = xrt::bo(device, 1, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(6));
+
+  // Workaround so we declare a really small trace buffer when one is not used
+  int tmp_trace_size = (trace_size > 0) ? trace_size : 1;
+  auto bo_trace = xrt::bo(device, tmp_trace_size * 4, XRT_BO_FLAGS_HOST_ONLY,
+                          kernel.group_id(7));
 
   if (verbosity >= 1) {
     std::cout << "Writing data into buffer objects.\n";
@@ -178,7 +183,11 @@ int main(int argc, const char *argv[]) {
   // Initialize outputs; bufOut is results matrix plus tracing info
   char *bufOut = bo_out.map<char *>();
   std::vector<C_DATATYPE> CVec(C_VOLUME);
-  memset(bufOut, 0, OUT_SIZE);
+  memset(bufOut, 0, C_SIZE);
+
+  char *bufTrace = bo_trace.map<char *>();
+  if (trace_size > 0)
+    memset(bufTrace, 0, trace_size);
 
   if (verbosity >= 2) {
     std::cout << "DTYPE_IN  = " XSTR(DTYPE_IN) "\n";
@@ -199,6 +208,8 @@ int main(int argc, const char *argv[]) {
   bo_a.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   bo_b.sync(XCL_BO_SYNC_BO_TO_DEVICE);
   bo_out.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  if (trace_size > 0)
+    bo_trace.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
   unsigned num_iter = n_iterations + n_warmup_iterations;
   float npu_time_total = 0;
@@ -216,7 +227,8 @@ int main(int argc, const char *argv[]) {
     }
     auto start = std::chrono::high_resolution_clock::now();
     unsigned int opcode = 3;
-    auto run = kernel(opcode, bo_instr, instr_v.size(), bo_a, bo_b, bo_out);
+    auto run = kernel(opcode, bo_instr, instr_v.size(), bo_a, bo_b, bo_out,
+                      bo_tmp1, bo_trace);
     ert_cmd_state r = run.wait();
     if (r != ERT_CMD_STATE_COMPLETED) {
       std::cout << "Kernel did not complete. Returned status: " << r << "\n";
@@ -224,6 +236,8 @@ int main(int argc, const char *argv[]) {
     }
     auto stop = std::chrono::high_resolution_clock::now();
     bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    if (trace_size > 0)
+      bo_trace.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
 
     if (iter < n_warmup_iterations) {
       /* Warmup iterations do not count towards average runtime. */
@@ -281,8 +295,7 @@ int main(int argc, const char *argv[]) {
 
   // Only write out trace of last iteration.
   if (trace_size > 0) {
-    memcpy(CVec.data(), bufOut, (CVec.size() * sizeof(C_DATATYPE)));
-    matmul_common::write_out_trace(((char *)bufOut) + C_SIZE, trace_size,
+    matmul_common::write_out_trace((char *)bufTrace, trace_size,
                                    vm["trace_file"].as<std::string>());
   }
 
