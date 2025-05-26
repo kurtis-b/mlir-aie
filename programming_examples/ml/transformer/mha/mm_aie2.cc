@@ -695,47 +695,14 @@ extern "C" {
 #define DIM_N 64
 #endif
 
-#ifdef i8_i8_ONLY
-#define combos(X) X(int8, i8, int8, i8, 4, 8, 8)
-#endif
-
-#ifdef i8_i16_ONLY
-#define combos(X)                                                              \
-  X(int8, i8, int16, i16, 4, 8, 8, 32, 192, 32)                                \
-  X(int8, i8, int16, i16, 4, 8, 8, 32, 48, 256)                                \
-  X(int8, i8, int16, i16, 4, 8, 8, 256, 48, 16)                                \
-  X(int8, i8, int16, i16, 4, 8, 8, 32, 32, 256)                                \
-  X(int8, i8, int16, i16, 4, 8, 8, 32, 256, 16)                                \
-  X(int8, i8, int16, i16, 4, 8, 8, 32, 16, 192)
-#endif
-
-#ifdef i8_i32_ONLY
-#define combos(X) X(int8, i8, int32, i32, 4, 8, 8)
-#endif
-
-#ifdef i16_i16_ONLY
-#define combos(X) X(int16, i16, int16, i16, 4, 4, 4)
-#endif
-
-#ifdef i16_i32_ONLY
-#define combos(X) X(int16, i16, int32, i32, 4, 4, 4)
-#endif
-
-#ifdef bf16_bf16_ONLY
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4)
-#endif
-
-#ifdef bf16_f32_ONLY
-#define combos(X) X(bfloat16, bf16, float, f32, 4, 8, 4)
-#endif
-
 #ifndef combos
 #define combos(X)                                                              \
-  X(int8, i8, int8, i8, 4, 8, 8)                                               \
-  X(int16, i16, int16, i16, 4, 4, 4)                                           \
-  X(int16, i16, int32, i32, 4, 4, 4)                                           \
-  X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4)                                   \
-  X(bfloat16, bf16, float, f32, 4, 8, 4)
+  X(int8, i8, int8, i8, 4, 8, 8, 32, 192, 32)                                  \
+  X(int8, i8, int8, i8, 4, 8, 8, 32, 48, 256)                                  \
+  X(int8, i8, int8, i8, 4, 8, 8, 256, 48, 32)                                  \
+  X(int8, i8, int8, i8, 4, 8, 8, 32, 32, 256)                                  \
+  X(int8, i8, int8, i8, 4, 8, 8, 32, 256, 32)                                  \
+  X(int8, i8, int8, i8, 4, 8, 8, 32, 32, 192)
 #endif
 
 #define matmul_vectorized_c_func(ctype_in, mlir_type_in, ctype_out,            \
@@ -748,7 +715,7 @@ extern "C" {
 
 #define matmul_scalar_c_func(ctype_in, mlir_type_in, ctype_out, mlir_type_out, \
                              r, s, t, m, k, n)                                 \
-  void matmul_scalar_##mlir_type_in##_##mlir_type_out_##m##_##k##_##n(         \
+  void matmul_scalar_##mlir_type_in##_##mlir_type_out##_##m##_##k##_##n(       \
       ctype_in *a_in, ctype_in *b_in, ctype_out *c_out) {                      \
     matmul_scalar<ctype_in, ctype_out, DIM_M, DIM_K, DIM_N>(a_in, b_in,        \
                                                             c_out);            \
@@ -756,13 +723,13 @@ extern "C" {
 
 #define zero_vectorized_c_func(ctype_in, mlir_type_in, ctype_out,              \
                                mlir_type_out, r, s, t, m, k, n)                \
-  void zero_##mlir_type_out_##m##_##k##_##n(ctype_out *c_out) {                \
+  void zero_##mlir_type_out##_##m##_##k##_##n(ctype_out *c_out) {              \
     zero_vectorized<ctype_out, DIM_M, DIM_N>(c_out);                           \
   }
 
 #define zero_scalar_c_func(ctype_in, mlir_type_in, ctype_out, mlir_type_out,   \
                            r, s, t, m, k, n)                                   \
-  void zero_scalar_##mlir_type_out_##m##_##k##_##n(ctype_out *c_out) {         \
+  void zero_scalar_##mlir_type_out##_##m##_##k##_##n(ctype_out *c_out) {       \
     zero_scalar<ctype_out, DIM_M, DIM_N>(c_out);                               \
   }
 
