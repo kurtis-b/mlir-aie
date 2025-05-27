@@ -20,6 +20,7 @@
 
 #include <aie_api/aie.hpp>
 
+#include "passThrough.cc"
 #include "zero.cc"
 
 template <typename T_in, typename T_out, int rowA, int colA, int colB>
@@ -702,7 +703,9 @@ extern "C" {
   X(int8, i8, int8, i8, 4, 8, 8, 256, 48, 32)                                  \
   X(int8, i8, int8, i8, 4, 8, 8, 32, 32, 256)                                  \
   X(int8, i8, int8, i8, 4, 8, 8, 32, 256, 32)                                  \
-  X(int8, i8, int8, i8, 4, 8, 8, 32, 32, 192)
+  X(int8, i8, int8, i8, 4, 8, 8, 32, 32, 192)                                  \
+  X(int8, i8, int8, i8, 4, 8, 8, 48, 48, 32)                                   \
+  X(int8, i8, int8, i8, 4, 8, 8, 256, 32, 48)
 #endif
 
 #define matmul_vectorized_c_func(ctype_in, mlir_type_in, ctype_out,            \
@@ -732,6 +735,24 @@ extern "C" {
   void zero_scalar_##mlir_type_out##_##m##_##k##_##n(ctype_out *c_out) {       \
     zero_scalar<ctype_out, DIM_M, DIM_N>(c_out);                               \
   }
+
+// #endif
+void passThroughTile_i8_256_48(int8 *in, int8 *out, int32_t tileHeight,
+                               int32_t tileWidth) {
+  passThroughTile(in, out, tileHeight, tileWidth);
+}
+void passThroughTile_i8_48_32(int8 *in, int8 *out, int32_t tileHeight,
+                              int32_t tileWidth) {
+  passThroughTile(in, out, tileHeight, tileWidth);
+}
+void passThroughTile_i8_48_256(int8 *in, int8 *out, int32_t tileHeight,
+                               int32_t tileWidth) {
+  passThroughTile(in, out, tileHeight, tileWidth);
+}
+void passThroughTile_i8_32_48(int8 *in, int8 *out, int32_t tileHeight,
+                              int32_t tileWidth) {
+  passThroughTile(in, out, tileHeight, tileWidth);
+}
 
 combos(matmul_vectorized_c_func) combos(matmul_scalar_c_func)
     combos(zero_vectorized_c_func) combos(zero_scalar_c_func)
