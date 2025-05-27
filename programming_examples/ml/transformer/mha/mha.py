@@ -171,11 +171,6 @@ def my_mha(
         zero_o3 = external_func(f"zero_{dtype_out_str}" + f"_{32}_{256}_{32}", inputs=[o3_l1_ty])
         zero_o4 = external_func(f"zero_{dtype_out_str}" + f"_{32}_{32}_{192}", inputs=[o4_l1_ty])
 
-        # Below zero functions are used to test the effect of passthrough functions, which 
-        # seem to be slowing down the execution by a lot. 
-        zero_wv = external_func(f"zero_{dtype_in_str}" + f"_{48}_{48}_{32}", inputs=[Wv_l1_ty])
-        zero_xv = external_func(f"zero_{dtype_in_str}" + f"_{256}_{32}_{48}", inputs=[Xv_l1_ty])
-
         matmul_vectorized_func_name = (
             f"matmul_{dtype_in_str}_{dtype_out_str}"
             if not b_col_maj
@@ -207,7 +202,8 @@ def my_mha(
         Xq_l2l1_fifos = object_fifo(f"Xq_L2L1", mem_tiles[2], core_tiles[1][0], fifo_depth, Xq_l1_ty)
         object_fifo_link(Xq_l3l2_fifos, Xq_l2l1_fifos)
         Xkv_l3l2_fifos = object_fifo(f"Xkv_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, Xkv_l2_ty)
-        Xk_l2l1_fifos = object_fifo(f"Xk_L2L1", mem_tiles[0], core_tiles[0][0], fifo_depth, Xk_l1_ty, 
+        Xk_l2l1_fifos = object_fifo(f"Xk_L2L1", mem_tiles[0], core_tiles[0][0], fifo_depth, Xk_l1_ty)
+        Xk_l1l1_fifos = object_fifo(f"Xk_L1L1", core_tiles[0][0], core_tiles[0][1], fifo_depth, Xk_l1_ty, 
                         (
                             [
                                 (48 // 4, 4),
@@ -215,7 +211,6 @@ def my_mha(
                                 (4, 1),
                             ]
                         )) # transpose at 4-byte (4xi8) granularity
-        Xk_l1l1_fifos = object_fifo(f"Xk_L1L1", core_tiles[0][0], core_tiles[0][1], fifo_depth, Xk_l1_ty)
         Xv_l2l1_fifos = object_fifo(f"Xv_L2L1", mem_tiles[0], core_tiles[2][0], fifo_depth, Xv_l1_ty)
         Xv_l1l1_fifos = object_fifo(f"Xv_L1L1", core_tiles[2][0], core_tiles[3][0], fifo_depth, Xv_l1_ty)
         object_fifo_link(Xkv_l3l2_fifos, [Xk_l2l1_fifos, Xv_l2l1_fifos], [], [0, 0])
@@ -223,7 +218,8 @@ def my_mha(
         Wq_l2l1_fifos = object_fifo(f"Wq_L2L1", mem_tiles[1], core_tiles[1][0], fifo_depth, Wq_l1_ty)
         object_fifo_link(Wq_l3l2_fifos, Wq_l2l1_fifos)
         Wk_l3l2_fifos = object_fifo(f"Wk_L3L2", shim_tiles[1], mem_tiles[1], fifo_depth, Wk_l2_ty)
-        Wk_l2l1_fifos = object_fifo(f"Wk_L2L1", mem_tiles[1], core_tiles[0][0], fifo_depth, Wk_l1_ty,
+        Wk_l2l1_fifos = object_fifo(f"Wk_L2L1", mem_tiles[1], core_tiles[0][0], fifo_depth, Wk_l1_ty)
+        Wk_l1l1_fifos = object_fifo(f"Wk_L1L1", core_tiles[0][0], core_tiles[0][1], fifo_depth, Wk_l1_ty,
                         (
                             [
                                 (32 // 4, 4),
@@ -231,7 +227,6 @@ def my_mha(
                                 (4, 1),
                             ]
                         ), ) # transpose at 4-byte (4xi8) granularity
-        Wk_l1l1_fifos = object_fifo(f"Wk_L1L1", core_tiles[0][0], core_tiles[0][1], fifo_depth, Wk_l1_ty)
         object_fifo_link(Wk_l3l2_fifos, Wk_l2l1_fifos)
         Wv_l3l2_fifos = object_fifo(f"Wv_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, Wv_l2_ty)
         Wv_l2l1_fifos = object_fifo(f"Wv_L2L1", mem_tiles[0], core_tiles[2][0], fifo_depth, Wv_l1_ty)
@@ -257,25 +252,22 @@ def my_mha(
 
         # Set up compute tiles
         # TODO: The passthrough functions seem to be slowing down the execution by a lot, so need to find a way to
-        # do that better. As a test, the zero functions are used instead of passthrough, and the performance is much better.
+        # do that better.
         @core(core_tiles[0][0], f"mha.o")
         def core_body():
             for _ in range_(0xFFFFFFFF):
-                pass
                 for _ in range_(H):
                     for _ in range_(head_dim // 32):
                         for _ in range_(K // 48):
                             # elem_xk0 = Xk_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
                             elem_xk1 = Xk_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
-                            zero_xv(elem_xk1)
                             # passtile_xk(elem_xk0, elem_xk1, 256, 48)
                             # Xk_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
                             Xk_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
-                            # elem_wk0 = Wk_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_wk0 = Wk_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
                             elem_wk1 = Wk_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
-                            zero_wv(elem_wk1)
-                            # passtile_wk(elem_wk0, elem_wk1, 32, 48)
-                            # Wk_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            passtile_wk(elem_wk0, elem_wk1, 32, 48)
+                            Wk_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
                             Wk_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
         
         @core(core_tiles[1][0], f"mha.o")
@@ -336,17 +328,15 @@ def my_mha(
                 for _ in range_(H):
                     for _ in range_(head_dim // 32):
                         for _ in range_(K // 48):
-                            # elem_xv0 = Xv_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_xv0 = Xv_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
                             elem_xv1 = Xv_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
-                            zero_xv(elem_xv1)
-                            # passtile_xv(elem_xv0, elem_xv1, 256, 48)
-                            # Xv_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            passtile_xv(elem_xv0, elem_xv1, 256, 48)
+                            Xv_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
                             Xv_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
-                            # elem_wv0 = Wv_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_wv0 = Wv_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
                             elem_wv1 = Wv_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
-                            zero_wv(elem_wv1)
-                            # passtile_wv(elem_wv0, elem_wv1, 48, 32)
-                            # Wv_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            passtile_wv(elem_wv0, elem_wv1, 48, 32)
+                            Wv_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
                             Wv_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
 
         @core(core_tiles[3][0], f"mha.o")
@@ -400,9 +390,8 @@ def my_mha(
             np.ndarray[(M * N,), np.dtype[dtype_out]],
         )
         def sequence(A, B, C):
-                # TODO: The below only generates the output for 32 rows, so need to repeat
+                # One iteration generates the output for 32 rows, so need to repeat
                 # for the rest of the output's sequence
-                # A input transfer:
                 for row_offset in range(0, M, 32):
                     npu_dma_memcpy_nd(
                         metadata=Xq_l3l2_fifos,
