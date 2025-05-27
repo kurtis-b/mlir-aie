@@ -703,9 +703,7 @@ extern "C" {
   X(int8, i8, int8, i8, 4, 8, 8, 256, 48, 32)                                  \
   X(int8, i8, int8, i8, 4, 8, 8, 32, 32, 256)                                  \
   X(int8, i8, int8, i8, 4, 8, 8, 32, 256, 32)                                  \
-  X(int8, i8, int8, i8, 4, 8, 8, 32, 32, 192)                                  \
-  X(int8, i8, int8, i8, 4, 8, 8, 48, 48, 32)                                   \
-  X(int8, i8, int8, i8, 4, 8, 8, 256, 32, 48)
+  X(int8, i8, int8, i8, 4, 8, 8, 32, 32, 192)
 #endif
 
 #define matmul_vectorized_c_func(ctype_in, mlir_type_in, ctype_out,            \
