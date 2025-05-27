@@ -171,18 +171,27 @@ def my_mha(
         zero_o3 = external_func(f"zero_{dtype_out_str}" + f"_{32}_{256}_{32}", inputs=[o3_l1_ty])
         zero_o4 = external_func(f"zero_{dtype_out_str}" + f"_{32}_{32}_{192}", inputs=[o4_l1_ty])
 
+        # Below zero functions are used to test the effect of passthrough functions, which 
+        # seem to be slowing down the execution by a lot. 
+        zero_wv = external_func(f"zero_{dtype_in_str}" + f"_{48}_{48}_{32}", inputs=[Wv_l1_ty])
+        zero_xv = external_func(f"zero_{dtype_in_str}" + f"_{256}_{32}_{48}", inputs=[Xv_l1_ty])
+
         matmul_vectorized_func_name = (
             f"matmul_{dtype_in_str}_{dtype_out_str}"
             if not b_col_maj
             else f"matmul_{dtype_in_str}_{dtype_out_str}_b_col_maj"
         )
         matmul_q = external_func(matmul_vectorized_func_name + f"_{32}_{192}_{32}", inputs=[Xq_l1_ty, Wq_l1_ty, q_l1_ty],)
-        matmul_k = external_func(matmul_vectorized_func_name + f"_{32}_{48}_{256}", inputs=[Xk_l1_ty, Wk_l1_ty, k_l1_ty],)
+        matmul_k = external_func(matmul_vectorized_func_name + f"_{32}_{48}_{256}", inputs=[Wk_l1_ty, Xk_l1_ty, k_l1_ty],)
         matmul_v = external_func(matmul_vectorized_func_name + f"_{256}_{48}_{32}", inputs=[Xv_l1_ty, Wv_l1_ty, v_l1_ty],)
         matmul_o1 = external_func(matmul_vectorized_func_name + f"_{32}_{32}_{256}", inputs=[q_l1_ty, k_l1_ty, o1_l1_ty],)
         softmax_o2 = external_func(f"softmax_{dtype_in_str}", inputs=[o1_l1_ty, o2_l1_ty, np.int32],)
         matmul_o3 = external_func(matmul_vectorized_func_name + f"_{32}_{256}_{32}", inputs=[o2_l1_ty, v_l1_ty, o3_l1_ty],)
         matmul_o4 = external_func(matmul_vectorized_func_name + f"_{32}_{32}_{192}", inputs=[o3_l1_ty, Wo_l1_ty, o4_l1_ty],)
+        passtile_xk = external_func(f"passThroughTile_{dtype_in_str}_{48}_{256}", inputs=[Xk_l1_ty, Xk_l1_ty, np.int32, np.int32])
+        passtile_wk = external_func(f"passThroughTile_{dtype_in_str}_{32}_{48}", inputs=[Wk_l1_ty, Wk_l1_ty, np.int32, np.int32])
+        passtile_xv = external_func(f"passThroughTile_{dtype_in_str}_{256}_{48}", inputs=[Xv_l1_ty, Xv_l1_ty, np.int32, np.int32])
+        passtile_wv = external_func(f"passThroughTile_{dtype_in_str}_{48}_{32}", inputs=[Wv_l1_ty, Wv_l1_ty, np.int32, np.int32])
 
         if dev == "npu":
             tiles = [[tile(col + 0, row) for col in range(0, n_aie_cols)] for row in range(0, 6)] # 1st to 3rd columns
@@ -196,6 +205,7 @@ def my_mha(
         # TODO: Will likely need to adjust the memory access patterns based on the matrix mult API tiling
         Xq_l3l2_fifos = object_fifo(f"Xq_L3L2", shim_tiles[2], mem_tiles[2], fifo_depth, Xq_l2_ty)
         Xq_l2l1_fifos = object_fifo(f"Xq_L2L1", mem_tiles[2], core_tiles[1][0], fifo_depth, Xq_l1_ty)
+        object_fifo_link(Xq_l3l2_fifos, Xq_l2l1_fifos)
         Xkv_l3l2_fifos = object_fifo(f"Xkv_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, Xkv_l2_ty)
         Xk_l2l1_fifos = object_fifo(f"Xk_L2L1", mem_tiles[0], core_tiles[0][0], fifo_depth, Xk_l1_ty, 
                         (
@@ -208,8 +218,10 @@ def my_mha(
         Xk_l1l1_fifos = object_fifo(f"Xk_L1L1", core_tiles[0][0], core_tiles[0][1], fifo_depth, Xk_l1_ty)
         Xv_l2l1_fifos = object_fifo(f"Xv_L2L1", mem_tiles[0], core_tiles[2][0], fifo_depth, Xv_l1_ty)
         Xv_l1l1_fifos = object_fifo(f"Xv_L1L1", core_tiles[2][0], core_tiles[3][0], fifo_depth, Xv_l1_ty)
+        object_fifo_link(Xkv_l3l2_fifos, [Xk_l2l1_fifos, Xv_l2l1_fifos], [], [0, 0])
         Wq_l3l2_fifos = object_fifo(f"Wq_L3L2", shim_tiles[1], mem_tiles[1], fifo_depth, Wq_l2_ty)
         Wq_l2l1_fifos = object_fifo(f"Wq_L2L1", mem_tiles[1], core_tiles[1][0], fifo_depth, Wq_l1_ty)
+        object_fifo_link(Wq_l3l2_fifos, Wq_l2l1_fifos)
         Wk_l3l2_fifos = object_fifo(f"Wk_L3L2", shim_tiles[1], mem_tiles[1], fifo_depth, Wk_l2_ty)
         Wk_l2l1_fifos = object_fifo(f"Wk_L2L1", mem_tiles[1], core_tiles[0][0], fifo_depth, Wk_l1_ty,
                         (
@@ -220,9 +232,11 @@ def my_mha(
                             ]
                         ), ) # transpose at 4-byte (4xi8) granularity
         Wk_l1l1_fifos = object_fifo(f"Wk_L1L1", core_tiles[0][0], core_tiles[0][1], fifo_depth, Wk_l1_ty)
+        object_fifo_link(Wk_l3l2_fifos, Wk_l2l1_fifos)
         Wv_l3l2_fifos = object_fifo(f"Wv_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, Wv_l2_ty)
         Wv_l2l1_fifos = object_fifo(f"Wv_L2L1", mem_tiles[0], core_tiles[2][0], fifo_depth, Wv_l1_ty)
         Wv_l1l1_fifos = object_fifo(f"Wv_L1L1", core_tiles[2][0], core_tiles[3][0], fifo_depth, Wv_l1_ty)
+        object_fifo_link(Wv_l3l2_fifos, Wv_l2l1_fifos)
         q_l1l1_fifos = object_fifo(f"q_L1L1", core_tiles[1][0], core_tiles[1][1], fifo_depth, q_l1_ty)
         k_l1l1_fifos = object_fifo(f"k_L1L1", core_tiles[0][1], core_tiles[1][1], fifo_depth, k_l1_ty)
         v_l1l1_fifos = object_fifo(f"v_L1L1", core_tiles[3][0], core_tiles[3][1], fifo_depth, v_l1_ty)
@@ -242,6 +256,28 @@ def my_mha(
         
 
         # Set up compute tiles
+        # TODO: The passthrough functions seem to be slowing down the execution by a lot, so need to find a way to
+        # do that better. As a test, the zero functions are used instead of passthrough, and the performance is much better.
+        @core(core_tiles[0][0], f"mha.o")
+        def core_body():
+            for _ in range_(0xFFFFFFFF):
+                pass
+                for _ in range_(H):
+                    for _ in range_(head_dim // 32):
+                        for _ in range_(K // 48):
+                            # elem_xk0 = Xk_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_xk1 = Xk_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
+                            zero_xv(elem_xk1)
+                            # passtile_xk(elem_xk0, elem_xk1, 256, 48)
+                            # Xk_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            Xk_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
+                            # elem_wk0 = Wk_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_wk1 = Wk_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
+                            zero_wv(elem_wk1)
+                            # passtile_wk(elem_wk0, elem_wk1, 32, 48)
+                            # Wk_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            Wk_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
+        
         @core(core_tiles[1][0], f"mha.o")
         def core_body():
             for _ in range_(0xFFFFFFFF):
@@ -267,7 +303,7 @@ def my_mha(
                         for _ in range_(K // 48):
                             elem_in_xk = Xk_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
                             elem_in_wk = Wk_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                            matmul_k(elem_in_xk, elem_in_wk, elem_k)
+                            matmul_k(elem_in_wk, elem_in_xk, elem_k)
                             Wk_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
                             Xk_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
                         k_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
@@ -294,6 +330,25 @@ def my_mha(
                 o1_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
                 o2_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
 
+        @core(core_tiles[2][0], f"mha.o")
+        def core_body():
+            for _ in range_(0xFFFFFFFF):
+                for _ in range_(H):
+                    for _ in range_(head_dim // 32):
+                        for _ in range_(K // 48):
+                            # elem_xv0 = Xv_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_xv1 = Xv_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
+                            zero_xv(elem_xv1)
+                            # passtile_xv(elem_xv0, elem_xv1, 256, 48)
+                            # Xv_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            Xv_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
+                            # elem_wv0 = Wv_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_wv1 = Wv_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
+                            zero_wv(elem_wv1)
+                            # passtile_wv(elem_wv0, elem_wv1, 48, 32)
+                            # Wv_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            Wv_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
+
         @core(core_tiles[3][0], f"mha.o")
         def core_body():
             for _ in range_(0xFFFFFFFF):
@@ -312,16 +367,16 @@ def my_mha(
         @core(core_tiles[3][1], f"mha.o")
         def core_body():
             for _ in range_(0xFFFFFFFF):
-                # elem_in_o2 = o2_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                elem_in_o2 = o2_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
                 for _ in range_(H):
                     for _ in range_(head_dim // 32):
                         elem_o3 = o3_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
                         zero_o3(elem_o3)
-                        # elem_in_v = v_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                        # matmul_o3(elem_in_o2, elem_in_v, elem_o3)
-                        # v_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
+                        elem_in_v = v_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                        matmul_o3(elem_in_o2, elem_in_v, elem_o3)
+                        v_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
                         o3_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
-                # o2_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
+                o2_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
 
         for row in range(n_aie_rows):
             @core(core_tiles[row][2], f"mha.o")
@@ -348,71 +403,72 @@ def my_mha(
                 # TODO: The below only generates the output for 32 rows, so need to repeat
                 # for the rest of the output's sequence
                 # A input transfer:
-                npu_dma_memcpy_nd(
-                    metadata=Xq_l3l2_fifos,
-                    bd_id=0,
-                    mem=A,
-                    offsets=[0, 0, 0, 0],
-                    sizes=[N // 32, K // 192, 32, 192],
-                    strides=[0, 192, K, 1],
-                )
+                for row_offset in range(0, M, 32):
+                    npu_dma_memcpy_nd(
+                        metadata=Xq_l3l2_fifos,
+                        bd_id=0,
+                        mem=A,
+                        offsets=[0, 0, 0, row_offset],
+                        sizes=[N // 32, K // 192, 32, 192],
+                        strides=[0, 192, K, 1],
+                    )
 
-                npu_dma_memcpy_nd(
-                    metadata=Xkv_l3l2_fifos,
-                    bd_id=1,
-                    mem=A,
-                    offsets=[0, 0, 0, 0],
-                    sizes=[N // 32, K // 48, M, 48],
-                    strides=[0, 48, K, 1],
-                )
+                    npu_dma_memcpy_nd(
+                        metadata=Xkv_l3l2_fifos,
+                        bd_id=1,
+                        mem=A,
+                        offsets=[0, 0, 0, 0],
+                        sizes=[N // 32, K // 48, M, 48],
+                        strides=[0, 48, K, 1],
+                    )
 
-                npu_dma_memcpy_nd(
-                    metadata=Wq_l3l2_fifos,
-                    bd_id=2,
-                    mem=A,
-                    offsets=[0, 0, 0, M * K],
-                    sizes=[N // 32, K // 192, 192, 32],
-                    strides=[32, 192 * N, N, 1],
-                )
+                    npu_dma_memcpy_nd(
+                        metadata=Wq_l3l2_fifos,
+                        bd_id=2,
+                        mem=A,
+                        offsets=[0, 0, 0, M * K],
+                        sizes=[N // 32, K // 192, 192, 32],
+                        strides=[32, 192 * N, N, 1],
+                    )
 
-                npu_dma_memcpy_nd(
-                    metadata=Wk_l3l2_fifos,
-                    bd_id=3,
-                    mem=A,
-                    offsets=[0, 0, 0, M * K + K * N],
-                    sizes=[N // 32, K // 48, 48, 32],
-                    strides=[32, 48 * N, N, 1],
-                )
+                    npu_dma_memcpy_nd(
+                        metadata=Wk_l3l2_fifos,
+                        bd_id=3,
+                        mem=A,
+                        offsets=[0, 0, 0, M * K + K * N],
+                        sizes=[N // 32, K // 48, 48, 32],
+                        strides=[32, 48 * N, N, 1],
+                    )
 
-                # B input transfer:
-                npu_dma_memcpy_nd(
-                    metadata=Wv_l3l2_fifos,
-                    bd_id=4,
-                    mem=B,
-                    offsets=[0, 0, 0, 0],
-                    sizes=[N // 32, K // 48, 48, 32],
-                    strides=[32, 48 * N, N, 1],
-                )
+                    # B input transfer:
+                    npu_dma_memcpy_nd(
+                        metadata=Wv_l3l2_fifos,
+                        bd_id=4,
+                        mem=B,
+                        offsets=[0, 0, 0, 0],
+                        sizes=[N // 32, K // 48, 48, 32],
+                        strides=[32, 48 * N, N, 1],
+                    )
 
-                npu_dma_memcpy_nd(
-                    metadata=Wo_l3l2_fifos,
-                    bd_id=5,
-                    mem=B,
-                    offsets=[0, 0, 0, K * N],
-                    sizes=[1, K // 32, 32, N],
-                    strides=[0, 32 * N, N, 1],
-                )
+                    npu_dma_memcpy_nd(
+                        metadata=Wo_l3l2_fifos,
+                        bd_id=5,
+                        mem=B,
+                        offsets=[0, 0, 0, K * N],
+                        sizes=[1, K // 32, 32, N],
+                        strides=[0, 32 * N, N, 1],
+                    )
 
-                # Output transfer:
-                npu_dma_memcpy_nd(
-                    metadata=o4_l2l3_fifos,
-                    bd_id=6,
-                    mem=C,
-                    offsets=[0, 0, 0, 0],
-                    sizes=[1, 1, 32, N],
-                    strides=[0, 0, N, 1],
-                )
-                dma_wait(o4_l2l3_fifos)
+                    # Output transfer:
+                    npu_dma_memcpy_nd(
+                        metadata=o4_l2l3_fifos,
+                        bd_id=6,
+                        mem=C,
+                        offsets=[0, 0, 0, row_offset],
+                        sizes=[1, 1, 32, N],
+                        strides=[0, 0, N, 1],
+                    )
+                    dma_wait(o4_l2l3_fifos)
 
 
 if __name__ == "__main__":
