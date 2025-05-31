@@ -32,7 +32,7 @@ n_aie_cols?=3
 endif
 b_col_maj?=0
 
-operations=mm_32x24x256 mm_32x192x32 mm_32x32x256 mm_256x24x16 mm_32x256x16 mm_32x16x192 softmax_32x256
+operations=mm_32x192x64 mm_64x48x256 mm_256x48x64 mm_32x64x256 mm_32x256x64 mm_32x64x192 softmax_32x256
 kernels=mha
 aieargs=--dev ${devicename} -M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
 runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1
