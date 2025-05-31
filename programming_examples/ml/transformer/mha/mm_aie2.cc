@@ -699,8 +699,8 @@ extern "C" {
 #ifndef combos
 #define combos(X)                                                              \
   X(int8, i8, int8, i8, 4, 8, 8, 32, 192, 32)                                  \
-  X(int8, i8, int8, i8, 4, 8, 8, 32, 48, 256)                                  \
-  X(int8, i8, int8, i8, 4, 8, 8, 256, 48, 32)                                  \
+  X(int8, i8, int8, i8, 4, 8, 8, 32, 24, 256)                                  \
+  X(int8, i8, int8, i8, 4, 8, 8, 256, 24, 32)                                  \
   X(int8, i8, int8, i8, 4, 8, 8, 32, 32, 256)                                  \
   X(int8, i8, int8, i8, 4, 8, 8, 32, 256, 32)                                  \
   X(int8, i8, int8, i8, 4, 8, 8, 32, 32, 192)
@@ -735,19 +735,19 @@ extern "C" {
   }
 
 // #endif
-void passThroughTile_i8_256_48(int8 *in, int8 *out, int32_t tileHeight,
+void passThroughTile_i8_256_24(int8 *in, int8 *out, int32_t tileHeight,
                                int32_t tileWidth) {
   passThroughTile(in, out, tileHeight, tileWidth);
 }
-void passThroughTile_i8_48_32(int8 *in, int8 *out, int32_t tileHeight,
+void passThroughTile_i8_24_32(int8 *in, int8 *out, int32_t tileHeight,
                               int32_t tileWidth) {
   passThroughTile(in, out, tileHeight, tileWidth);
 }
-void passThroughTile_i8_48_256(int8 *in, int8 *out, int32_t tileHeight,
+void passThroughTile_i8_24_256(int8 *in, int8 *out, int32_t tileHeight,
                                int32_t tileWidth) {
   passThroughTile(in, out, tileHeight, tileWidth);
 }
-void passThroughTile_i8_32_48(int8 *in, int8 *out, int32_t tileHeight,
+void passThroughTile_i8_32_24(int8 *in, int8 *out, int32_t tileHeight,
                               int32_t tileWidth) {
   passThroughTile(in, out, tileHeight, tileWidth);
 }
