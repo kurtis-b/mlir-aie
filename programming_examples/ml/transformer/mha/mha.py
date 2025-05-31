@@ -34,9 +34,6 @@ def main():
     argparser.add_argument("-K", type=int, default=512)
     argparser.add_argument("-N", type=int, default=512)
     argparser.add_argument("-H", type=int, default=12)
-    argparser.add_argument("-m", type=int, default=64)
-    argparser.add_argument("-k", type=int, default=64)
-    argparser.add_argument("-n", type=int, default=32)
     argparser.add_argument("--n-aie-cols", type=int, choices=[1, 2, 3, 4, 8], default=4)
     argparser.add_argument("--b-col-maj", type=int, choices=[0, 1], default=0)
     argparser.add_argument(
@@ -63,9 +60,6 @@ def main():
             args.K,
             args.N,
             args.H,
-            args.m,
-            args.k,
-            args.n,
             args.n_aie_cols,
             args.dtype_in,
             args.dtype_out,
@@ -90,9 +84,6 @@ def my_mha(
     K,
     N,
     H,
-    m,
-    k,
-    n,
     n_aie_cols,
     dtype_in_str,
     dtype_out_str,
@@ -100,7 +91,7 @@ def my_mha(
     trace_size,
     generate_taps=False,
 ):
-    n_aie_rows = 4
+    o4_rows = 4
     head_dim = N // H
 
     dtype_in = dtype_map[dtype_in_str]
@@ -215,17 +206,17 @@ def my_mha(
         object_fifo_link(v_l1l1_fifos_0, v_l1l1_fifos_1)
         o1_l1l1_fifos = object_fifo(f"o1_L1L1", core_tiles[1][1], core_tiles[2][1], fifo_depth, o1_l1_ty)
         o2_l1l1_fifos = object_fifo(f"o2_L1L1", core_tiles[2][1], core_tiles[3][1], fifo_depth, o2_l1_ty)
-        o3_l1l1_fifos = object_fifo(f"o3_L1L1", core_tiles[3][1], [core_tiles[j][2] for j in range(n_aie_rows)], fifo_depth, o3_l1_ty) # broadcast along one column
+        o3_l1l1_fifos = object_fifo(f"o3_L1L1", core_tiles[3][1], [core_tiles[j][2] for j in range(o4_rows)], fifo_depth, o3_l1_ty) # broadcast along one column
         Wo_l3l2_fifos = object_fifo(f"Wo_L3L2", shim_tiles[2], mem_tiles[2], fifo_depth, Wo_l2_ty)
-        Wo_l2l1_fifos = [None] * n_aie_rows
-        for row in range(n_aie_rows):
+        Wo_l2l1_fifos = [None] * o4_rows
+        for row in range(o4_rows):
             Wo_l2l1_fifos[row] = object_fifo(f"Wo_L2L1_{row}", mem_tiles[2], core_tiles[row][2], fifo_depth, Wo_l1_ty)
-        object_fifo_link(Wo_l3l2_fifos, [Wo_l2l1_fifos[i] for i in range(n_aie_rows)], [], [64 * 192 * i for i in range(n_aie_rows)])
-        o4_l1l2_fifos = [None] * n_aie_rows
-        for row in range(n_aie_rows):
+        object_fifo_link(Wo_l3l2_fifos, [Wo_l2l1_fifos[i] for i in range(o4_rows)], [], [64 * 192 * i for i in range(o4_rows)])
+        o4_l1l2_fifos = [None] * o4_rows
+        for row in range(o4_rows):
             o4_l1l2_fifos[row] = object_fifo(f"o4_L1L2_{row}", core_tiles[row][2], mem_tiles[2], fifo_depth, o4_l1_ty)
         o4_l2l3_fifos = object_fifo(f"o4_L2L3", mem_tiles[2], shim_tiles[2], fifo_depth, o4_l2_ty)
-        object_fifo_link([o4_l1l2_fifos[i] for i in range(n_aie_rows)], o4_l2l3_fifos, [32 * 192 * i for i in range(n_aie_rows)], [])
+        object_fifo_link([o4_l1l2_fifos[i] for i in range(o4_rows)], o4_l2l3_fifos, [32 * 192 * i for i in range(o4_rows)], [])
         
 
         # Set up compute tiles        
@@ -312,7 +303,7 @@ def my_mha(
                         o3_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
                     o2_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
 
-        for row in range(n_aie_rows):
+        for row in range(o4_rows):
             @core(core_tiles[row][2], f"mha.o")
             def core_body():
                 for _ in range_(0xFFFFFFFF):

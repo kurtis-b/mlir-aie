@@ -20,7 +20,6 @@
 
 #include <aie_api/aie.hpp>
 
-#include "passThrough.cc"
 #include "zero.cc"
 
 template <typename T_in, typename T_out, int rowA, int colA, int colB>
@@ -684,18 +683,6 @@ extern "C" {
 // These dimensions must be divisible by the r, s, t dimensions used in
 // the kernels.
 
-#ifndef DIM_M
-#define DIM_M 64
-#endif
-
-#ifndef DIM_K
-#define DIM_K 64
-#endif
-
-#ifndef DIM_N
-#define DIM_N 64
-#endif
-
 #ifndef combos
 #define combos(X)                                                              \
   X(int8, i8, int8, i8, 4, 8, 8, 32, 192, 64)                                  \
@@ -710,47 +697,29 @@ extern "C" {
                                  mlir_type_out, r, s, t, m, k, n)              \
   void matmul_##mlir_type_in##_##mlir_type_out##_##m##_##k##_##n(              \
       ctype_in *a_in, ctype_in *b_in, ctype_out *c_out) {                      \
-    matmul_vectorized_##r##x##s##x##t##_##mlir_type_in##_##mlir_type_out<      \
-        DIM_M, DIM_K, DIM_N>(a_in, b_in, c_out);                               \
+    matmul_vectorized_##r##x##s##x##t##_##mlir_type_in##_##mlir_type_out<m, k, \
+                                                                         n>(   \
+        a_in, b_in, c_out);                                                    \
   }
 
 #define matmul_scalar_c_func(ctype_in, mlir_type_in, ctype_out, mlir_type_out, \
                              r, s, t, m, k, n)                                 \
   void matmul_scalar_##mlir_type_in##_##mlir_type_out##_##m##_##k##_##n(       \
       ctype_in *a_in, ctype_in *b_in, ctype_out *c_out) {                      \
-    matmul_scalar<ctype_in, ctype_out, DIM_M, DIM_K, DIM_N>(a_in, b_in,        \
-                                                            c_out);            \
+    matmul_scalar<ctype_in, ctype_out, m, k, n>(a_in, b_in, c_out);            \
   }
 
 #define zero_vectorized_c_func(ctype_in, mlir_type_in, ctype_out,              \
                                mlir_type_out, r, s, t, m, k, n)                \
   void zero_##mlir_type_out##_##m##_##k##_##n(ctype_out *c_out) {              \
-    zero_vectorized<ctype_out, DIM_M, DIM_N>(c_out);                           \
+    zero_vectorized<ctype_out, m, n>(c_out);                                   \
   }
 
 #define zero_scalar_c_func(ctype_in, mlir_type_in, ctype_out, mlir_type_out,   \
                            r, s, t, m, k, n)                                   \
   void zero_scalar_##mlir_type_out##_##m##_##k##_##n(ctype_out *c_out) {       \
-    zero_scalar<ctype_out, DIM_M, DIM_N>(c_out);                               \
+    zero_scalar<ctype_out, m, n>(c_out);                                       \
   }
-
-// #endif
-void passThroughTile_i8_256_48(int8 *in, int8 *out, int32_t tileHeight,
-                               int32_t tileWidth) {
-  passThroughTile(in, out, tileHeight, tileWidth);
-}
-void passThroughTile_i8_48_32(int8 *in, int8 *out, int32_t tileHeight,
-                              int32_t tileWidth) {
-  passThroughTile(in, out, tileHeight, tileWidth);
-}
-void passThroughTile_i8_48_256(int8 *in, int8 *out, int32_t tileHeight,
-                               int32_t tileWidth) {
-  passThroughTile(in, out, tileHeight, tileWidth);
-}
-void passThroughTile_i8_32_48(int8 *in, int8 *out, int32_t tileHeight,
-                              int32_t tileWidth) {
-  passThroughTile(in, out, tileHeight, tileWidth);
-}
 
 combos(matmul_vectorized_c_func) combos(matmul_scalar_c_func)
     combos(zero_vectorized_c_func) combos(zero_scalar_c_func)
