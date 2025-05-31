@@ -20,11 +20,6 @@ K?=768
 N?=768
 H?=12
 
-# m, k, n: single AIE core GEMM dimensions
-m?=32
-k?=32
-n?=32
-
 ifeq ($(devicename),npu2)
 n_aie_cols?=3
 else 
@@ -34,9 +29,9 @@ b_col_maj?=0
 
 operations=mm_32x192x64 mm_64x48x256 mm_256x48x64 mm_32x64x256 mm_32x256x64 mm_32x64x192 softmax_32x256
 kernels=mha
-aieargs=--dev ${devicename} -M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
+aieargs=--dev ${devicename} -M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
 runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1
-target_suffix=mha_${m}x${k}x${n}
+target_suffix=mha
 
 # set this flag to 1 for linear buffer allocation
 # else, 0 for bank-aware
@@ -65,23 +60,23 @@ endif
 # Add "nm ${@D}/${@F}" at the end of the command to see the symbols in the object file 
 aie2_runtime_dir = ${AIEOPT_DIR}/aie_runtime_lib/AIE2
 ifeq (${devicename}, npu)
-build/mha_mm_b_row_maj_${m}x${k}x${n}.o: ${srcdir}/mm_aie2.cc
+build/mha_mm_b_row_maj.o: ${srcdir}/mm_aie2.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c $< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -I${kernels_dir} -c $< -o ${@F}
 else ifeq (${devicename}, npu2)
-build/mha_mm_b_row_maj_${m}x${k}x${n}.o: ${srcdir}/mm_aie2p.cc
+build/mha_mm_b_row_maj.o: ${srcdir}/mm_aie2p.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c $< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -I${kernels_dir} -c $< -o ${@F}
 endif
 
 ifeq (${devicename}, npu)
-build/mha_mm_b_col_maj_${m}x${k}x${n}.o: ${srcdir}/mm_b_col_maj_aie2.cc
+build/mha_mm_b_col_maj.o: ${srcdir}/mm_b_col_maj_aie2.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c $< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -I${kernels_dir} -c $< -o ${@F}
 else ifeq (${devicename}, npu2)
-build/mha_mm_b_col_maj_${m}x${k}x${n}.o: ${srcdir}/mm_b_col_maj_aie2p.cc
+build/mha_mm_b_col_maj.o: ${srcdir}/mm_b_col_maj_aie2p.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c $< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -I${kernels_dir} -c $< -o ${@F}
 endif
 
 ifeq ($(devicename),npu)
@@ -90,7 +85,7 @@ build/lut_based_ops.o: ${aie2_runtime_dir}/lut_based_ops.cpp
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -c $< -o ${@F}
 endif
 
-build/softmax_${m}x${n}.o: ${kernels_dir}/softmax.cc
+build/softmax.o: ${kernels_dir}/softmax.cc
 	mkdir -p ${@D}
 ifeq (${devicename}, npu)
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -I${aie2_runtime_dir} -c $< -o ${@F}
@@ -100,21 +95,21 @@ endif
 
 ifeq (${devicename}, npu)
 ifneq (${b_col_maj}, 1)
-build/mha.o: build/mha_mm_b_row_maj_${m}x${k}x${n}.o build/softmax_${m}x${n}.o build/lut_based_ops.o
+build/mha.o: build/mha_mm_b_row_maj.o build/softmax.o build/lut_based_ops.o
 	mkdir -p ${@D}
 	ar rvs $@ $^
 else
-build/mha.o: build/mha_mm_b_col_maj_${m}x${k}x${n}.o build/softmax_${m}x${n}.o build/lut_based_ops.o
+build/mha.o: build/mha_mm_b_col_maj.o build/softmax.o build/lut_based_ops.o
 	mkdir -p ${@D}
 	ar rvs $@ $^
 endif
 else ifeq (${devicename}, npu2)
 ifneq (${b_col_maj}, 1)
-build/mha.o: build/mha_mm_b_row_maj_${m}x${k}x${n}.o build/softmax_${m}x${n}.o
+build/mha.o: build/mha_mm_b_row_maj.o build/softmax.o
 	mkdir -p ${@D}
 	ar rvs $@ $^
 else
-build/mha.o: build/mha_mm_b_col_maj_${m}x${k}x${n}.o build/softmax_${m}x${n}.o
+build/mha.o: build/mha_mm_b_col_maj.o build/softmax.o
 	mkdir -p ${@D}
 	ar rvs $@ $^
 endif
