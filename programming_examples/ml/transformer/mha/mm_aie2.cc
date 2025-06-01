@@ -683,14 +683,34 @@ extern "C" {
 // These dimensions must be divisible by the r, s, t dimensions used in
 // the kernels.
 
-#ifndef combos
-#define combos(X)                                                              \
-  X(int8, i8, int8, i8, 4, 8, 8, 32, 192, 64)                                  \
-  X(int8, i8, int8, i8, 4, 8, 8, 64, 48, 256)                                  \
-  X(int8, i8, int8, i8, 4, 8, 8, 256, 48, 64)                                  \
-  X(int8, i8, int8, i8, 4, 8, 8, 32, 64, 256)                                  \
-  X(int8, i8, int8, i8, 4, 8, 8, 32, 256, 64)                                  \
-  X(int8, i8, int8, i8, 4, 8, 8, 32, 64, 192)
+#ifndef DIM_M
+#define DIM_M 32
+#endif
+
+#ifndef DIM_K
+#define DIM_K 32
+#endif
+
+#ifndef DIM_N
+#define DIM_N 32
+#endif
+
+#ifdef bf16_bf16_ONLY
+#if defined(DIM_M) && defined(DIM_K) && defined(DIM_N)
+#if (DIM_M == 32) && (DIM_K == 192) && (DIM_N == 32)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 192, 32)
+#elif (DIM_M == 32) && (DIM_K == 24) && (DIM_N == 256)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 24, 256)
+#elif (DIM_M == 256) && (DIM_K == 24) && (DIM_N == 32)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 256, 24, 32)
+#elif (DIM_M == 32) && (DIM_K == 32) && (DIM_N == 256)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 32, 256)
+#elif (DIM_M == 32) && (DIM_K == 256) && (DIM_N == 32)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 256, 32)
+#elif (DIM_M == 32) && (DIM_K == 32) && (DIM_N == 192)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 32, 192)
+#endif
+#endif
 #endif
 
 #define matmul_vectorized_c_func(ctype_in, mlir_type_in, ctype_out,            \
@@ -722,6 +742,6 @@ extern "C" {
   }
 
 combos(matmul_vectorized_c_func) combos(matmul_scalar_c_func)
-    combos(zero_vectorized_c_func) combos(zero_scalar_c_func)
+// combos(zero_vectorized_c_func) combos(zero_scalar_c_func)
 
 } // extern "C"
