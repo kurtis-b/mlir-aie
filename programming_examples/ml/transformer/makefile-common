@@ -74,6 +74,7 @@ insts_target?=build/insts_${target_suffix}.txt
 aie_py_src?=${targetname}.py
 
 CHESS?=false
+SKIP_KERNELS?=false
 
 # default sequential buffer allocation, if not already defined
 buffer_aloc_flag?=basic-sequential
@@ -96,15 +97,23 @@ ${trace_mlir_target}: ${srcdir}/${aie_py_src}
 	mkdir -p ${@D}
 	python3 $< ${aieargs} --trace_size ${trace_size} > $@
 
-${xclbin_target}: ${mlir_target} ${kernels:%=build/%.o}
+${xclbin_target}: ${mlir_target} 
+ifeq ($(SKIP_KERNELS),false)
+	$(eval kernel_deps=${kernels:%=build/%.o})
+endif
+	$(if $(filter true,$(SKIP_KERNELS)), $(MAKE) build_kernels, $(MAKE) $(kernel_deps))
 	mkdir -p ${@D}
 	cd ${@D} && aiecc.py --alloc-scheme=${buffer_aloc_flag} --aie-generate-xclbin --no-compile-host --xclbin-name=${@F} \
 				$(if $(shell [ $(CHESS) != true ] && echo true), \
 					--no-xchesscc --no-xbridge --peano ${PEANO_INSTALL_DIR}, \
 				) \
-				--aie-generate-npu-insts --npu-insts-name=${insts_target:build/%=%} $(<:%=../%)
+				--aie-generate-npu-insts --npu-insts-name=${insts_target:build/%=%} $(<:%=../%) 
 
-${trace_xclbin_target}: ${trace_mlir_target} ${kernels:%=build/%.o}
+${trace_xclbin_target}: ${trace_mlir_target}
+ifeq ($(SKIP_KERNELS),false)
+	$(eval kernel_deps=${kernels:%=build/%.o})
+endif
+	$(if $(filter true,$(SKIP_KERNELS)), $(MAKE) build_kernels, $(MAKE) $(kernel_deps))
 	mkdir -p ${@D}
 	cd ${@D} && aiecc.py --alloc-scheme=${buffer_aloc_flag} --aie-generate-xclbin --no-compile-host --xclbin-name=${@F} \
 				$(if $(shell [ $(CHESS) != true ] && echo true), \
