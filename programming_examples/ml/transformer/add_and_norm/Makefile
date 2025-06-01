@@ -27,7 +27,7 @@ b_col_maj?=0
 
 kernels=addandnorm_${m}x${n}
 aieargs=--dev ${devicename} -M $M -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 100
+runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 50
 target_suffix=addandnorm_${m}x${n}
 
 # set this flag to 1 for linear buffer allocation

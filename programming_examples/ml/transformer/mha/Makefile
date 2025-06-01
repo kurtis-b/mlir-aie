@@ -27,10 +27,8 @@ n_aie_cols?=3
 endif
 b_col_maj?=0
 
-operations=mm_32x192x64 mm_64x48x256 mm_256x48x64 mm_32x64x256 mm_32x256x64 mm_32x64x192 softmax_32x256
-kernels=mha
 aieargs=--dev ${devicename} -M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1
+runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 50
 target_suffix=mha
 
 # set this flag to 1 for linear buffer allocation
@@ -43,9 +41,11 @@ else
 buffer_aloc_flag=bank-aware
 endif
 
-dtype_in?=i8
-dtype_out?=i8
+dtype_in?=bf16
+dtype_out?=bf16
 trace_size?=0
+
+SKIP_KERNELS=true
 
 include ${srcdir}/../makefile-common
 
@@ -57,71 +57,70 @@ endif
 
 
 
-# Add "nm ${@D}/${@F}" at the end of the command to see the symbols in the object file 
 aie2_runtime_dir = ${AIEOPT_DIR}/aie_runtime_lib/AIE2
-ifeq (${devicename}, npu)
-build/mha_mm_b_row_maj.o: ${srcdir}/mm_aie2.cc
-	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -I${kernels_dir} -c $< -o ${@F}
-else ifeq (${devicename}, npu2)
-build/mha_mm_b_row_maj.o: ${srcdir}/mm_aie2p.cc
-	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -I${kernels_dir} -c $< -o ${@F}
-endif
 
-ifeq (${devicename}, npu)
-build/mha_mm_b_col_maj.o: ${srcdir}/mm_b_col_maj_aie2.cc
-	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -I${kernels_dir} -c $< -o ${@F}
-else ifeq (${devicename}, npu2)
-build/mha_mm_b_col_maj.o: ${srcdir}/mm_b_col_maj_aie2p.cc
-	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -I${kernels_dir} -c $< -o ${@F}
+# Define matmul and softmax dimension lists
+matmul_dims := 32x192x32 32x24x256 256x24x32 32x32x256 32x256x32 32x32x192
+softmax_dims := 32x256
+
+# Add "nm ${@D}/${@F}" at the end of the command to see the symbols in the object file 
+# Pattern rule for matmul kernels, select row or col major based on b_col_maj
+build/mha_mm_%.o:
+	$(eval dims := $(subst x, ,$*))
+	$(eval m := $(word 1,${dims}))
+	$(eval k := $(word 2,${dims}))
+	$(eval n := $(word 3,${dims}))
+ifeq ($(b_col_maj),0)
+  ifeq ($(devicename),npu)
+	@mkdir -p $(@D)
+	cd $(@D) && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c ${srcdir}/mm_aie2.cc -o $(@F)
+  else ifeq ($(devicename),npu2)
+	@mkdir -p $(@D)
+	cd $(@D) && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c ${srcdir}/mm_aie2p.cc -o $(@F)
+  endif
+else
+  ifeq ($(devicename),npu)
+	@mkdir -p $(@D)
+	cd $(@D) && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c ${srcdir}/mm_b_col_maj_aie2.cc -o $(@F)
+  else ifeq ($(devicename),npu2)
+	@mkdir -p $(@D)
+	cd $(@D) && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -c ${srcdir}/mm_b_col_maj_aie2p.cc -o $(@F)
+  endif
 endif
 
 ifeq ($(devicename),npu)
-build/lut_based_ops.o: ${aie2_runtime_dir}/lut_based_ops.cpp
+build/mha_lut_based_ops.o: ${aie2_runtime_dir}/lut_based_ops.cpp
 	mkdir -p ${@D}
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -c $< -o ${@F}
+	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -I. -c $< -o ${@F}
 endif
 
-build/softmax.o: ${kernels_dir}/softmax.cc
-	mkdir -p ${@D}
-ifeq (${devicename}, npu)
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -I${aie2_runtime_dir} -c $< -o ${@F}
-else ifeq (${devicename}, npu2)
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -I${aie2_runtime_dir} -c $< -o ${@F}
+# Pattern rule for softmax kernels
+build/mha_softmax_%.o: 
+	$(eval dims := $(subst x, ,$*))
+	$(eval m := $(word 1,${dims}))
+	$(eval n := $(word 2,${dims}))
+	@mkdir -p $(@D)
+ifeq ($(devicename),npu)
+	cd $(@D) && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -I. -I${aie2_runtime_dir} -c ${kernels_dir}/softmax.cc -o $(@F)
+
+else ifeq ($(devicename),npu2)
+	cd $(@D) && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -c ${kernels_dir}/softmax.cc -o $(@F)
 endif
 
-ifeq (${devicename}, npu)
-ifneq (${b_col_maj}, 1)
-build/mha.o: build/mha_mm_b_row_maj.o build/softmax.o build/lut_based_ops.o
-	mkdir -p ${@D}
-	ar rvs $@ $^
-else
-build/mha.o: build/mha_mm_b_col_maj.o build/softmax.o build/lut_based_ops.o
-	mkdir -p ${@D}
-	ar rvs $@ $^
-endif
-else ifeq (${devicename}, npu2)
-ifneq (${b_col_maj}, 1)
-build/mha.o: build/mha_mm_b_row_maj.o build/softmax.o
-	mkdir -p ${@D}
-	ar rvs $@ $^
-else
-build/mha.o: build/mha_mm_b_col_maj.o build/softmax.o
-	mkdir -p ${@D}
-	ar rvs $@ $^
-endif
+# Bundle rule for softmax kernel and lut_based_ops.o (only for npu)
+ifeq ($(devicename),npu)
+build/mha_softmax.o: $(addprefix build/mha_softmax_,$(addsuffix .o,$(softmax_dims))) build/mha_lut_based_ops.o
+	ar rvs $@ $+
+else ifeq ($(devicename),npu2)
+build/mha_softmax.o: $(addprefix build/mha_softmax_,$(addsuffix .o,$(softmax_dims)))
+	ar rvs $@ $+
 endif
 
-build/%.o: %.cc
-	mkdir -p ${@D}
-ifeq (${devicename}, npu)
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DBIT_WIDTH=8 -c $< -o ${@F}
-else ifeq (${devicename}, npu2)
-	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -c $< -o ${@F}
-endif
+# Convenience targets to build all kernels
+matmul_objs := $(addprefix build/mha_mm_,$(addsuffix .o,$(matmul_dims))) 
+
+.PHONY: build_kernels
+build_kernels: $(matmul_objs) build/mha_softmax.o
 
 .PHONY: run
 run: ${targetname}.exe ${xclbin_target}
