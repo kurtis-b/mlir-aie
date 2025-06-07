@@ -27,6 +27,8 @@ type_bytes = {
 
 tile_mem = defaultdict(int)
 
+tile_buffers = defaultdict(list)
+
 with open(input_file, 'r') as f:
     for line in f:
         if flow_re.search(line):
@@ -42,9 +44,21 @@ with open(input_file, 'r') as f:
             tile = (int(x), int(y))
             tile_mem[tile] += num_elem * bytes_per_elem
 
+            # Extract symbol name if present
+            sym_match = re.search(r'sym_name\s*=\s*"([^"]+)"', line)
+            sym_name = sym_match.group(1) if sym_match else None
+            tile_buffers[tile].append({
+                'sym_name': sym_name,
+                'num_elem': num_elem,
+                'dtype': dtype,
+                'bytes': num_elem * bytes_per_elem
+            })
+
 print("Tile memory usage (in bytes and kB):")
 for tile, total_bytes in sorted(tile_mem.items()):
     print(f"Tile {tile}: {total_bytes} bytes ({total_bytes / 1024:.2f} kB)")
+    for buf in tile_buffers[tile]:
+        print(f"  Buffer: {buf['sym_name']}, {buf['num_elem']} x {buf['dtype']} = {buf['bytes']} bytes")
 
 # Parse loop upper bounds per tile from aie_mha.mlir
 core_loop_bounds = {}
@@ -58,16 +72,37 @@ core_block_re = re.compile(r'%core_(\d+)_(\d+)\s*=\s*aie\.core\(%tile_(\d+)_(\d+
 scf_for_re = re.compile(r'scf\.for\s+%arg\d+\s*=\s*%c\d+(?:_\d+)?\s+to\s+%c(\d+)(?:_\d+)?\s+step\s+%c\d+(?:_\d+)?\s*{')
 
 with open(aie_mha_file, 'r') as f:
+    core_loop_bounds = {}
     inside_core = False
     tile = None
     for line in f:
         if not inside_core:
             m = core_block_re.match(line.strip())
             if m:
-                tile = (int(m.group(3)), int(m.group(4)))
+                tile = f"({int(m.group(3))}, {int(m.group(4))})"
                 inside_core = True
                 scf_for_count = 0
         else:
+            # Check for matmul call
+            if "matmul" in line:
+                # Example: func.call @matmul_bf16_bf16_32_24_256(...)
+                call_match = re.search(r'@matmul_([^(\s]+)\(', line)
+                if call_match:
+                    matmul_str = call_match.group(1)  # e.g., 'bf16_bf16_32_24_256'
+                    parts = matmul_str.split('_')
+                    if len(parts) >= 5:
+                        dtype = f"{parts[0]}_{parts[1]}"
+                        m, k, n = map(int, parts[-3:])
+                        macs = m * k * n
+                        if tile not in core_loop_bounds:
+                            core_loop_bounds[tile] = {}
+                        core_loop_bounds[tile]['matmul'] = {
+                            'dtype': dtype.split('_')[0],  # e.g., 'bf16'
+                            'm': m,
+                            'k': k,
+                            'n': n,
+                            'macs_one_iter': macs
+                        }
             m = scf_for_re.search(line)
             if m:
                 scf_for_count += 1
@@ -75,13 +110,19 @@ with open(aie_mha_file, 'r') as f:
                     continue  # Skip the first scf.for
                 matmul_instances = int(m.group(1))
                 if tile not in core_loop_bounds:
-                    core_loop_bounds[tile] = matmul_instances
+                    core_loop_bounds[tile] = {}
+                    core_loop_bounds[tile]['instances'] = matmul_instances
                 else:
-                    core_loop_bounds[tile] *= matmul_instances
+                    core_loop_bounds[tile]['instances'] *= matmul_instances
             if line.strip() == "}":
                 inside_core = False
                 tile = None
 
-print("\nTile loop upper bounds:")
-for tile, matmul_instances in sorted(core_loop_bounds.items()):
-    print(f"Tile {tile}: {matmul_instances}")
+print("\nTile loop upper bounds and matmul info:")
+for tile, info in sorted(core_loop_bounds.items()):
+    if isinstance(info, dict) and 'matmul' in info:
+        matmul = info['matmul']
+        instances = info.get('instances', 1)
+        print(f"Tile {tile}: {instances} iterations of {matmul['m']}x{matmul['k']}x{matmul['n']}, matmul dtype={matmul['dtype']}, MACs={matmul['macs_one_iter'] * instances}")
+    else:
+        print(f"Tile {tile}: {info.get('instances', 1)} iterations")
