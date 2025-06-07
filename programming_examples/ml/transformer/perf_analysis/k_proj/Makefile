@@ -8,7 +8,7 @@
 # 
 ##===----------------------------------------------------------------------===##
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
-subdir=perf_analysis/q_proj
+subdir=perf_analysis/k_proj
 targetname=mha
 
 
@@ -62,7 +62,7 @@ aie2_runtime_dir = ${AIEOPT_DIR}/aie_runtime_lib/AIE2
 # Define matmul and softmax dimension lists
 # If these values are changed, make sure to update the corresponding kernel code's
 # combos(X) and "#if" macros. 
-matmul_dims := 32x192x32
+matmul_dims := 256x32x16
 softmax_dims := 32x256
 
 # Add "nm ${@D}/${@F}" at the end of the command to see the symbols in the object file 
