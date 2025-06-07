@@ -28,7 +28,7 @@ endif
 b_col_maj?=0
 
 aieargs=--dev ${devicename} -M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 50
+runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 5
 target_suffix=mha
 
 # set this flag to 1 for linear buffer allocation
@@ -60,7 +60,9 @@ endif
 aie2_runtime_dir = ${AIEOPT_DIR}/aie_runtime_lib/AIE2
 
 # Define matmul and softmax dimension lists
-matmul_dims := 32x192x32 32x24x256 256x24x32 32x32x256 32x256x32 32x32x192
+# If these values are changed, make sure to update the corresponding kernel code's
+# combos(X) and "#if" macros. 
+matmul_dims := 32x192x16 256x32x16 32x16x256 32x256x16 32x16x192
 softmax_dims := 32x256
 
 # Add "nm ${@D}/${@F}" at the end of the command to see the symbols in the object file 
