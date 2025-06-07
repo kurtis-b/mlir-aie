@@ -97,10 +97,52 @@ def my_mha(
     dtype_in = dtype_map[dtype_in_str]
     dtype_out = dtype_map[dtype_out_str]
 
+    q_matmul_dims = (32, 192, 32)
+    k_matmul_dims = (32, 24, 256)
+    v_matmul_dims = (256, 24, 32)
+    o1_matmul_dims = (32, 32, 256)
+    o3_matmul_dims = (32, 256, 32)
+    o4_matmul_dims = (32, 32, 192)
+    o2_softmax_dims = (32, 256)
+    matmul_dims = [q_matmul_dims, k_matmul_dims, v_matmul_dims, o1_matmul_dims,
+                   o3_matmul_dims, o4_matmul_dims]
+    
+    if dev == "npu":
+        if dtype_in_str == "bf16":
+            r = 4
+            s = 8
+            t = 4
+        elif dtype_in_str == "i8":
+            r = 4
+            s = 8
+            t = 8
+        elif dtype_in_str == "i16":
+            r = 4
+            s = 4
+            t = 4
+    else:
+        if dtype_in_str == "bf16":
+            r = 8
+            s = 8
+            t = 8
+        elif dtype_in_str == "i8":
+            r = 8
+            s = 8
+            t = 8
+        elif dtype_in_str == "i16":
+            r = 4
+            s = 4
+            t = 8
+
     assert np.issubdtype(dtype_in, np.integer) == np.issubdtype(dtype_out, np.integer), f"Input dtype ({dtype_in}) and output dtype ({dtype_out}) must either both be integral or both be float"
     assert (np.dtype(dtype_out).itemsize >= np.dtype(dtype_in).itemsize), f"Output dtype ({dtype_out}) must be equal or larger to input dtype ({dtype_in})"
 
     assert (N % H == 0), """Embedding dimension must be divisible by number of heads"""
+    for dims in matmul_dims:
+        assert (dims[0] * dims[1] * dims[2] > 0), f"Matmul dimensions {dims} must be non-zero"
+        assert (dims[0] % r == 0), f"Matmul dimension {dims[0]} must be divisible by {r}"
+        assert (dims[1] % s == 0), f"Matmul dimension {dims[1]} must be divisible by {s}"
+        assert (dims[2] % t == 0), f"Matmul dimension {dims[2]} must be divisible by {t}"
 
     # If you get errors during CDO generation due to running out of program
     # memory, it may be because too much code is generated due to ObjectFIFO
@@ -125,15 +167,6 @@ def my_mha(
 
     @device(dev_ty)
     def device_body():
-        q_matmul_dims = (32, 192, 32)
-        k_matmul_dims = (32, 24, 256)
-        v_matmul_dims = (256, 24, 32)
-        o1_matmul_dims = (32, 32, 256)
-        o3_matmul_dims = (32, 256, 32)
-        o4_matmul_dims = (32, 32, 192)
-        o2_softmax_dims = (32, 256)
-
-
         Xq_l1_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[1],), np.dtype[dtype_in]]
         Wq_l1_ty = np.ndarray[(q_matmul_dims[1] * q_matmul_dims[2],), np.dtype[dtype_in]]
         q_l1_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[2],), np.dtype[dtype_out]]
@@ -162,6 +195,7 @@ def my_mha(
         # differing input and output data types. Currently this isn't being handled,
         # i.e. matmul for o1 and o3 should be i16xi16->i16 and o4 i16xi8->i16.
         # The former is easy to add, but latter requires a new matmul function.
+        zero_q = external_func(f"zero_{dtype_out_str}_{q_matmul_dims[0]}_{q_matmul_dims[1]}_{q_matmul_dims[2]}", inputs=[q_l1_ty])
 
         matmul_vectorized_func_name = (
             f"matmul_{dtype_in_str}_{dtype_out_str}"
@@ -207,8 +241,25 @@ def my_mha(
 
         # AIE-array data movement with object fifos
         # TODO: Will likely need to adjust the memory access patterns based on the matrix mult API tiling
-        Xq_l3l1_fifos = object_fifo(f"Xq_L3L1", shim_tiles[2], core_tiles[0][1], fifo_depth, Xq_l1_ty)
-        Wq_l3l1_fifos = object_fifo(f"Wq_L3L1", shim_tiles[1], core_tiles[0][1], fifo_depth, Wq_l1_ty)
+        Xq_l3l2_fifos = object_fifo(f"Xq_L3L2", shim_tiles[2], mem_tiles[2], fifo_depth, Xq_l1_ty)
+        Xq_l2l1_fifos = object_fifo(f"Xq_L2L1", mem_tiles[2], core_tiles[0][1], fifo_depth, Xq_l1_ty,
+                                    [
+                                        (q_matmul_dims[0] // r, r * q_matmul_dims[1]),
+                                        (q_matmul_dims[1] // s, s),
+                                        (r, q_matmul_dims[1]),
+                                        (s, 1),
+                                    ],)
+        object_fifo_link(Xq_l3l2_fifos, Xq_l2l1_fifos)
+        
+        Wq_l3l2_fifos = object_fifo(f"Wq_L3L2", shim_tiles[1], mem_tiles[1], fifo_depth, Wq_l1_ty)
+        Wq_l2l1_fifos = object_fifo(f"Wq_L2L1", mem_tiles[1], core_tiles[0][1], fifo_depth, Wq_l1_ty,
+                                    [
+                                        (q_matmul_dims[1] // s, s * q_matmul_dims[2]),
+                                        (q_matmul_dims[2] // t, t),
+                                        (s, q_matmul_dims[2]),
+                                        (t, 1),
+                                    ],)
+        object_fifo_link(Wq_l3l2_fifos, Wq_l2l1_fifos)
         Xkv_l3l1_fifos = object_fifo(f"Xkv_L3L1", shim_tiles[0], [core_tiles[1][0], core_tiles[2][0]], fifo_depth, Xkv_l1_ty)
         Wk_l3l1_fifos = object_fifo(f"Wk_L3L1", shim_tiles[1], core_tiles[0][0], fifo_depth, Wk_l1_ty)
         Wk_l1l1_fifos = object_fifo(f"Wk_L1L1", core_tiles[0][0], core_tiles[1][0], fifo_depth, Wk_l1_ty,
@@ -280,13 +331,13 @@ def my_mha(
                 for _ in range_(H):
                     for _ in range_(head_dim // q_matmul_dims[2]):
                         elem_q = q_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
-                        # zero_q(elem_q)
+                        zero_q(elem_q)
                         for _ in range_(K // q_matmul_dims[1]):
-                            elem_in_xq = Xq_l3l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                            elem_in_wq = Wq_l3l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_xq = Xq_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_wq = Wq_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
                             matmul_q(elem_in_xq, elem_in_wq, elem_q)
-                            Wq_l3l1_fifos.release(ObjectFifoPort.Consume, 1)
-                            Xq_l3l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            Wq_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            Xq_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
                         q_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
 
         @core(core_tiles[1][1], f"mha_mm_{o1_matmul_dims[0]}x{o1_matmul_dims[1]}x{o1_matmul_dims[2]}.o")
@@ -353,16 +404,16 @@ def my_mha(
                 # for the rest of the output's sequence
                 for row_offset in range(0, M, o4_matmul_dims[0]):
                     npu_dma_memcpy_nd(
-                        metadata=Xq_l3l1_fifos,
+                        metadata=Xq_l3l2_fifos,
                         bd_id=0,
                         mem=A,
-                        offsets=[0, 0, 0, row_offset],
+                        offsets=[0, 0, 0, row_offset * K],
                         sizes=[N // q_matmul_dims[2], K // q_matmul_dims[1], q_matmul_dims[0], q_matmul_dims[1]],
                         strides=[0, q_matmul_dims[1], K, 1],
                     )
 
                     npu_dma_memcpy_nd(
-                        metadata=Wq_l3l1_fifos,
+                        metadata=Wq_l3l2_fifos,
                         bd_id=2,
                         mem=A,
                         offsets=[0, 0, 0, M * K],
@@ -412,7 +463,7 @@ def my_mha(
                         metadata=o4_l2l3_fifos,
                         bd_id=6,
                         mem=C,
-                        offsets=[0, 0, 0, row_offset],
+                        offsets=[0, 0, 0, row_offset * N],
                         sizes=[1, 1, o4_matmul_dims[0], N],
                         strides=[0, 0, N, 1],
                     )
