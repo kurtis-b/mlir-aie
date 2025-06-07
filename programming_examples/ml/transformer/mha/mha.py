@@ -97,14 +97,13 @@ def my_mha(
     dtype_in = dtype_map[dtype_in_str]
     dtype_out = dtype_map[dtype_out_str]
 
-    q_matmul_dims = (32, 192, 32)
-    k_matmul_dims = (32, 24, 256)
-    v_matmul_dims = (256, 24, 32)
-    o1_matmul_dims = (32, 32, 256)
-    o3_matmul_dims = (32, 256, 32)
-    o4_matmul_dims = (32, 32, 192)
+    q_matmul_dims = (32, 192, 16)
+    kv_matmul_dims = (256, 32, 16)
+    o1_matmul_dims = (32, 16, 256)
+    o3_matmul_dims = (32, 256, 16)
+    o4_matmul_dims = (32, 16, 192)
     o2_softmax_dims = (32, 256)
-    matmul_dims = [q_matmul_dims, k_matmul_dims, v_matmul_dims, o1_matmul_dims,
+    matmul_dims = [q_matmul_dims, kv_matmul_dims, o1_matmul_dims,
                    o3_matmul_dims, o4_matmul_dims]
     
     if dev == "npu":
@@ -171,15 +170,12 @@ def my_mha(
         Wq_l1_ty = np.ndarray[(q_matmul_dims[1] * q_matmul_dims[2],), np.dtype[dtype_in]]
         q_l1_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[2],), np.dtype[dtype_out]]
 
-        Xkv_l1_ty = np.ndarray[(k_matmul_dims[1] * k_matmul_dims[2],), np.dtype[dtype_in]]
-        Wk_l1_ty = np.ndarray[(k_matmul_dims[0] * k_matmul_dims[1],), np.dtype[dtype_in]]
-        k_l1_ty = np.ndarray[(k_matmul_dims[0] * k_matmul_dims[2],), np.dtype[dtype_out]]
+        Xkv_l1_ty = np.ndarray[(kv_matmul_dims[0] * kv_matmul_dims[1],), np.dtype[dtype_in]]
+        Wkv_l1_ty = np.ndarray[(kv_matmul_dims[1] * kv_matmul_dims[2],), np.dtype[dtype_in]]
+        kv_l1_ty = np.ndarray[(kv_matmul_dims[0] * kv_matmul_dims[2],), np.dtype[dtype_out]]
 
         o1_l1_ty = np.ndarray[(o1_matmul_dims[0] * o1_matmul_dims[2],), np.dtype[dtype_out]]
         o2_l1_ty = np.ndarray[(o2_softmax_dims[0] * o2_softmax_dims[1],), np.dtype[dtype_out]]
-
-        Wv_l1_ty = np.ndarray[(v_matmul_dims[1] * v_matmul_dims[2],), np.dtype[dtype_in]]
-        v_l1_ty = np.ndarray[(v_matmul_dims[0] * v_matmul_dims[2],), np.dtype[dtype_out]]
 
         o3_l1_ty = np.ndarray[(o3_matmul_dims[0] * o3_matmul_dims[2],), np.dtype[dtype_out]]
 
@@ -196,6 +192,7 @@ def my_mha(
         # i.e. matmul for o1 and o3 should be i16xi16->i16 and o4 i16xi8->i16.
         # The former is easy to add, but latter requires a new matmul function.
         zero_q = external_func(f"zero_{dtype_out_str}_{q_matmul_dims[0]}_{q_matmul_dims[1]}_{q_matmul_dims[2]}", inputs=[q_l1_ty])
+        zero_kv = external_func(f"zero_{dtype_out_str}_{kv_matmul_dims[0]}_{kv_matmul_dims[1]}_{kv_matmul_dims[2]}", inputs=[kv_l1_ty])
 
         matmul_vectorized_func_name = (
             f"matmul_{dtype_in_str}_{dtype_out_str}"
@@ -206,17 +203,13 @@ def my_mha(
             matmul_vectorized_func_name + f"_{q_matmul_dims[0]}_{q_matmul_dims[1]}_{q_matmul_dims[2]}",
             inputs=[Xq_l1_ty, Wq_l1_ty, q_l1_ty],
         )
-        matmul_k = external_func(
-            matmul_vectorized_func_name + f"_{k_matmul_dims[0]}_{k_matmul_dims[1]}_{k_matmul_dims[2]}",
-            inputs=[Wk_l1_ty, Xkv_l1_ty, k_l1_ty],
-        )
-        matmul_v = external_func(
-            matmul_vectorized_func_name + f"_{v_matmul_dims[0]}_{v_matmul_dims[1]}_{v_matmul_dims[2]}",
-            inputs=[Xkv_l1_ty, Wv_l1_ty, v_l1_ty],
+        matmul_kv = external_func(
+            matmul_vectorized_func_name + f"_{kv_matmul_dims[0]}_{kv_matmul_dims[1]}_{kv_matmul_dims[2]}",
+            inputs=[Xkv_l1_ty, Wkv_l1_ty, kv_l1_ty],
         )
         matmul_o1 = external_func(
             matmul_vectorized_func_name + f"_{o1_matmul_dims[0]}_{o1_matmul_dims[1]}_{o1_matmul_dims[2]}",
-            inputs=[q_l1_ty, k_l1_ty, o1_l1_ty],
+            inputs=[q_l1_ty, kv_l1_ty, o1_l1_ty],
         )
         softmax_o2 = external_func(
             f"softmax_{dtype_in_str}",
@@ -224,7 +217,7 @@ def my_mha(
         )
         matmul_o3 = external_func(
             matmul_vectorized_func_name + f"_{o3_matmul_dims[0]}_{o3_matmul_dims[1]}_{o3_matmul_dims[2]}",
-            inputs=[o2_l1_ty, v_l1_ty, o3_l1_ty],
+            inputs=[o2_l1_ty, kv_l1_ty, o3_l1_ty],
         )
         matmul_o4 = external_func(
             matmul_vectorized_func_name + f"_{o4_matmul_dims[0]}_{o4_matmul_dims[1]}_{o4_matmul_dims[2]}",
@@ -260,25 +253,36 @@ def my_mha(
                                         (t, 1),
                                     ],)
         object_fifo_link(Wq_l3l2_fifos, Wq_l2l1_fifos)
-        Xkv_l3l1_fifos = object_fifo(f"Xkv_L3L1", shim_tiles[0], [core_tiles[1][0], core_tiles[2][0]], fifo_depth, Xkv_l1_ty)
-        Wk_l3l1_fifos = object_fifo(f"Wk_L3L1", shim_tiles[1], core_tiles[0][0], fifo_depth, Wk_l1_ty)
-        Wk_l1l1_fifos = object_fifo(f"Wk_L1L1", core_tiles[0][0], core_tiles[1][0], fifo_depth, Wk_l1_ty,
-                        (
-                            [
-                                (k_matmul_dims[0] // 2, 2),
-                                (k_matmul_dims[1], k_matmul_dims[0]),
-                                (2, 1),
-                            ]
-                        ), ) # transpose at 2-byte (2xbf16) granularity
-        object_fifo_link(Wk_l3l1_fifos, Wk_l1l1_fifos)
-        Wv_l3l1_fifos = object_fifo(f"Wv_L3L1", shim_tiles[0], core_tiles[3][0], fifo_depth, Wv_l1_ty)
-        Wv_l1l1_fifos = object_fifo(f"Wv_L1L1", core_tiles[3][0], core_tiles[2][0], fifo_depth, Wv_l1_ty)
-        object_fifo_link(Wv_l3l1_fifos, Wv_l1l1_fifos)
+        Xkv_l3l2_fifos = object_fifo(f"Xkv_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, Xkv_l1_ty)
+        Xkv_l2l1_fifos = object_fifo(f"Xkv_L2L1", mem_tiles[0], [core_tiles[1][0], core_tiles[2][0]], fifo_depth, Xkv_l1_ty,
+                                    [
+                                        (kv_matmul_dims[0] // r, r * kv_matmul_dims[1]),
+                                        (kv_matmul_dims[1] // s, s),
+                                        (r, kv_matmul_dims[1]),
+                                        (s, 1),
+                                    ],)
+        object_fifo_link(Xkv_l3l2_fifos, Xkv_l2l1_fifos)
+        Wk_l3l2_fifos = object_fifo(f"Wk_L3L2", shim_tiles[1], mem_tiles[1], fifo_depth, Wkv_l1_ty)
+        Wk_l2l1_fifos = object_fifo(f"Wk_L2L1", mem_tiles[1], core_tiles[1][0], fifo_depth, Wkv_l1_ty,
+                                    [
+                                        (kv_matmul_dims[1] // s, s * kv_matmul_dims[2]),
+                                        (kv_matmul_dims[2] // t, t),
+                                        (s, kv_matmul_dims[2]),
+                                        (t, 1),
+                                    ],)
+        object_fifo_link(Wk_l3l2_fifos, Wk_l2l1_fifos)
+        Wv_l3l2_fifos = object_fifo(f"Wv_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, Wkv_l1_ty)
+        Wv_l2l1_fifos = object_fifo(f"Wv_L2L1", mem_tiles[0], core_tiles[2][0], fifo_depth, Wkv_l1_ty,
+                                    [
+                                        (kv_matmul_dims[1] // s, s * kv_matmul_dims[2]),
+                                        (kv_matmul_dims[2] // t, t),
+                                        (s, kv_matmul_dims[2]),
+                                        (t, 1),
+                                    ],)
+        object_fifo_link(Wv_l3l2_fifos, Wv_l2l1_fifos)
         q_l1l1_fifos = object_fifo(f"q_L1L1", core_tiles[0][1], core_tiles[1][1], fifo_depth, q_l1_ty)
-        k_l1l1_fifos = object_fifo(f"k_L1L1", core_tiles[1][0], core_tiles[1][1], fifo_depth, k_l1_ty)
-        v_l1l1_fifos_0 = object_fifo(f"v_L1L1_0", core_tiles[2][0], core_tiles[3][0], fifo_depth, v_l1_ty)
-        v_l1l1_fifos_1 = object_fifo(f"v_L1L1_1", core_tiles[3][0], core_tiles[3][1], fifo_depth, v_l1_ty)
-        object_fifo_link(v_l1l1_fifos_0, v_l1l1_fifos_1)
+        k_l1l1_fifos = object_fifo(f"k_L1L1", core_tiles[1][0], core_tiles[1][1], fifo_depth, kv_l1_ty)
+        v_l1l1_fifos = object_fifo(f"v_L1L1", core_tiles[2][0], core_tiles[3][1], fifo_depth, kv_l1_ty)
         o1_l1l1_fifos = object_fifo(f"o1_L1L1", core_tiles[1][1], core_tiles[2][1], fifo_depth, o1_l1_ty)
         o2_l1l1_fifos = object_fifo(f"o2_L1L1", core_tiles[2][1], core_tiles[3][1], fifo_depth, o2_l1_ty)
         o3_l1l1_fifos = object_fifo(f"o3_L1L1", core_tiles[3][1], [core_tiles[j][2] for j in range(o4_rows)], fifo_depth, o3_l1_ty) # broadcast along one column
@@ -286,7 +290,7 @@ def my_mha(
         Wo_l2l1_fifos = [None] * o4_rows
         for row in range(o4_rows):
             Wo_l2l1_fifos[row] = object_fifo(f"Wo_L2L1_{row}", mem_tiles[2], core_tiles[row][2], fifo_depth, Wo_l1_ty)
-        object_fifo_link(Wo_l3l2_fifos, [Wo_l2l1_fifos[i] for i in range(o4_rows)], [], [o4_matmul_dims[0] * o4_matmul_dims[2] * i for i in range(o4_rows)])
+        object_fifo_link(Wo_l3l2_fifos, [Wo_l2l1_fifos[i] for i in range(o4_rows)], [], [o4_matmul_dims[1] * o4_matmul_dims[2] * i for i in range(o4_rows)])
         o4_l1l2_fifos = [None] * o4_rows
         for row in range(o4_rows):
             o4_l1l2_fifos[row] = object_fifo(f"o4_L1L2_{row}", core_tiles[row][2], mem_tiles[2], fifo_depth, o4_l1_ty)
@@ -294,36 +298,36 @@ def my_mha(
         object_fifo_link([o4_l1l2_fifos[i] for i in range(o4_rows)], o4_l2l3_fifos, [o4_matmul_dims[0] * o4_matmul_dims[2] * i for i in range(o4_rows)], [])
         
 
-        # Set up compute tiles        
-        @core(core_tiles[1][0], f"mha_mm_{k_matmul_dims[0]}x{k_matmul_dims[1]}x{k_matmul_dims[2]}.o")
+        # Set up compute tiles  
+        @core(core_tiles[1][0], f"mha_mm_{kv_matmul_dims[0]}x{kv_matmul_dims[1]}x{kv_matmul_dims[2]}.o")
         def core_body():
             for _ in range_(0xFFFFFFFF):
                 for _ in range_(H):
-                    for _ in range_(head_dim // k_matmul_dims[0]):
+                    for _ in range_(head_dim // kv_matmul_dims[2]):
                         elem_k = k_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
-                        # zero_k(elem_k)
-                        for _ in range_(K // k_matmul_dims[1]):
-                            elem_in_xk = Xkv_l3l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                            elem_in_wk = Wk_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                            matmul_k(elem_in_wk, elem_in_xk, elem_k)
-                            Wk_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
-                            Xkv_l3l1_fifos.release(ObjectFifoPort.Consume, 1)
+                        zero_kv(elem_k)
+                        for _ in range_(K // kv_matmul_dims[1]):
+                            elem_in_xk = Xkv_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_wk = Wk_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            matmul_kv(elem_in_xk, elem_in_wk, elem_k)
+                            Wk_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            Xkv_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
                         k_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
 
-        @core(core_tiles[2][0], f"mha_mm_{v_matmul_dims[0]}x{v_matmul_dims[1]}x{v_matmul_dims[2]}.o")
+        @core(core_tiles[2][0], f"mha_mm_{kv_matmul_dims[0]}x{kv_matmul_dims[1]}x{kv_matmul_dims[2]}.o")
         def core_body():
             for _ in range_(0xFFFFFFFF):
                 for _ in range_(H):
-                    for _ in range_(head_dim // v_matmul_dims[2]):
-                        elem_v = v_l1l1_fifos_0.acquire(ObjectFifoPort.Produce, 1)
-                        # zero_v(elem_v)
-                        for _ in range_(K // v_matmul_dims[1]):
-                            elem_in_xv = Xkv_l3l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                            elem_in_wv = Wv_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                            matmul_v(elem_in_xv, elem_in_wv, elem_v)
-                            Wv_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
-                            Xkv_l3l1_fifos.release(ObjectFifoPort.Consume, 1)
-                        v_l1l1_fifos_0.release(ObjectFifoPort.Produce, 1)
+                    for _ in range_(head_dim // kv_matmul_dims[2]):
+                        elem_v = v_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
+                        zero_kv(elem_v)
+                        for _ in range_(K // kv_matmul_dims[1]):
+                            elem_in_xv = Xkv_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_wv = Wv_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            matmul_kv(elem_in_xv, elem_in_wv, elem_v)
+                            Wv_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                            Xkv_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                        v_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
 
         @core(core_tiles[0][1], f"mha_mm_{q_matmul_dims[0]}x{q_matmul_dims[1]}x{q_matmul_dims[2]}.o")
         def core_body():
@@ -372,9 +376,9 @@ def my_mha(
                     for _ in range_(head_dim // o3_matmul_dims[2]):
                         elem_o3 = o3_l1l1_fifos.acquire(ObjectFifoPort.Produce, 1)
                         # zero_o3(elem_o3)
-                        elem_in_v = v_l1l1_fifos_1.acquire(ObjectFifoPort.Consume, 1)
+                        elem_in_v = v_l1l1_fifos.acquire(ObjectFifoPort.Consume, 1)
                         matmul_o3(elem_in_o2, elem_in_v, elem_o3)
-                        v_l1l1_fifos_1.release(ObjectFifoPort.Consume, 1)
+                        v_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
                         o3_l1l1_fifos.release(ObjectFifoPort.Produce, 1)
                     o2_l1l1_fifos.release(ObjectFifoPort.Consume, 1)
 
@@ -422,31 +426,31 @@ def my_mha(
                     )
 
                     npu_dma_memcpy_nd(
-                        metadata=Xkv_l3l1_fifos,
+                        metadata=Xkv_l3l2_fifos,
                         bd_id=1,
                         mem=A,
                         offsets=[0, 0, 0, 0],
-                        sizes=[N // v_matmul_dims[2], K // v_matmul_dims[1], M, v_matmul_dims[1]],
-                        strides=[0, v_matmul_dims[1], K, 1],
+                        sizes=[N // kv_matmul_dims[2], K // kv_matmul_dims[1], M, kv_matmul_dims[1]],
+                        strides=[0, kv_matmul_dims[1], K, 1],
                     )
 
                     npu_dma_memcpy_nd(
-                        metadata=Wk_l3l1_fifos,
+                        metadata=Wk_l3l2_fifos,
                         bd_id=3,
                         mem=A,
                         offsets=[0, 0, 0, M * K + K * N],
-                        sizes=[N // k_matmul_dims[0], K // k_matmul_dims[1], k_matmul_dims[1], k_matmul_dims[0]],
-                        strides=[k_matmul_dims[0], k_matmul_dims[1] * N, N, 1],
+                        sizes=[N // kv_matmul_dims[2], K // kv_matmul_dims[1], kv_matmul_dims[1], kv_matmul_dims[2]],
+                        strides=[kv_matmul_dims[2], kv_matmul_dims[1] * N, N, 1],
                     )
 
                     # B input transfer:
                     npu_dma_memcpy_nd(
-                        metadata=Wv_l3l1_fifos,
+                        metadata=Wv_l3l2_fifos,
                         bd_id=4,
                         mem=B,
                         offsets=[0, 0, 0, 0],
-                        sizes=[N // v_matmul_dims[2], K // v_matmul_dims[1], v_matmul_dims[1], v_matmul_dims[2]],
-                        strides=[v_matmul_dims[2], v_matmul_dims[1] * N, N, 1],
+                        sizes=[N // kv_matmul_dims[2], K // kv_matmul_dims[1], kv_matmul_dims[1], kv_matmul_dims[2]],
+                        strides=[kv_matmul_dims[2], kv_matmul_dims[1] * N, N, 1],
                     )
 
                     npu_dma_memcpy_nd(
