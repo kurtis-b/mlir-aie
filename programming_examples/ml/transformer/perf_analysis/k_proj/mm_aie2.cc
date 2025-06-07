@@ -697,16 +697,8 @@ extern "C" {
 
 #ifdef bf16_bf16_ONLY
 #if defined(DIM_M) && defined(DIM_K) && defined(DIM_N)
-#if (DIM_M == 32) && (DIM_K == 192) && (DIM_N == 16)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 192, 16)
-#elif (DIM_M == 256) && (DIM_K == 32) && (DIM_N == 16)
+#if (DIM_M == 256) && (DIM_K == 32) && (DIM_N == 16)
 #define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 256, 32, 16)
-#elif (DIM_M == 32) && (DIM_K == 16) && (DIM_N == 256)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 16, 256)
-#elif (DIM_M == 32) && (DIM_K == 256) && (DIM_N == 16)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 256, 16)
-#elif (DIM_M == 32) && (DIM_K == 16) && (DIM_N == 192)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 16, 192)
 #endif
 #endif
 #endif
