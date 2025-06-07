@@ -110,17 +110,62 @@ std::bfloat16_t get_random<std::bfloat16_t>() {
 template <typename Tin, typename Tout, typename Tacc>
 void matmul(int M, int N, int K, const std::vector<Tin> A,
             const std::vector<Tin> B, std::vector<Tout> &C, int b_col_maj) {
-  for (int row = 0; row < M; row++) {
-    for (int col = 0; col < N; col++) {
-      Tacc running_sum = 0;
-      for (int k = 0; k < K; k++) {
+  // Assume:
+  // - A[0 .. M*K-1] is X (input)
+  // - A[M*K .. M*K+K*N-1] is Q weights
+  // - A[M*K+K*N .. M*K+2*K*N-1] is K weights
+  // - C is M*M (attention score matrix)
+  // - M: batch size, K: embedding size, N: projection size (usually == K)
+
+  const int embed_dim = 768; // as per instruction
+
+  // 1. Compute Q = X * W_Q and K = X * W_K
+  std::vector<Tacc> Q(M * N, 0);
+  std::vector<Tacc> K_proj(M * N, 0);
+
+  const Tin *X = &A[0];
+  const Tin *W_Q = &A[M * K];
+  const Tin *W_K = &A[M * K + K * N];
+
+  // Q = X * W_Q
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      Tacc sum = 0;
+      for (int k = 0; k < K; ++k) {
         if (!b_col_maj) {
-          running_sum += Tacc(A[row * K + k] * B[k * N + col]);
+          sum += Tacc(X[m * K + k] * W_Q[k * N + n]);
         } else {
-          running_sum += Tacc(A[row * K + k] * B[k + col * K]);
+          sum += Tacc(X[m * K + k] * W_Q[k + n * K]);
         }
       }
-      C[row * N + col] = Tout(running_sum);
+      Q[m * N + n] = sum;
+    }
+  }
+
+  // K_proj = X * W_K
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      Tacc sum = 0;
+      for (int k = 0; k < K; ++k) {
+        if (!b_col_maj) {
+          sum += Tacc(X[m * K + k] * W_K[k * N + n]);
+        } else {
+          sum += Tacc(X[m * K + k] * W_K[k + n * K]);
+        }
+      }
+      K_proj[m * N + n] = sum;
+    }
+  }
+
+  // 2. Compute attention score: Q * K_proj^T
+  for (int i = 0; i < M; ++i) {
+    for (int j = 0; j < M; ++j) {
+      Tacc sum = 0;
+      for (int n = 0; n < N; ++n) {
+        sum += Q[i * N + n] * K_proj[j * N + n]; // K_proj^T: swap i/j
+      }
+      // 3. Scalar divide by embedding size
+      C[i * M + j] = Tout(sum / embed_dim);
     }
   }
 }
@@ -159,17 +204,62 @@ float matmul_timed(int M, int N, int K, const std::vector<Tin> A,
       .count();
 #endif
   auto start = std::chrono::high_resolution_clock::now();
-  for (int row = 0; row < M; row++) {
-    for (int col = 0; col < N; col++) {
-      Tacc running_sum = 0;
-      for (int k = 0; k < K; k++) {
+  // Assume:
+  // - A[0 .. M*K-1] is X (input)
+  // - A[M*K .. M*K+K*N-1] is Q weights
+  // - A[M*K+K*N .. M*K+2*K*N-1] is K weights
+  // - C is M*M (attention score matrix)
+  // - M: batch size, K: embedding size, N: projection size (usually == K)
+
+  const int embed_dim = 768; // as per instruction
+
+  // 1. Compute Q = X * W_Q and K = X * W_K
+  std::vector<Tacc> Q(M * N, 0);
+  std::vector<Tacc> K_proj(M * N, 0);
+
+  const Tin *X = &A[0];
+  const Tin *W_Q = &A[M * K];
+  const Tin *W_K = &A[M * K + K * N];
+
+  // Q = X * W_Q
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      Tacc sum = 0;
+      for (int k = 0; k < K; ++k) {
         if (!b_col_maj) {
-          running_sum += Tacc(A[row * K + k] * B[k * N + col]);
+          sum += Tacc(X[m * K + k] * W_Q[k * N + n]);
         } else {
-          running_sum += Tacc(A[row * K + k] * B[k + col * K]);
+          sum += Tacc(X[m * K + k] * W_Q[k + n * K]);
         }
       }
-      C[row * N + col] = Tout(running_sum);
+      Q[m * N + n] = sum;
+    }
+  }
+
+  // K_proj = X * W_K
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      Tacc sum = 0;
+      for (int k = 0; k < K; ++k) {
+        if (!b_col_maj) {
+          sum += Tacc(X[m * K + k] * W_K[k * N + n]);
+        } else {
+          sum += Tacc(X[m * K + k] * W_K[k + n * K]);
+        }
+      }
+      K_proj[m * N + n] = sum;
+    }
+  }
+
+  // 2. Compute attention score: Q * K_proj^T
+  for (int i = 0; i < M; ++i) {
+    for (int j = 0; j < M; ++j) {
+      Tacc sum = 0;
+      for (int n = 0; n < N; ++n) {
+        sum += Q[i * N + n] * K_proj[j * N + n]; // K_proj^T: swap i/j
+      }
+      // 3. Scalar divide by embedding size
+      C[i * M + j] = Tout(sum / embed_dim);
     }
   }
   return std::chrono::duration_cast<std::chrono::microseconds>(
@@ -180,15 +270,54 @@ float matmul_timed(int M, int N, int K, const std::vector<Tin> A,
 template <typename Tin, typename Tout, typename Tacc>
 Tout mul_acc(int M, int N, int K, int row, int col, const std::vector<Tin> A,
              const std::vector<Tin> B, int b_col_maj) {
-  Tacc running_sum = 0;
-  for (int k = 0; k < K; k++) {
-    if (!b_col_maj) {
-      running_sum += Tacc(A[row * K + k] * B[k * N + col]);
-    } else {
-      running_sum += Tacc(A[row * K + k] * B[k + col * K]);
+  // A: [X | W_Q | W_K]
+  // X: M*K, W_Q: K*N, W_K: K*N
+  const int embed_dim = 768;
+  const Tin *X = &A[0];
+  const Tin *W_Q = &A[M * K];
+  const Tin *W_K = &A[M * K + K * N];
+
+  // 1. Compute Q[row, n] and K_proj[col, n]
+  std::vector<Tacc> Q_row(N, 0);
+  std::vector<Tacc> K_col(N, 0);
+
+  // Q[row, n] = sum_k X[row*K + k] * W_Q[k*N + n] (or col-major)
+  for (int n = 0; n < N; ++n) {
+    Tacc sum = 0;
+    for (int k = 0; k < K; ++k) {
+      if (!b_col_maj) {
+        sum += Tacc(X[row * K + k] * W_Q[k * N + n]);
+      } else {
+        sum += Tacc(X[row * K + k] * W_Q[k + n * K]);
+      }
     }
+    Q_row[n] = sum;
   }
-  return (Tout)running_sum;
+
+  // K_proj[col, n] = sum_k X[col*K + k] * W_K[k*N + n] (or col-major)
+  for (int n = 0; n < N; ++n) {
+    Tacc sum = 0;
+    for (int k = 0; k < K; ++k) {
+      if (!b_col_maj) {
+        sum += Tacc(X[col * K + k] * W_K[k * N + n]);
+      } else {
+        sum += Tacc(X[col * K + k] * W_K[k + n * K]);
+      }
+    }
+    K_col[n] = sum;
+  }
+
+  // 2. Compute attention score: dot(Q_row, K_col)
+  Tacc attn_sum = 0;
+  for (int n = 0; n < N; ++n) {
+    attn_sum += Q_row[n] * K_col[n];
+  }
+
+  // 3. Scalar divide by embedding size
+  attn_sum = attn_sum / embed_dim;
+
+  // 4. Return as Tout
+  return (Tout)attn_sum;
 }
 
 // nearly_equal function adapted from Stack Overflow, License CC BY-SA 4.0
