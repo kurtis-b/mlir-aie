@@ -83,7 +83,7 @@ int main(int argc, const char *argv[]) {
 
   // B isn't used
   int A_VOLUME = M * K + 2 * N * K;
-  int B_VOLUME = M * M; 
+  int B_VOLUME = M * K;
   int C_VOLUME = M * M;
 
   size_t A_SIZE = (A_VOLUME * sizeof(A_DATATYPE));
@@ -165,10 +165,10 @@ int main(int argc, const char *argv[]) {
   for (int i = 0; i < M * K; i++) {
     AVec[i] = matmul_common::get_random<A_DATATYPE>();
   }
-  for (int i = M * K; i < (A_VOLUME - K * N); i++) {
+  for (int i = M * K; i < ((M * K) + (K * N)); i++) {
     AVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
   }
-  for (int i = M * K + K * N; i < A_VOLUME; i++) {
+  for (int i = ((M * K) + (K * N)); i < A_VOLUME; i++) {
     AVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
   }
   memcpy(bufA, AVec.data(), (AVec.size() * sizeof(A_DATATYPE)));
