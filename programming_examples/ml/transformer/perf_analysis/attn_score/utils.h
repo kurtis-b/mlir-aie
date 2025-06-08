@@ -558,9 +558,9 @@ int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
 
   if (n_errors > 0) {
     std::cout << std::endl << "Reference:" << std::endl;
-    matmul_common::print_matrix(CRef, N);
+    matmul_common::print_matrix(CRef, M);
     std::cout << std::endl << "Output:" << std::endl;
-    matmul_common::print_matrix(C, N);
+    matmul_common::print_matrix(C, M);
   }
 
   return n_errors;
