@@ -51,6 +51,9 @@ constexpr int verify_stochastic_n_samples = 1000;
 
 namespace po = boost::program_options;
 
+// TODO: Move the test src of the test for each design into their own header
+// files. Then include those files in the Makefile in this subdir so they can be
+// called here.
 int ffn1(const po::variables_map &vm, xrt::device &device, xrt::xclbin &xclbin,
          xrt::hw_context &context, std::vector<A_DATATYPE> &inVec,
          std::vector<C_DATATYPE> &outVec, const int verbosity,
