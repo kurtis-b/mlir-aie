@@ -99,10 +99,10 @@ def my_mha(
 
     q_matmul_dims = (32, 192, 32)
     kv_matmul_dims = (256, 32, 16)
-    o1_matmul_dims = (32, 32, 256)
-    o3_matmul_dims = (32, 256, 32)
-    o4_matmul_dims = (32, 32, 192)
-    o2_softmax_dims = (32, 256)
+    o1_matmul_dims = (q_matmul_dims[0], q_matmul_dims[2], kv_matmul_dims[0]) # (32, 16, 256)
+    o3_matmul_dims = (q_matmul_dims[0], kv_matmul_dims[0], kv_matmul_dims[2]) # (32, 256, 16)
+    o4_matmul_dims = (q_matmul_dims[0], kv_matmul_dims[2], 192) # (32, 16, 192)
+    o2_softmax_dims = (q_matmul_dims[0], kv_matmul_dims[0]) # (32, 256)
     matmul_dims = [q_matmul_dims, kv_matmul_dims, o1_matmul_dims,
                    o3_matmul_dims, o4_matmul_dims]
     
