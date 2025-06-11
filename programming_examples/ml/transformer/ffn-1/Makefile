@@ -22,17 +22,8 @@ m?=32
 k?=64
 n?=64
 
-ifeq ($(devicename),npu2)
-n_aie_cols?=2
-else 
-n_aie_cols?=1
-endif
-b_col_maj?=0
-
-kernels=ffn-1_mm_${m}x${k}x${n}
-aieargs=--dev ${devicename} -M $M -K $K -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 50
 target_suffix=ffn-1_${m}x${k}x${n}
+kernels=ffn-1_mm_${m}x${k}x${n}
 
 # set this flag to 1 for linear buffer allocation
 # else, 0 for bank-aware
@@ -51,11 +42,21 @@ trace_size?=0
 include ${srcdir}/../makefile-common
 
 ifeq ($(devicename),npu2)
+n_aie_cols?=2
+else 
+n_aie_cols?=1
+endif
+b_col_maj?=0
+
+aieargs=--dev ${devicename} -M $M -K $K -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
+runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 1
+
+ifeq ($(devicename),npu2)
 kernels_dir=${srcdir}/../../../../aie_kernels/aie2p
 else 
 kernels_dir=${srcdir}/../../../../aie_kernels/aie2
 endif
-
+relu_kernel_dir=${srcdir}/../../../../aie_kernels/aie2
 
 
 build/ffn-1_mm_b_row_maj_${m}x${k}x${n}.o: ${kernels_dir}/mm.cc
@@ -74,7 +75,7 @@ else ifeq (${devicename}, npu2)
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2P_FLAGS} -DBIT_WIDTH=8 -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o ${@F}
 endif
 
-build/relu_${m}x${n}.o: ${kernels_dir}/relu.cc
+build/relu_${m}x${n}.o: ${relu_kernel_dir}/relu.cc
 	mkdir -p ${@D}
 ifeq (${devicename}, npu)
 	cd ${@D} && ${PEANO_INSTALL_DIR}/bin/clang++ ${PEANOWRAP2_FLAGS} -DDIM_M=${m} -DDIM_N=${n} -c $< -o ${@F}
