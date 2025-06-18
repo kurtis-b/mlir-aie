@@ -114,10 +114,12 @@ void matmul(int M, int N, int K, const std::vector<Tin> A,
   // - A[0 .. M*K-1] is X (input)
   // - A[M*K .. M*K+K*N-1] is Q weights
   // - A[M*K+K*N .. M*K+2*K*N-1] is K weights
-  // - C is M*M (attention score matrix)
+  // - C is M*M*num_heads (attention score matrix, per head)
   // - M: batch size, K: embedding size, N: projection size (usually == K)
+  // - N must be divisible by num_heads
 
-  const int embed_dim = 768; // as per instruction
+  const int num_heads = 12;
+  const int head_dim = N / num_heads;
 
   // 1. Compute Q = X * W_Q and K = X * W_K
   std::vector<Tacc> Q(M * N, 0);
@@ -157,15 +159,21 @@ void matmul(int M, int N, int K, const std::vector<Tin> A,
     }
   }
 
-  // 2. Compute attention score: Q * K_proj^T
-  for (int i = 0; i < M; ++i) {
-    for (int j = 0; j < M; ++j) {
-      Tacc sum = 0;
-      for (int n = 0; n < N; ++n) {
-        sum += Q[i * N + n] * K_proj[j * N + n]; // K_proj^T: swap i/j
+  // 2. Compute attention score per head: for each head, Q_h * K_h^T
+  // Output C is [M * M * num_heads], row-major: for each head, [M x M]
+  for (int h = 0; h < num_heads; ++h) {
+    for (int i = 0; i < M; ++i) {
+      for (int j = 0; j < M; ++j) {
+        Tacc sum = 0;
+        for (int n = 0; n < head_dim; ++n) {
+          int q_idx = i * N + h * head_dim + n;
+          int k_idx = j * N + h * head_dim + n;
+          sum += Q[q_idx] * K_proj[k_idx];
+        }
+        // Scalar divide by head_dim (not embed_dim) for per-head scaling
+        // C[h * M * M + i * M + j] = Tout(sum);
+        C[i * M + j] = Tout(sum);
       }
-      // 3. Scalar divide by embedding size
-      C[i * M + j] = Tout(sum / embed_dim);
     }
   }
 }
@@ -176,42 +184,9 @@ float matmul_timed(int M, int N, int K, const std::vector<Tin> A,
                    int b_col_maj) {
   // TODO: Use Eigen or BLAS to run a more optimized version of the matrix
   // multiplication. The implementation here is really naive.
-#if 0
-  // THIS CODE DOESN'T WORK: M, K, and N need to be constant expressions,
-  // not variables.
-  Matrix<Tin, M, K> a;
-  Matrix<Tin, K, N> b;
-  Matrix<Tout, M, N> c;
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < K; j++) {
-      a(i, j) = A[i * K + j];
-    }
-  }
-  for (int i = 0; i < K; i++) {
-    for (int j = 0; j < N; j++) {
-      b(i, j) = B[i * N + j];
-    }
-  }
   auto start = std::chrono::high_resolution_clock::now();
-  c = a * b;
-  auto end = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
-      C[i * N + j] = c(i, j);
-    }
-  }
-  return std::chrono::duration_cast<std::chrono::microseconds>(end - start)
-      .count();
-#endif
-  auto start = std::chrono::high_resolution_clock::now();
-  // Assume:
-  // - A[0 .. M*K-1] is X (input)
-  // - A[M*K .. M*K+K*N-1] is Q weights
-  // - A[M*K+K*N .. M*K+2*K*N-1] is K weights
-  // - C is M*M (attention score matrix)
-  // - M: batch size, K: embedding size, N: projection size (usually == K)
-
-  const int embed_dim = 768; // as per instruction
+  const int num_heads = 12;
+  const int head_dim = N / num_heads;
 
   // 1. Compute Q = X * W_Q and K = X * W_K
   std::vector<Tacc> Q(M * N, 0);
@@ -251,15 +226,21 @@ float matmul_timed(int M, int N, int K, const std::vector<Tin> A,
     }
   }
 
-  // 2. Compute attention score: Q * K_proj^T
-  for (int i = 0; i < M; ++i) {
-    for (int j = 0; j < M; ++j) {
-      Tacc sum = 0;
-      for (int n = 0; n < N; ++n) {
-        sum += Q[i * N + n] * K_proj[j * N + n]; // K_proj^T: swap i/j
+  // 2. Compute attention score per head: for each head, Q_h * K_h^T
+  // Output C is [M * M * num_heads], row-major: for each head, [M x M]
+  for (int h = 0; h < num_heads; ++h) {
+    for (int i = 0; i < M; ++i) {
+      for (int j = 0; j < M; ++j) {
+        Tacc sum = 0;
+        for (int n = 0; n < head_dim; ++n) {
+          int q_idx = i * N + h * head_dim + n;
+          int k_idx = j * N + h * head_dim + n;
+          sum += Q[q_idx] * K_proj[k_idx];
+        }
+        // Scalar divide by head_dim (not embed_dim) for per-head scaling
+        // C[h * M * M + i * M + j] = Tout(sum / head_dim);
+        C[i * M + j] = Tout(sum / head_dim);
       }
-      // 3. Scalar divide by embedding size
-      C[i * M + j] = Tout(sum / embed_dim);
     }
   }
   return std::chrono::duration_cast<std::chrono::microseconds>(
@@ -272,7 +253,8 @@ Tout mul_acc(int M, int N, int K, int row, int col, const std::vector<Tin> A,
              const std::vector<Tin> B, int b_col_maj) {
   // A: [X | W_Q | W_K]
   // X: M*K, W_Q: K*N, W_K: K*N
-  const int embed_dim = 768;
+  const int num_heads = 12;
+  const int head_dim = N / num_heads;
   const Tin *X = &A[0];
   const Tin *W_Q = &A[M * K];
   const Tin *W_K = &A[M * K + K * N];
@@ -307,16 +289,19 @@ Tout mul_acc(int M, int N, int K, int row, int col, const std::vector<Tin> A,
     K_col[n] = sum;
   }
 
-  // 2. Compute attention score: dot(Q_row, K_col)
+  // 2. Compute attention score per head: for each head, dot(Q_row_h, K_col_h)
   Tacc attn_sum = 0;
-  for (int n = 0; n < N; ++n) {
-    attn_sum += Q_row[n] * K_col[n];
+  for (int h = 0; h < num_heads; ++h) {
+    Tacc head_sum = 0;
+    for (int n = 0; n < head_dim; ++n) {
+      int idx = h * head_dim + n;
+      head_sum += Q_row[idx] * K_col[idx];
+    }
+    // Scalar divide by head_dim for per-head scaling
+    attn_sum += head_sum / head_dim;
   }
 
-  // 3. Scalar divide by embedding size
-  attn_sum = attn_sum / embed_dim;
-
-  // 4. Return as Tout
+  // 3. Return as Tout
   return (Tout)attn_sum;
 }
 
@@ -532,14 +517,14 @@ int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
   std::vector<struct error<Tout>> errors;
   Tout max_rel_error = (Tout)0.0f;
 
-  std::vector<Tout> CRef(M * N);
+  std::vector<Tout> CRef(M * M);
   matmul<Tin, Tout, Tacc>(M, N, K, A, B, CRef, b_col_maj);
 
   for (int row = 0; row < M; row++) {
-    for (int col = 0; col < N; col++) {
+    for (int col = 0; col < M; col++) {
       std::optional<struct error<Tout>> error =
-          verify_single(std::cout, row, col, CRef[row * N + col],
-                        C[row * N + col], abs_tol, rel_tol);
+          verify_single(std::cout, row, col, CRef[row * M + col],
+                        C[row * M + col], abs_tol, rel_tol);
       if (error.has_value()) {
         if (n_errors < max_printable_errors) {
           errors.push_back(*error);
@@ -556,12 +541,12 @@ int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
   }
   print_error_summary(std::cout, n_errors, errors, max_rel_error);
 
-  if (n_errors > 0) {
-    std::cout << std::endl << "Reference:" << std::endl;
-    matmul_common::print_matrix(CRef, M);
-    std::cout << std::endl << "Output:" << std::endl;
-    matmul_common::print_matrix(C, M);
-  }
+  //   if (n_errors > 0) {
+  std::cout << std::endl << "Reference:" << std::endl;
+  matmul_common::print_matrix(CRef, M);
+  std::cout << std::endl << "Output:" << std::endl;
+  matmul_common::print_matrix(C, M);
+  //   }
 
   return n_errors;
 }
@@ -573,7 +558,7 @@ int verify_stochastic(int M, int N, int K, std::vector<Tin> A,
                       float rel_tol = 0.05, int b_col_maj = 0) {
   std::mt19937 rng;
   auto rows = std::views::iota(0, M);
-  auto cols = std::views::iota(0, N);
+  auto cols = std::views::iota(0, M);
   auto sampled_rows = std::vector<int>(n_samples);
   auto sampled_cols = std::vector<int>(n_samples);
 
@@ -597,7 +582,7 @@ int verify_stochastic(int M, int N, int K, std::vector<Tin> A,
     }
     Tout ref = mul_acc<Tin, Tout, Tacc>(M, N, K, row, col, A, B, b_col_maj);
     std::optional<struct error<Tout>> error = verify_single(
-        std::cout, row, col, ref, C[row * N + col], abs_tol, rel_tol);
+        std::cout, row, col, ref, C[row * M + col], abs_tol, rel_tol);
     if (error.has_value()) {
       if (n_errors < max_printable_errors) {
         errors.push_back(*error);
@@ -622,7 +607,7 @@ float time_matmul(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
                   std::vector<Tout> C, int n_samples, int verbosity = 0,
                   float abs_tol = 0.5, float rel_tol = 0.05,
                   int b_col_maj = 0) {
-  std::vector<Tout> CRef(M * N);
+  std::vector<Tout> CRef(M * M);
   return matmul_timed<Tin, Tout, Tacc>(M, N, K, A, B, CRef, b_col_maj);
 }
 

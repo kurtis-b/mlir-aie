@@ -248,9 +248,21 @@ def my_mha(
                                     ],)
         object_fifo_link(Wk_l3l2_fifos, Wk_l2l1_fifos)
         q_l1l1_fifos = object_fifo(f"q_L1L1", core_tiles[0][1], core_tiles[1][1], fifo_depth, q_l1_ty)
-        k_l1l1_fifos = object_fifo(f"k_L1L1", core_tiles[1][0], core_tiles[1][1], fifo_depth, kv_l1_ty)
+        k_l1l1_fifos = object_fifo(f"k_L1L1", core_tiles[1][0], core_tiles[1][1], fifo_depth, kv_l1_ty,
+                                    [
+                                        (kv_matmul_dims[2] // t, t),
+                                        (kv_matmul_dims[0] // r, r * kv_matmul_dims[2]),
+                                        (t, 1),
+                                        (r, kv_matmul_dims[2]), # TODO: Check if this is possible. Need to fix build error since can only do 3D transformation
+                                    ],)
         o1_l1l2_fifos = object_fifo(f"o1_L1L2", core_tiles[1][1], mem_tiles[1], fifo_depth, o1_l1_ty)
-        o1_l2l3_fifos = object_fifo(f"o1_L2L3", mem_tiles[1], shim_tiles[1], fifo_depth, o1_l1_ty)
+        o1_l2l3_fifos = object_fifo(f"o1_L2L3", mem_tiles[1], shim_tiles[1], fifo_depth, o1_l1_ty,
+                                    [
+                                        (q_matmul_dims[0] // r, r * kv_matmul_dims[2]),
+                                        (kv_matmul_dims[2] // t, t),
+                                        (r, kv_matmul_dims[2]),
+                                        (t, 1),
+                                    ],)
         object_fifo_link(o1_l1l2_fifos, o1_l2l3_fifos)
 
         
