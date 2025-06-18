@@ -28,7 +28,7 @@ endif
 b_col_maj?=0
 
 aieargs=--dev ${devicename} -M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 5
+runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 1
 target_suffix=mha
 
 # set this flag to 1 for linear buffer allocation
