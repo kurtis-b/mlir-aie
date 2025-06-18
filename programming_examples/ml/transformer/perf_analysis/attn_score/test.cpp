@@ -164,12 +164,35 @@ int main(int argc, const char *argv[]) {
   std::vector<A_DATATYPE> AVec(A_VOLUME);
   for (int i = 0; i < M * K; i++) {
     AVec[i] = matmul_common::get_random<A_DATATYPE>();
+    // if (i % K == i / K) {
+    //   AVec[i] = 1;
+    // } else {
+    //   AVec[i] = 1; // Zero out the rest of the matrix
+    // }
   }
   for (int i = M * K; i < ((M * K) + (K * N)); i++) {
     AVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
+    // Write to the anti-diagonal (top right to bottom left)
+    // int row = (i - (M * K + K * N)) / N;
+    // int col = (i - (M * K + K * N)) % N;
+    // if (row + col == N - 1) {
+    // if (i % ((M * K) + N) == i / ((M * K) + N)) {
+    //   AVec[i] = 1;
+    // } else {
+    //   AVec[i] = 1; // Zero out the rest of the matrix
+    // }
   }
   for (int i = ((M * K) + (K * N)); i < A_VOLUME; i++) {
     AVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
+    // Write to the anti-diagonal (top right to bottom left)
+    // int row = (i - (M * K + K * N)) / N;
+    // int col = (i - (M * K + K * N)) % N;
+    // if (row + col == N - 1) {
+    // if (i % ((M * K) + (K * N) + N) == i / ((M * K) + (K * N) + N)) {
+    //   AVec[i] = 1;
+    // } else {
+    //   AVec[i] = 1; // Zero out the rest of the matrix
+    // }
   }
   memcpy(bufA, AVec.data(), (AVec.size() * sizeof(A_DATATYPE)));
 
@@ -284,7 +307,7 @@ int main(int argc, const char *argv[]) {
     // if (iter % 10 == 0) {
     //   cpu_time_total +=
     //       matmul_common::time_matmul<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
-    //           M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol,
+    //           M, M, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol,
     //           b_col_maj);
     // }
 
