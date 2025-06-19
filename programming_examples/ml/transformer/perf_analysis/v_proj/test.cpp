@@ -89,8 +89,6 @@ int main(int argc, const char *argv[]) {
   size_t B_SIZE = (B_VOLUME * sizeof(B_DATATYPE));
   size_t C_SIZE = (C_VOLUME * sizeof(C_DATATYPE));
 
-  size_t OUT_SIZE = C_SIZE + trace_size;
-
   std::vector<uint32_t> instr_v =
       test_utils::load_instr_binary(vm["instr"].as<std::string>());
 
@@ -165,7 +163,6 @@ int main(int argc, const char *argv[]) {
     AVec[i] = matmul_common::get_random<A_DATATYPE>();
   }
   memcpy(bufA, AVec.data(), (AVec.size() * sizeof(A_DATATYPE)));
-
   B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
   std::vector<B_DATATYPE> BVec(B_VOLUME);
   for (int i = 0; i < B_VOLUME; i++) {
