@@ -7,7 +7,6 @@
 import argparse
 from ml_dtypes import bfloat16
 import numpy as np
-import sys
 
 from aie.extras.context import mlir_mod_ctx
 
@@ -47,6 +46,12 @@ def main():
         default="i16",
     )
     argparser.add_argument("--trace_size", type=int, default=0)
+    argparser.add_argument(
+        "--generate-taps",
+        action="store_true",
+        help="Generate TensorAccessPatterns, a Python object to represent each data transfer"
+        "of the input/output matrices. These objects can be used for visualization.",
+    )
     args = argparser.parse_args()
     with mlir_mod_ctx() as ctx:
         maybe_taps = my_addandnorm(
@@ -60,9 +65,13 @@ def main():
             args.dtype_out,
             args.b_col_maj,
             args.trace_size,
+            args.generate_taps,
         )
         # print(ctx.module.operation.verify())
         print(ctx.module)
+
+    if args.generate_taps:
+        return maybe_taps
 
 
 def ceildiv(a, b):
@@ -80,6 +89,7 @@ def my_addandnorm(
     dtype_out_str,
     b_col_maj,
     trace_size,
+    generate_taps=False,
 ):
     # Using 2 rows because there's not enough channels to use 4 cores and 3 cores makes the tiling uneven. 
     # But Layernorm is much faster than the other transformer operations even with 2 rows, so will likely 
@@ -109,14 +119,18 @@ def my_addandnorm(
 
     n_A_tiles_per_shim = n_aie_rows // n_aie_cols
 
-    if n_aie_cols == 1:
-        if dev == "npu":
-            # Use this virtualization to generate the xclbin, but the 
-            # design will only use one column of cores.
+    if dev == "npu":
+        if n_aie_cols == 1:
             dev_ty = AIEDevice.npu1_4col
-        else:
+    else:
+        if n_aie_cols == 1:
             dev_ty = AIEDevice.npu2
 
+    # These will hold TensorAccessPattern objects that represent the runtime
+    # npu_dma_memcpy_nd operations of this design. They are only used if generate_taps is true
+    A_taps = []
+    B_taps = []
+    C_taps = []
 
     @device(dev_ty)
     def device_body():
@@ -257,7 +271,7 @@ def my_addandnorm(
         # Set up compute tiles
         for row in range(n_aie_rows):
             for col in range(n_aie_cols):
-                @core(core_tiles[row][col], f"addandnorm_{m}x{n}.o")
+                @core(core_tiles[row][col], f"addandnorm_{m}x{n}.o", stack_size=0xD00)
                 def core_body():
                     for _ in range_(0xFFFFFFFF):
                         loop = (
