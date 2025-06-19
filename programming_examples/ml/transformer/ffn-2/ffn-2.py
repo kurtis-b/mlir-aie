@@ -220,7 +220,6 @@ def my_matmul(
             matmul_vectorized_func_name,
             inputs=[A_l1_ty, B_l1_ty, C_l1_ty],
         )
-        relu = external_func(f"{dtype_out_str}_relu", inputs=[C_l1_ty, C_l1_ty])
 
         # Tile declarations as tile[row][col]
         if dev == "npu":
