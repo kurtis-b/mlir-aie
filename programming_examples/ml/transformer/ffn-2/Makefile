@@ -31,7 +31,7 @@ b_col_maj?=0
 
 kernels=ffn-2_mm_${m}x${k}x${n}
 aieargs=--dev ${devicename} -M $M -K $K -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 1
+runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 50
 target_suffix=ffn-2_${m}x${k}x${n}
 
 # set this flag to 1 for linear buffer allocation
