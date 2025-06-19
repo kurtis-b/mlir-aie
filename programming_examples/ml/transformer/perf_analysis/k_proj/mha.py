@@ -231,8 +231,8 @@ def my_mha(
                                     ],)
         object_fifo_link(X_l3l2_fifos, X_l2l1_fifos, [], [kv_matmul_dims[0] * kv_matmul_dims[1] * i for i in range(n_aie_rows_projs)])
         
-        Wk_l3l2_fifos = object_fifo(f"Wk_L3L2", shim_tiles[1], mem_tiles[0], fifo_depth, Wkv_l1_ty)
-        Wk_l2l1_fifos = object_fifo(f"Wk_L2L1", mem_tiles[0], [core_tiles[0 + row][0] for row in range(n_aie_rows_projs)], fifo_depth, Wkv_l2_ty,
+        Wk_l3l2_fifos = object_fifo(f"Wk_L3L2", shim_tiles[1], mem_tiles[0], fifo_depth, Wkv_l2_ty)
+        Wk_l2l1_fifos = object_fifo(f"Wk_L2L1", mem_tiles[0], [core_tiles[0 + row][0] for row in range(n_aie_rows_projs)], fifo_depth, Wkv_l1_ty,
                                     [
                                         (kv_matmul_dims[1] // s, s * kv_matmul_dims[2]),
                                         (kv_matmul_dims[2] // t, t),
@@ -243,7 +243,7 @@ def my_mha(
 
         for row in range(n_aie_rows_projs):
             kv_l1l2_fifos[row] = object_fifo(f"k_L1L2_{row}", core_tiles[0 + row][0], mem_tiles[0], fifo_depth, kv_l1_ty) 
-        k_l2l3_fifos = object_fifo(f"k_L2L3", mem_tiles[0], shim_tiles[1], fifo_depth, kv_l2_ty,
+        k_l2l3_fifos = object_fifo(f"k_L2L3", mem_tiles[0], shim_tiles[0], fifo_depth, kv_l2_ty,
                                     [
                                        (kv_matmul_dims[0] // r, r * kv_matmul_dims[2]),
                                        (r, t),
