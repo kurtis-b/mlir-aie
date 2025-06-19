@@ -193,10 +193,10 @@ def my_mha(
 
     @device(dev_ty)
     def device_body():
-        Xq_l2_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[1] * n_aie_rows_projs,), np.dtype[dtype_in]]
+        X_l2_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[1] * n_aie_rows_projs,), np.dtype[dtype_in]]
         Wq_l2_ty = np.ndarray[(q_matmul_dims[1] * q_matmul_dims[2],), np.dtype[dtype_in]]
         q_l2_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[2] * n_aie_rows_projs,), np.dtype[dtype_out]]
-        Xq_l1_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[1],), np.dtype[dtype_in]]
+        X_l1_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[1],), np.dtype[dtype_in]]
         Wq_l1_ty = np.ndarray[(q_matmul_dims[1] * q_matmul_dims[2],), np.dtype[dtype_in]]
         q_l1_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[2],), np.dtype[dtype_out]]
 
@@ -205,7 +205,7 @@ def my_mha(
         matmul_vectorized_func_name = f"matmul_{dtype_in_str}_{dtype_out_str}"
         matmul_q = external_func(
             matmul_vectorized_func_name + f"_{q_matmul_dims[0]}_{q_matmul_dims[1]}_{q_matmul_dims[2]}",
-            inputs=[Xq_l1_ty, Wq_l1_ty, q_l1_ty],
+            inputs=[X_l1_ty, Wq_l1_ty, q_l1_ty],
         )
 
         if dev == "npu":
@@ -217,22 +217,22 @@ def my_mha(
         core_tiles = tiles[2:]
 
         # AIE-array data movement with object fifos
-        Xq_l2l1_fifos = [None] * n_aie_rows_projs
+        X_l2l1_fifos = [None] * n_aie_rows_projs
         q_l1l2_fifos = [None] * n_aie_rows_projs
 
-        Xq_l3l2_fifos = object_fifo(f"Xq_L3L2", shim_tiles[2], mem_tiles[2], fifo_depth, Xq_l2_ty)
+        X_l3l2_fifos = object_fifo(f"X_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, X_l2_ty)
         for row in range(n_aie_rows_projs):
-            Xq_l2l1_fifos[row] = object_fifo(f"Xq_L2L1_{row}", mem_tiles[2], core_tiles[2 + row][0], fifo_depth, Xq_l1_ty,
+            X_l2l1_fifos[row] = object_fifo(f"X_L2L1_{row}", mem_tiles[0], core_tiles[2 + row][0], fifo_depth, X_l1_ty,
                                     [
                                         (q_matmul_dims[0] // r, r * q_matmul_dims[1]),
                                         (q_matmul_dims[1] // s, s),
                                         (r, q_matmul_dims[1]),
                                         (s, 1),
                                     ],)
-        object_fifo_link(Xq_l3l2_fifos, Xq_l2l1_fifos, [], [q_matmul_dims[0] * q_matmul_dims[1] * i for i in range(n_aie_rows_projs)])
+        object_fifo_link(X_l3l2_fifos, X_l2l1_fifos, [], [q_matmul_dims[0] * q_matmul_dims[1] * i for i in range(n_aie_rows_projs)])
         
-        Wq_l3l2_fifos = object_fifo(f"Wq_L3L2", shim_tiles[1], mem_tiles[1], fifo_depth, Wq_l2_ty)
-        Wq_l2l1_fifos = object_fifo(f"Wq_L2L1", mem_tiles[1], [core_tiles[2 + row][0] for row in range(n_aie_rows_projs)], fifo_depth, Wq_l1_ty,
+        Wq_l3l2_fifos = object_fifo(f"Wq_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, Wq_l2_ty)
+        Wq_l2l1_fifos = object_fifo(f"Wq_L2L1", mem_tiles[0], [core_tiles[2 + row][0] for row in range(n_aie_rows_projs)], fifo_depth, Wq_l1_ty,
                                     [
                                         (q_matmul_dims[1] // s, s * q_matmul_dims[2]),
                                         (q_matmul_dims[2] // t, t),
@@ -240,6 +240,7 @@ def my_mha(
                                         (t, 1),
                                     ],)
         object_fifo_link(Wq_l3l2_fifos, Wq_l2l1_fifos)
+
         for row in range(n_aie_rows_projs):
             q_l1l2_fifos[row] = object_fifo(f"q_L1L2_{row}", core_tiles[2 + row][0], mem_tiles[0], fifo_depth, q_l1_ty)
         q_l2l3_fifos = object_fifo(f"q_L2L3", mem_tiles[0], shim_tiles[0], fifo_depth, q_l2_ty,
@@ -252,7 +253,7 @@ def my_mha(
         object_fifo_link(q_l1l2_fifos, q_l2l3_fifos, [q_matmul_dims[0] * q_matmul_dims[1] * i for i in range(n_aie_rows_projs)], [])
 
         for row in range(n_aie_rows_projs):
-            @core(core_tiles[2 + row][0], f"mha_mm_{q_matmul_dims[0]}x{q_matmul_dims[1]}x{q_matmul_dims[2]}.o")
+            @core(core_tiles[2 + row][0], f"mha_mm_{q_matmul_dims[0]}x{q_matmul_dims[1]}x{q_matmul_dims[2]}.o", stack_size=0xD00)
             def core_body():
                 for _ in range_(0xFFFFFFFF):
                     for _ in range_(H):
@@ -260,11 +261,11 @@ def my_mha(
                             elem_q = q_l1l2_fifos[row].acquire(ObjectFifoPort.Produce, 1)
                             zero_q(elem_q)
                             for _ in range_(K // q_matmul_dims[1]):
-                                elem_in_xq = Xq_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
+                                elem_in_X = X_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
                                 elem_in_wq = Wq_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                                matmul_q(elem_in_xq, elem_in_wq, elem_q)
+                                matmul_q(elem_in_X, elem_in_wq, elem_q)
                                 Wq_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
-                                Xq_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
+                                X_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
                             q_l1l2_fifos[row].release(ObjectFifoPort.Produce, 1)
 
         # To/from AIE-array data movement
@@ -278,7 +279,7 @@ def my_mha(
                 # for the rest of the output's sequence
                 for row_offset in range(0, M, q_matmul_dims[0] * n_aie_rows_projs):
                     npu_dma_memcpy_nd(
-                        metadata=Xq_l3l2_fifos,
+                        metadata=X_l3l2_fifos,
                         bd_id=0,
                         mem=A,
                         offsets=[0, 0, 0, row_offset * K],
