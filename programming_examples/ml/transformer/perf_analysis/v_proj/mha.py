@@ -193,8 +193,8 @@ def my_mha(
 
     @device(dev_ty)
     def device_body():
-        X_l2_ty = np.ndarray[(kv_matmul_dims[0] * kv_matmul_dims[1] * n_aie_rows_projs,), np.dtype[dtype_in]]
-        Wkv_l2_ty = np.ndarray[(kv_matmul_dims[1] * kv_matmul_dims[2],), np.dtype[dtype_in]]
+        X_l2_ty = np.ndarray[(kv_matmul_dims[0] * kv_matmul_dims[1],), np.dtype[dtype_in]]
+        Wkv_l2_ty = np.ndarray[(kv_matmul_dims[1] * kv_matmul_dims[2] * n_aie_rows_projs,), np.dtype[dtype_in]]
         kv_l2_ty = np.ndarray[(kv_matmul_dims[0] * kv_matmul_dims[2] * n_aie_rows_projs,), np.dtype[dtype_out]]
         X_l1_ty = np.ndarray[(kv_matmul_dims[0] * kv_matmul_dims[1],), np.dtype[dtype_in]]
         Wkv_l1_ty = np.ndarray[(kv_matmul_dims[1] * kv_matmul_dims[2],), np.dtype[dtype_in]]
@@ -217,29 +217,29 @@ def my_mha(
         core_tiles = tiles[2:]
 
         # AIE-array data movement with object fifos
-        X_l2l1_fifos = [None] * n_aie_rows_projs
+        Wv_l2l1_fifos = [None] * n_aie_rows_projs
         kv_l1l2_fifos = [None] * n_aie_rows_projs
 
         X_l3l2_fifos = object_fifo(f"X_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, X_l2_ty)
-        for row in range(n_aie_rows_projs):
-            X_l2l1_fifos[row] = object_fifo(f"X_L2L1_{row}", mem_tiles[0], core_tiles[2 + row][1], fifo_depth, X_l1_ty,
+        X_l2l1_fifos = object_fifo(f"X_L2L1", mem_tiles[0], [core_tiles[2 + row][1] for row in range(n_aie_rows_projs)], fifo_depth, X_l1_ty,
                                     [
                                         (kv_matmul_dims[0] // r, r * kv_matmul_dims[1]),
                                         (kv_matmul_dims[1] // s, s),
                                         (r, kv_matmul_dims[1]),
                                         (s, 1),
                                     ],)
-        object_fifo_link(X_l3l2_fifos, X_l2l1_fifos, [], [kv_matmul_dims[0] * kv_matmul_dims[1] * i for i in range(n_aie_rows_projs)])
+        object_fifo_link(X_l3l2_fifos, X_l2l1_fifos)
         
         Wv_l3l2_fifos = object_fifo(f"Wv_L3L2", shim_tiles[1], mem_tiles[1], fifo_depth, Wkv_l2_ty)
-        Wv_l2l1_fifos = object_fifo(f"Wv_L2L1", mem_tiles[1], [core_tiles[2 + row][1] for row in range(n_aie_rows_projs)], fifo_depth, Wkv_l1_ty,
-                                    [
-                                        (kv_matmul_dims[1] // s, s * kv_matmul_dims[2]),
-                                        (kv_matmul_dims[2] // t, t),
-                                        (s, kv_matmul_dims[2]),
-                                        (t, 1),
-                                    ],)
-        object_fifo_link(Wv_l3l2_fifos, Wv_l2l1_fifos)
+        for row in range(n_aie_rows_projs):
+            Wv_l2l1_fifos[row] = object_fifo(f"Wv_L2L1_{row}", mem_tiles[1], core_tiles[2 + row][1], fifo_depth, Wkv_l1_ty,
+                                        [
+                                            (kv_matmul_dims[1] // s, s * kv_matmul_dims[2]),
+                                            (kv_matmul_dims[2] // t, t),
+                                            (s, kv_matmul_dims[2]),
+                                            (t, 1),
+                                        ],)
+        object_fifo_link(Wv_l3l2_fifos, Wv_l2l1_fifos, [], [kv_matmul_dims[1] * kv_matmul_dims[2] * i for i in range(n_aie_rows_projs)])
 
         for row in range(n_aie_rows_projs):
             kv_l1l2_fifos[row] = object_fifo(f"v_L1L2_{row}", core_tiles[2 + row][1], mem_tiles[1], fifo_depth, kv_l1_ty) 
@@ -250,7 +250,7 @@ def my_mha(
                                        (kv_matmul_dims[2] // t, r * t),
                                        (t, 1),
                                     ],)
-        object_fifo_link(kv_l1l2_fifos, v_l2l3_fifos, [kv_matmul_dims[0] * kv_matmul_dims[1] * i for i in range(n_aie_rows_projs)], [])
+        object_fifo_link(kv_l1l2_fifos, v_l2l3_fifos, [kv_matmul_dims[0] * kv_matmul_dims[2] * i for i in range(n_aie_rows_projs)], [])
 
         for row in range(n_aie_rows_projs):
             @core(core_tiles[2 + row][1], f"mha_mm_{kv_matmul_dims[0]}x{kv_matmul_dims[1]}x{kv_matmul_dims[2]}.o", stack_size=0xD00)
@@ -261,11 +261,11 @@ def my_mha(
                             elem_v = kv_l1l2_fifos[row].acquire(ObjectFifoPort.Produce, 1)
                             zero_kv(elem_v)
                             for _ in range_(K // kv_matmul_dims[1]):
-                                elem_in_xv = X_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
-                                elem_in_wv = Wv_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                                elem_in_xv = X_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                                elem_in_wv = Wv_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
                                 matmul_kv(elem_in_xv, elem_in_wv, elem_v)
-                                Wv_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
-                                X_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
+                                Wv_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
+                                X_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
                             kv_l1l2_fifos[row].release(ObjectFifoPort.Produce, 1)
 
         # To/from AIE-array data movement
@@ -277,34 +277,35 @@ def my_mha(
         def sequence(A, B, C):
                 # One iteration generates the output for 32 rows, so need to repeat
                 # for the rest of the output's sequence
-                for row_offset in range(0, M, kv_matmul_dims[0] * n_aie_rows_projs):
+                for row_offset in range(0, M, kv_matmul_dims[0]):
                     npu_dma_memcpy_nd(
                         metadata=X_l3l2_fifos,
                         bd_id=1,
                         mem=A,
                         offsets=[0, 0, 0, row_offset * K],
-                        sizes=[N // kv_matmul_dims[2], K // kv_matmul_dims[1], kv_matmul_dims[0] * n_aie_rows_projs, kv_matmul_dims[1]],
+                        sizes=[N // kv_matmul_dims[2], K // kv_matmul_dims[1], kv_matmul_dims[0], kv_matmul_dims[1]],
                         strides=[0, kv_matmul_dims[1], K, 1],
                     )
 
-                    npu_dma_memcpy_nd(
-                        metadata=Wv_l3l2_fifos,
-                        bd_id=4,
-                        mem=B,
-                        offsets=[0, 0, 0, 0],
-                        sizes=[N // kv_matmul_dims[2], K // kv_matmul_dims[1], kv_matmul_dims[1], kv_matmul_dims[2]],
-                        strides=[kv_matmul_dims[2], kv_matmul_dims[1] * N, N, 1],
-                    )
+                    for col_offset in range(0, N, kv_matmul_dims[2] * n_aie_cols_projs):
+                        npu_dma_memcpy_nd(
+                            metadata=Wv_l3l2_fifos,
+                            bd_id=4,
+                            mem=B,
+                            offsets=[0, 0, 0, col_offset],
+                            sizes=[K // kv_matmul_dims[1], n_aie_rows_projs, kv_matmul_dims[1], kv_matmul_dims[2]],
+                            strides=[kv_matmul_dims[1] * N, kv_matmul_dims[2], N, 1],
+                        )
 
-                    npu_dma_memcpy_nd(
-                        metadata=v_l2l3_fifos,
-                        bd_id=6,
-                        mem=C,
-                        offsets=[0, 0, 0, row_offset * N],
-                        sizes=[1, N // kv_matmul_dims[2], kv_matmul_dims[0] * n_aie_rows_projs, kv_matmul_dims[2]],
-                        strides=[0, kv_matmul_dims[2], N, 1],
-                    )
-                    dma_wait(v_l2l3_fifos)
+                        npu_dma_memcpy_nd(
+                            metadata=v_l2l3_fifos,
+                            bd_id=6,
+                            mem=C,
+                            offsets=[0, 0, 0, row_offset * N + col_offset],
+                            sizes=[1, n_aie_rows_projs, kv_matmul_dims[0], kv_matmul_dims[2]],
+                            strides=[0, kv_matmul_dims[0] * kv_matmul_dims[2], N, 1],
+                        )
+                        dma_wait(v_l2l3_fifos)
 
 
 if __name__ == "__main__":
