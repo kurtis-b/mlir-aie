@@ -104,72 +104,204 @@ template <>
 std::bfloat16_t get_random<std::bfloat16_t>() {
   // Random numbers should NOT be uniformly between 0 and 1, because that
   // would make the matrix product AB always close to 1.
-  return std::bfloat16_t(4.0 * (float)rand() / (float)(RAND_MAX));
+  return std::bfloat16_t((float)rand() / (float)(RAND_MAX)) /
+         12288.0; // Scale down to avoid large exponents, this seems to be the
+                  // sweet spot
 }
 
 template <typename Tin, typename Tout, typename Tacc>
-void matmul(int M, int N, int K, const std::vector<Tin> A,
+void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
             const std::vector<Tin> B, std::vector<Tout> &C, int b_col_maj) {
-  for (int row = 0; row < M; row++) {
-    for (int col = 0; col < N; col++) {
-      Tacc running_sum = 0;
-      for (int k = 0; k < K; k++) {
+  // Assume:
+  // - A[0 .. M*K-1] is X (input)
+  // - A[M*K .. M*K+K*N-1] is Q weights
+  // - A[M*K+K*N .. M*K+2*K*N-1] is K weights
+  // - C is M*M*num_heads (attention score matrix, per head)
+  // - M: batch size, K: embedding size, N: projection size (usually == K)
+  // - N must be divisible by num_heads
+
+  const int num_heads = H;
+  const int head_dim = N / num_heads;
+
+  Tout *Q_proj = &C[0];
+  Tout *K_proj = &C[M * N];
+  Tout *V_proj = &C[2 * M * N];
+  Tout *attn_scores = &C[3 * M * N];
+
+  const Tin *X = &A[0];
+  const Tin *W_Q = &A[M * K];
+  const Tin *W_K = &A[M * K + K * N];
+  const Tin *W_V = &B[0];
+
+  // 1. Compute Q = X * W_Q, K = X * W_K, and V = X * W_V
+  // Q = X * W_Q
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      Tacc sum = 0;
+      for (int k = 0; k < K; ++k) {
         if (!b_col_maj) {
-          running_sum += Tacc(A[row * K + k] * B[k * N + col]);
+          sum += Tacc(X[m * K + k] * W_Q[k * N + n]);
         } else {
-          running_sum += Tacc(A[row * K + k] * B[k + col * K]);
+          sum += Tacc(X[m * K + k] * W_Q[k + n * K]);
         }
       }
-      C[row * N + col] = Tout(running_sum);
+      Q_proj[m * N + n] = sum;
+    }
+  }
+
+  // K = X * W_K
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      Tacc sum = 0;
+      for (int k = 0; k < K; ++k) {
+        if (!b_col_maj) {
+          sum += Tacc(X[m * K + k] * W_K[k * N + n]);
+        } else {
+          sum += Tacc(X[m * K + k] * W_K[k + n * K]);
+        }
+      }
+      K_proj[m * N + n] = sum;
+    }
+  }
+
+  // V = X * W_V
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      Tacc sum = 0;
+      for (int k = 0; k < K; ++k) {
+        if (!b_col_maj) {
+          sum += Tacc(X[m * K + k] * W_V[k * N + n]);
+        } else {
+          sum += Tacc(X[m * K + k] * W_V[k + n * K]);
+        }
+      }
+      V_proj[m * N + n] = sum;
+    }
+  }
+
+  // 2. Compute attention score per head: for each head, Q_h * K_h^T
+  // Output C is [M * M * num_heads], row-major: for each head, [M x M]
+  for (int h = 0; h < num_heads; ++h) {
+    for (int i = 0; i < M; ++i) {
+      for (int j = 0; j < M; ++j) {
+        Tacc sum = 0;
+        for (int n = 0; n < head_dim; ++n) {
+          int q_idx = i * N + h * head_dim + n;
+          int k_idx = j * N + h * head_dim + n;
+          sum += Q_proj[q_idx] * K_proj[k_idx];
+        }
+        // Scalar divide by head_dim (not embed_dim) for per-head scaling
+        // C[h * M * M + i * M + j] = Tout(sum);
+        attn_scores[h * M * M + i * M + j] = Tout(sum);
+      }
+    }
+  }
+
+  // 3. Apply softmax to attention scores per head
+  // For each head, for each row i, softmax over j (columns)
+  for (int h = 0; h < num_heads; ++h) {
+    for (int i = 0; i < M; ++i) {
+      // Find max for numerical stability
+      Tacc max_score = attn_scores[h * M * M + i * M];
+      for (int j = 1; j < M; ++j) {
+        Tacc val = attn_scores[h * M * M + i * M + j];
+        if (val > max_score)
+          max_score = val;
+      }
+      // Compute exp and sum
+      Tacc sum_exp = 0;
+      for (int j = 0; j < M; ++j) {
+        if (h == 0 && i == 0 && j < 10) {
+          std::cout << "attn_scores[" << h << "][" << i << "][" << j
+                    << "] before softmax: "
+                    << attn_scores[h * M * M + i * M + j] << "\n";
+        }
+        Tacc exp_val = std::exp(attn_scores[h * M * M + i * M + j] - max_score);
+        attn_scores[h * M * M + i * M + j] = exp_val;
+        if (h == 0 && i == 0 && j < 10) {
+          std::cout << "attn_scores[" << h << "][" << i << "][" << j
+                    << "] after exp: " << attn_scores[h * M * M + i * M + j]
+                    << "\n";
+        }
+        sum_exp += exp_val;
+      }
+      // Normalize
+      for (int j = 0; j < M; ++j) {
+        attn_scores[h * M * M + i * M + j] =
+            Tout(attn_scores[h * M * M + i * M + j] / sum_exp);
+        if (h == 0 && i == 0 && j < 10) {
+          std::cout << "attn_scores[" << h << "][" << i << "][" << j
+                    << "] after softmax: " << attn_scores[h * M * M + i * M + j]
+                    << "\n";
+        }
+      }
     }
   }
 }
 
 template <typename Tin, typename Tout, typename Tacc>
-float matmul_timed(int M, int N, int K, const std::vector<Tin> A,
+float matmul_timed(int M, int N, int K, int H, const std::vector<Tin> A,
                    const std::vector<Tin> B, std::vector<Tout> &C,
                    int b_col_maj) {
   // TODO: Use Eigen or BLAS to run a more optimized version of the matrix
   // multiplication. The implementation here is really naive.
-#if 0
-  // THIS CODE DOESN'T WORK: M, K, and N need to be constant expressions,
-  // not variables.
-  Matrix<Tin, M, K> a;
-  Matrix<Tin, K, N> b;
-  Matrix<Tout, M, N> c;
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < K; j++) {
-      a(i, j) = A[i * K + j];
-    }
-  }
-  for (int i = 0; i < K; i++) {
-    for (int j = 0; j < N; j++) {
-      b(i, j) = B[i * N + j];
-    }
-  }
   auto start = std::chrono::high_resolution_clock::now();
-  c = a * b;
-  auto end = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < M; i++) {
-    for (int j = 0; j < N; j++) {
-      C[i * N + j] = c(i, j);
-    }
-  }
-  return std::chrono::duration_cast<std::chrono::microseconds>(end - start)
-      .count();
-#endif
-  auto start = std::chrono::high_resolution_clock::now();
-  for (int row = 0; row < M; row++) {
-    for (int col = 0; col < N; col++) {
-      Tacc running_sum = 0;
-      for (int k = 0; k < K; k++) {
+  const int num_heads = H;
+  const int head_dim = N / num_heads;
+
+  // 1. Compute Q = X * W_Q and K = X * W_K
+  std::vector<Tacc> Q(M * N, 0);
+  std::vector<Tacc> K_proj(M * N, 0);
+
+  const Tin *X = &A[0];
+  const Tin *W_Q = &A[M * K];
+  const Tin *W_K = &A[M * K + K * N];
+
+  // Q = X * W_Q
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      Tacc sum = 0;
+      for (int k = 0; k < K; ++k) {
         if (!b_col_maj) {
-          running_sum += Tacc(A[row * K + k] * B[k * N + col]);
+          sum += Tacc(X[m * K + k] * W_Q[k * N + n]);
         } else {
-          running_sum += Tacc(A[row * K + k] * B[k + col * K]);
+          sum += Tacc(X[m * K + k] * W_Q[k + n * K]);
         }
       }
-      C[row * N + col] = Tout(running_sum);
+      Q[m * N + n] = sum;
+    }
+  }
+
+  // K_proj = X * W_K
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      Tacc sum = 0;
+      for (int k = 0; k < K; ++k) {
+        if (!b_col_maj) {
+          sum += Tacc(X[m * K + k] * W_K[k * N + n]);
+        } else {
+          sum += Tacc(X[m * K + k] * W_K[k + n * K]);
+        }
+      }
+      K_proj[m * N + n] = sum;
+    }
+  }
+
+  // 2. Compute attention score per head: for each head, Q_h * K_h^T
+  // Output C is [M * M * num_heads], row-major: for each head, [M x M]
+  for (int h = 0; h < num_heads; ++h) {
+    for (int i = 0; i < M; ++i) {
+      for (int j = 0; j < M; ++j) {
+        Tacc sum = 0;
+        for (int n = 0; n < head_dim; ++n) {
+          int q_idx = i * N + h * head_dim + n;
+          int k_idx = j * N + h * head_dim + n;
+          sum += Q[q_idx] * K_proj[k_idx];
+        }
+        // Scalar divide by head_dim (not embed_dim) for per-head scaling
+        // C[h * M * M + i * M + j] = Tout(sum / head_dim);
+        C[i * M + j] = Tout(sum / head_dim);
+      }
     }
   }
   return std::chrono::duration_cast<std::chrono::microseconds>(
@@ -178,23 +310,67 @@ float matmul_timed(int M, int N, int K, const std::vector<Tin> A,
 }
 
 template <typename Tin, typename Tout, typename Tacc>
-Tout mul_acc(int M, int N, int K, int row, int col, const std::vector<Tin> A,
-             const std::vector<Tin> B, int b_col_maj) {
-  Tacc running_sum = 0;
-  for (int k = 0; k < K; k++) {
-    if (!b_col_maj) {
-      running_sum += Tacc(A[row * K + k] * B[k * N + col]);
-    } else {
-      running_sum += Tacc(A[row * K + k] * B[k + col * K]);
+Tout mul_acc(int M, int N, int K, int H, int row, int col,
+             const std::vector<Tin> A, const std::vector<Tin> B,
+             int b_col_maj) {
+  // A: [X | W_Q | W_K]
+  // X: M*K, W_Q: K*N, W_K: K*N
+  const int num_heads = H;
+  const int head_dim = N / num_heads;
+  const Tin *X = &A[0];
+  const Tin *W_Q = &A[M * K];
+  const Tin *W_K = &A[M * K + K * N];
+
+  // 1. Compute Q[row, n] and K_proj[col, n]
+  std::vector<Tacc> Q_row(N, 0);
+  std::vector<Tacc> K_col(N, 0);
+
+  // Q[row, n] = sum_k X[row*K + k] * W_Q[k*N + n] (or col-major)
+  for (int n = 0; n < N; ++n) {
+    Tacc sum = 0;
+    for (int k = 0; k < K; ++k) {
+      if (!b_col_maj) {
+        sum += Tacc(X[row * K + k] * W_Q[k * N + n]);
+      } else {
+        sum += Tacc(X[row * K + k] * W_Q[k + n * K]);
+      }
     }
+    Q_row[n] = sum;
   }
-  return (Tout)running_sum;
+
+  // K_proj[col, n] = sum_k X[col*K + k] * W_K[k*N + n] (or col-major)
+  for (int n = 0; n < N; ++n) {
+    Tacc sum = 0;
+    for (int k = 0; k < K; ++k) {
+      if (!b_col_maj) {
+        sum += Tacc(X[col * K + k] * W_K[k * N + n]);
+      } else {
+        sum += Tacc(X[col * K + k] * W_K[k + n * K]);
+      }
+    }
+    K_col[n] = sum;
+  }
+
+  // 2. Compute attention score per head: for each head, dot(Q_row_h, K_col_h)
+  Tacc attn_sum = 0;
+  for (int h = 0; h < num_heads; ++h) {
+    Tacc head_sum = 0;
+    for (int n = 0; n < head_dim; ++n) {
+      int idx = h * head_dim + n;
+      head_sum += Q_row[idx] * K_col[idx];
+    }
+    // Scalar divide by head_dim for per-head scaling
+    attn_sum += head_sum / head_dim;
+  }
+
+  // 3. Return as Tout
+  return (Tout)attn_sum;
 }
 
 // nearly_equal function adapted from Stack Overflow, License CC BY-SA 4.0
 // Original author: P-Gn
 // Source: https://stackoverflow.com/a/32334103
-bool nearly_equal(float a, float b, float epsilon = 128 * FLT_EPSILON,
+bool nearly_equal(float a, float b, float epsilon = 64 * FLT_EPSILON,
                   float abs_th = FLT_MIN)
 // those defaults are arbitrary and could be removed
 {
@@ -343,27 +519,30 @@ void print_matrix(const std::vector<int8_t> matrix, int n_cols,
                col_sep, elide_sym, w);
 }
 
-constexpr int max_printable_errors = 32;
+constexpr int max_printable_errors = 4096;
 
 template <typename Tout>
 struct error {
   int row;
   int col;
+  int offset;
   Tout expected;
   Tout actual;
+  std::string tag;
 };
 
 template <typename Tout>
 std::optional<struct error<Tout>>
 verify_single(std::ostream &os, int row, int col, Tout expected, Tout actual,
-              float abs_tol, float rel_tol) {
+              float abs_tol, float rel_tol, int offset = 0,
+              std::string tag = "") {
   bool match = expected == actual;
   if (abs_tol > 0 || rel_tol > 0) {
     // Allow for some tolerance for float data types
     match = nearly_equal(expected, actual, rel_tol, abs_tol);
   }
   if (!match) {
-    return (struct error<Tout>){row, col, expected, actual};
+    return (struct error<Tout>){row, col, offset, expected, actual, tag};
   }
   return std::nullopt;
 }
@@ -373,10 +552,14 @@ void print_error_summary(std::ostream &os, int n_errors,
                          std::vector<struct error<Tout>> &errors,
                          Tout max_rel_error) {
   for (struct error<Tout> &err : errors) {
-    os << "[" << std::setw(5) << err.row << ", " << std::setw(5) << err.col
-       << "] " << std::setw(4) << std::setprecision(2) << std::fixed
-       << (float)err.actual << " =!= " << std::setw(4) << std::setprecision(2)
-       << std::fixed << (float)err.expected << std::endl;
+    if (!err.tag.empty()) {
+      os << "[" << err.tag << "] ";
+    }
+    os << "offset: " << err.offset << ", [" << std::setw(5) << err.row << ", "
+       << std::setw(5) << err.col << "] " << std::setw(4)
+       << std::setprecision(2) << std::fixed << (float)err.actual
+       << " =!= " << std::setw(4) << std::setprecision(2) << std::fixed
+       << (float)err.expected << std::endl;
   }
   if (n_errors > max_printable_errors) {
     os << "...and " << std::setw(0) << n_errors - max_printable_errors
@@ -396,21 +579,22 @@ void print_progress_bar(std::ostream &os, double progress, int len = 75) {
 }
 
 template <typename Tin, typename Tout, typename Tacc>
-int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
+int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
            std::vector<Tout> C, int verbosity = 0, float abs_tol = 0.5,
            float rel_tol = 0.05, int b_col_maj = 0) {
   int n_errors = 0;
   std::vector<struct error<Tout>> errors;
   Tout max_rel_error = (Tout)0.0f;
 
-  std::vector<Tout> CRef(M * N);
-  matmul<Tin, Tout, Tacc>(M, N, K, A, B, CRef, b_col_maj);
+  std::vector<Tout> CRef(3 * M * N + H * M * M);
+  memcpy(CRef.data(), C.data(), (3 * M * N + H * M * M) * sizeof(Tout));
+  matmul<Tin, Tout, Tacc>(M, N, K, H, A, B, CRef, b_col_maj);
 
   for (int row = 0; row < M; row++) {
     for (int col = 0; col < N; col++) {
       std::optional<struct error<Tout>> error =
           verify_single(std::cout, row, col, CRef[row * N + col],
-                        C[row * N + col], abs_tol, rel_tol);
+                        C[row * N + col], abs_tol, rel_tol, 0, "Q_proj");
       if (error.has_value()) {
         if (n_errors < max_printable_errors) {
           errors.push_back(*error);
@@ -425,26 +609,97 @@ int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
       }
     }
   }
+  for (int row = 0; row < M; row++) {
+    for (int col = 0; col < N; col++) {
+      std::optional<struct error<Tout>> error = verify_single(
+          std::cout, row, col, CRef[M * N + row * N + col],
+          C[M * N + row * N + col], abs_tol, rel_tol, M * N, "K_proj");
+      if (error.has_value()) {
+        if (n_errors < max_printable_errors) {
+          errors.push_back(*error);
+        }
+        Tout rel_error =
+            std::abs(error->actual - error->expected) /
+            std::max(std::abs(error->actual), std::abs(error->expected));
+        if (rel_error > max_rel_error) {
+          max_rel_error = rel_error;
+        }
+        n_errors++;
+      }
+    }
+  }
+  for (int row = 0; row < M; row++) {
+    for (int col = 0; col < N; col++) {
+      std::optional<struct error<Tout>> error = verify_single(
+          std::cout, row, col, CRef[2 * M * N + row * N + col],
+          C[2 * M * N + row * N + col], abs_tol, rel_tol, 2 * M * N, "V_proj");
+      if (error.has_value()) {
+        if (n_errors < max_printable_errors) {
+          errors.push_back(*error);
+        }
+        Tout rel_error =
+            std::abs(error->actual - error->expected) /
+            std::max(std::abs(error->actual), std::abs(error->expected));
+        if (rel_error > max_rel_error) {
+          max_rel_error = rel_error;
+        }
+        n_errors++;
+      }
+    }
+  }
+  for (int head = 0; head < H; head++) {
+    for (int row = 0; row < M; row++) {
+      for (int col = 0; col < M; col++) {
+        std::optional<struct error<Tout>> error = verify_single(
+            std::cout, row, col, CRef[3 * M * N + head * M * M + row * M + col],
+            C[3 * M * N + head * M * M + row * M + col], abs_tol, rel_tol,
+            3 * M * N + head * M * M, "attn_score_" + std::to_string(head));
+        if (error.has_value()) {
+          if (n_errors < max_printable_errors) {
+            errors.push_back(*error);
+          }
+          Tout rel_error =
+              std::abs(error->actual - error->expected) /
+              std::max(std::abs(error->actual), std::abs(error->expected));
+          if (rel_error > max_rel_error) {
+            max_rel_error = rel_error;
+          }
+          n_errors++;
+        }
+      }
+    }
+  }
+
   print_error_summary(std::cout, n_errors, errors, max_rel_error);
 
-  if (n_errors > 0) {
-    std::cout << std::endl << "Reference:" << std::endl;
-    matmul_common::print_matrix(CRef, N);
-    std::cout << std::endl << "Output:" << std::endl;
-    matmul_common::print_matrix(C, N);
+  //   if (n_errors > 0) {
+  //   std::cout << std::endl << "Reference:" << std::endl;
+  //   matmul_common::print_matrix(CRef, M);
+  //   std::cout << std::endl << "Output:" << std::endl;
+  //   matmul_common::print_matrix(C, M);
+  //   }
+
+  // Check the first head result
+  for (int row = 0; row < 1; row++) {
+    for (int col = 0; col < 10; col++) {
+      std::cout << "C[" << row << ", " << col
+                << "] = " << C[3 * M * N + row * M + col]
+                << " (expected: " << CRef[3 * M * N + row * M + col] << ")"
+                << std::endl;
+    }
   }
 
   return n_errors;
 }
 
 template <typename Tin, typename Tout, typename Tacc>
-int verify_stochastic(int M, int N, int K, std::vector<Tin> A,
+int verify_stochastic(int M, int N, int K, int H, std::vector<Tin> A,
                       std::vector<Tin> B, std::vector<Tout> C, int n_samples,
                       int verbosity = 0, float abs_tol = 0.5,
                       float rel_tol = 0.05, int b_col_maj = 0) {
   std::mt19937 rng;
   auto rows = std::views::iota(0, M);
-  auto cols = std::views::iota(0, N);
+  auto cols = std::views::iota(0, M);
   auto sampled_rows = std::vector<int>(n_samples);
   auto sampled_cols = std::vector<int>(n_samples);
 
@@ -466,9 +721,9 @@ int verify_stochastic(int M, int N, int K, std::vector<Tin> A,
       progress = (double)i / n_samples;
       print_progress_bar(std::cerr, progress);
     }
-    Tout ref = mul_acc<Tin, Tout, Tacc>(M, N, K, row, col, A, B, b_col_maj);
+    Tout ref = mul_acc<Tin, Tout, Tacc>(M, N, K, H, row, col, A, B, b_col_maj);
     std::optional<struct error<Tout>> error = verify_single(
-        std::cout, row, col, ref, C[row * N + col], abs_tol, rel_tol);
+        std::cout, row, col, ref, C[row * M + col], abs_tol, rel_tol);
     if (error.has_value()) {
       if (n_errors < max_printable_errors) {
         errors.push_back(*error);
@@ -489,12 +744,12 @@ int verify_stochastic(int M, int N, int K, std::vector<Tin> A,
 }
 
 template <typename Tin, typename Tout, typename Tacc>
-float time_matmul(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
-                  std::vector<Tout> C, int n_samples, int verbosity = 0,
-                  float abs_tol = 0.5, float rel_tol = 0.05,
+float time_matmul(int M, int N, int K, int H, std::vector<Tin> A,
+                  std::vector<Tin> B, std::vector<Tout> C, int n_samples,
+                  int verbosity = 0, float abs_tol = 0.5, float rel_tol = 0.05,
                   int b_col_maj = 0) {
-  std::vector<Tout> CRef(M * N);
-  return matmul_timed<Tin, Tout, Tacc>(M, N, K, A, B, CRef, b_col_maj);
+  std::vector<Tout> CRef(M * M);
+  return matmul_timed<Tin, Tout, Tacc>(M, N, K, H, A, B, CRef, b_col_maj);
 }
 
 // --------------------------------------------------------------------------

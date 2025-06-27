@@ -74,23 +74,19 @@ int main(int argc, const char *argv[]) {
   int M = vm["M"].as<int>();
   int K = vm["K"].as<int>();
   int N = vm["N"].as<int>();
-  bool do_verify_stochastic =
-      (long long)M * N * K > verify_stochastic_threshold;
+  int H = vm["H"].as<int>();
 
   if (verbosity >= 1) {
     std::cout << "Matrix size " << M << "x" << K << "x" << N << std::endl;
   }
 
-# B isn't used
-  int A_VOLUME = M * K;
+  int A_VOLUME = M * K + 2 * K * N;
   int B_VOLUME = K * N;
-  int C_VOLUME = M * N;
+  int C_VOLUME = 3 * M * N + H * M * M;
 
   size_t A_SIZE = (A_VOLUME * sizeof(A_DATATYPE));
   size_t B_SIZE = (B_VOLUME * sizeof(B_DATATYPE));
   size_t C_SIZE = (C_VOLUME * sizeof(C_DATATYPE));
-
-  size_t OUT_SIZE = C_SIZE + trace_size;
 
   std::vector<uint32_t> instr_v =
       test_utils::load_instr_binary(vm["instr"].as<std::string>());
@@ -162,11 +158,39 @@ int main(int argc, const char *argv[]) {
 
   A_DATATYPE *bufA = bo_a.map<A_DATATYPE *>();
   std::vector<A_DATATYPE> AVec(A_VOLUME);
-  for (int i = 0; i < A_VOLUME; i++) {
+  for (int i = 0; i < M * K; i++) {
     AVec[i] = matmul_common::get_random<A_DATATYPE>();
+    // if (i % K == i / K) {
+    //   AVec[i] = 1;
+    // } else {
+    //   AVec[i] = 1; // Zero out the rest of the matrix
+    // }
+  }
+  for (int i = M * K; i < ((M * K) + (K * N)); i++) {
+    AVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
+    // Write to the anti-diagonal (top right to bottom left)
+    // int row = (i - (M * K + K * N)) / N;
+    // int col = (i - (M * K + K * N)) % N;
+    // if (row + col == N - 1) {
+    // if (i % ((M * K) + N) == i / ((M * K) + N)) {
+    //   AVec[i] = 1;
+    // } else {
+    //   AVec[i] = 1; // Zero out the rest of the matrix
+    // }
+  }
+  for (int i = ((M * K) + (K * N)); i < A_VOLUME; i++) {
+    AVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
+    // Write to the anti-diagonal (top right to bottom left)
+    // int row = (i - (M * K + K * N)) / N;
+    // int col = (i - (M * K + K * N)) % N;
+    // if (row + col == N - 1) {
+    // if (i % ((M * K) + (K * N) + N) == i / ((M * K) + (K * N) + N)) {
+    //   AVec[i] = 1;
+    // } else {
+    //   AVec[i] = 1; // Zero out the rest of the matrix
+    // }
   }
   memcpy(bufA, AVec.data(), (AVec.size() * sizeof(A_DATATYPE)));
-
   B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
   std::vector<B_DATATYPE> BVec(B_VOLUME);
   for (int i = 0; i < B_VOLUME; i++) {
@@ -179,6 +203,18 @@ int main(int argc, const char *argv[]) {
   std::vector<C_DATATYPE> CVec(C_VOLUME);
   memset(bufOut, 0, C_SIZE);
 
+  //   for (int i = 0; i < M * N; ++i) {
+  //     int col = i % N;
+  //     CVec[i] =
+  //         (col == 0) ? static_cast<C_DATATYPE>(1) :
+  //         static_cast<C_DATATYPE>(0);
+  //   }
+  //   for (int i = M * N; i < 2 * M * N; ++i) {
+  //     int row = (i - M * N) / N;
+  //     CVec[i] = static_cast<C_DATATYPE>(row);
+  //   }
+  //   memcpy(bufOut, CVec.data(), (CVec.size() * sizeof(C_DATATYPE)));
+
   char *bufTrace = bo_trace.map<char *>();
   if (trace_size > 0)
     memset(bufTrace, 0, trace_size);
@@ -189,9 +225,9 @@ int main(int argc, const char *argv[]) {
     std::cout << "Verification tolerance " << abs_tol << " absolute, "
               << rel_tol << " relative.\n";
     std::cout << "A = \n";
-    matmul_common::print_matrix(AVec, K);
+    // matmul_common::print_matrix(AVec, K);
     std::cout << "B = \n";
-    matmul_common::print_matrix(BVec, N);
+    // matmul_common::print_matrix(BVec, N);
   }
 
   // Instruction buffer for DMA configuration
@@ -212,7 +248,8 @@ int main(int argc, const char *argv[]) {
   float cpu_time_total = 0;
 
   int errors = 0;
-  float macs = 2.0 * float(M) * float(K) * float(N);
+  float macs = 2.0 * (3.0 * float(M) * float(K) * float(N) +
+                      2.0 * float(M) * float(N) * float(M));
 
   for (unsigned iter = 0; iter < num_iter; iter++) {
 
@@ -241,24 +278,11 @@ int main(int argc, const char *argv[]) {
     if (do_verify) {
       memcpy(CVec.data(), bufOut, (CVec.size() * sizeof(C_DATATYPE)));
       if (verbosity >= 1) {
-        if (do_verify_stochastic) {
-          std::cout << "Verifying " << verify_stochastic_n_samples
-                    << " random samples against reference matmul ..."
-                    << std::endl;
-        } else {
-          std::cout << "Verifying against reference matmul ..." << std::endl;
-        }
+        std::cout << "Verifying against reference matmul ..." << std::endl;
       }
       auto vstart = std::chrono::system_clock::now();
-      if (do_verify_stochastic) {
-        errors = matmul_common::verify_stochastic<A_DATATYPE, C_DATATYPE,
-                                                  ACC_DATATYPE>(
-            M, N, K, AVec, BVec, CVec, verify_stochastic_n_samples, verbosity,
-            abs_tol, rel_tol, b_col_maj);
-      } else {
-        errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
-            M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, b_col_maj);
-      }
+      errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
+          M, N, K, H, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, b_col_maj);
       auto vstop = std::chrono::system_clock::now();
       float vtime =
           std::chrono::duration_cast<std::chrono::seconds>(vstop - vstart)
@@ -278,7 +302,7 @@ int main(int argc, const char *argv[]) {
     // if (iter % 10 == 0) {
     //   cpu_time_total +=
     //       matmul_common::time_matmul<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
-    //           M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol,
+    //           M, M, K, H, AVec, BVec, CVec, verbosity, abs_tol, rel_tol,
     //           b_col_maj);
     // }
 
@@ -316,10 +340,6 @@ int main(int argc, const char *argv[]) {
     return 0;
   } else {
     std::cout << "\nError count: " << errors;
-    if (do_verify_stochastic) {
-      std::cout << " (out of " << verify_stochastic_n_samples
-                << " random samples)";
-    }
     std::cout << "\n\n";
 
     std::cout << "\nFailed.\n\n";
