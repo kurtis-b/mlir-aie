@@ -75,8 +75,6 @@ int main(int argc, const char *argv[]) {
   int K = vm["K"].as<int>();
   int N = vm["N"].as<int>();
   int H = vm["H"].as<int>();
-  bool do_verify_stochastic =
-      (long long)M * N * K > verify_stochastic_threshold;
 
   if (verbosity >= 1) {
     std::cout << "Matrix size " << M << "x" << K << "x" << N << std::endl;
@@ -280,25 +278,11 @@ int main(int argc, const char *argv[]) {
     if (do_verify) {
       memcpy(CVec.data(), bufOut, (CVec.size() * sizeof(C_DATATYPE)));
       if (verbosity >= 1) {
-        if (do_verify_stochastic) {
-          std::cout << "Verifying " << verify_stochastic_n_samples
-                    << " random samples against reference matmul ..."
-                    << std::endl;
-        } else {
-          std::cout << "Verifying against reference matmul ..." << std::endl;
-        }
+        std::cout << "Verifying against reference matmul ..." << std::endl;
       }
       auto vstart = std::chrono::system_clock::now();
-      if (do_verify_stochastic) {
-        errors = matmul_common::verify_stochastic<A_DATATYPE, C_DATATYPE,
-                                                  ACC_DATATYPE>(
-            M, N, K, H, AVec, BVec, CVec, verify_stochastic_n_samples,
-            verbosity, abs_tol, rel_tol, b_col_maj);
-      } else {
-        errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
-            M, N, K, H, AVec, BVec, CVec, verbosity, abs_tol, rel_tol,
-            b_col_maj);
-      }
+      errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
+          M, N, K, H, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, b_col_maj);
       auto vstop = std::chrono::system_clock::now();
       float vtime =
           std::chrono::duration_cast<std::chrono::seconds>(vstop - vstart)
@@ -356,10 +340,6 @@ int main(int argc, const char *argv[]) {
     return 0;
   } else {
     std::cout << "\nError count: " << errors;
-    if (do_verify_stochastic) {
-      std::cout << " (out of " << verify_stochastic_n_samples
-                << " random samples)";
-    }
     std::cout << "\n\n";
 
     std::cout << "\nFailed.\n\n";
