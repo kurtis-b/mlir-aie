@@ -130,8 +130,10 @@ def my_mha(
 
     q_matmul_dims = (32, 64, 64)
     kv_matmul_dims = (32, 64, 64)
-    o1_matmul_dims = (32, 64, 64)
-    matmul_dims = [q_matmul_dims, kv_matmul_dims, o1_matmul_dims]
+    matmul_dims = [q_matmul_dims, kv_matmul_dims]
+
+    o1_matmul_dims = [(16, 32), (256, 32)]
+    o2_softmax_dims = (16, 256)
     
     # r, s, t are the dimensions required by the microkernel MAC instructions.
     mac_dims = microkernel_mac_dim_map[dev][dtype_in_str]
@@ -158,10 +160,14 @@ def my_mha(
         assert (
             M % (dims[0] * n_aie_rows_projs) == 0
         ), """A must be tileable into (m * n_aie_rows_projs, dims[1])-sized blocks"""
+    assert (
+        M % (o1_matmul_dims[0][0]) == 0
+    ), """A must be tileable into (m, dims[1])-sized blocks"""
 
     # Both A and B are tiled in the K dimension into size k.
     for dims in matmul_dims:
         assert K % dims[1] == 0
+    assert K % o1_matmul_dims[0][1] == 0
 
     # Input matrix B:
     # Conceptually, we do the same as with A, but instead of broadcasting
@@ -170,16 +176,27 @@ def my_mha(
         assert (
             N % (dims[2] * n_aie_cols_projs) == 0
         ), """B must be tileable into (k, dims[2] * n_aie_cols_projs)-sized blocks"""
+    assert (
+        N % (o1_matmul_dims[1][0]) == 0
+    ), """B must be tileable into (k, dims[2])-sized blocks"""
 
     assert (N % H == 0), """Embedding dimension must be divisible by number of heads"""
-    assert (head_dim % o1_matmul_dims[1] == 0), """Head dimension must be divisible by o1_matmul_dims[1]"""
-    assert (head_dim % q_matmul_dims[2] == 0), """Head dimension must be divisible by q_matmul_dims[2]"""
+    assert (head_dim % o1_matmul_dims[0][1] == 0), """Head dimension must be divisible by left matrix col dim"""
+    assert (head_dim % o1_matmul_dims[1][1] == 0), """Head dimension must be divisible by right matrix col dim"""
+    assert (M / o2_softmax_dims[1] == 1), """Softmax tile col size must be the whole sequence length"""
+    assert (o1_matmul_dims[0][0] == o2_softmax_dims[0]), """Softmax tile row size must be the same as the attn score"""
+    assert (o1_matmul_dims[1][0] == o2_softmax_dims[1]), """Softmax tile col size must be the same as the attn score"""
 
     for dims in matmul_dims:
         assert (dims[0] * dims[1] * dims[2] > 0), f"Matmul dimensions {dims} must be non-zero"
         assert (dims[0] % r == 0), f"Matmul dimension {dims[0]} must be divisible by {r}"
         assert (dims[1] % s == 0), f"Matmul dimension {dims[1]} must be divisible by {s}"
         assert (dims[2] % t == 0), f"Matmul dimension {dims[2]} must be divisible by {t}"
+    assert (o1_matmul_dims[0][0] * o1_matmul_dims[0][1] * o1_matmul_dims[1][0] > 0), f"Matmul dimensions {o1_matmul_dims} must be non-zero"
+    assert (o1_matmul_dims[0][0] % r == 0), f"Matmul dimension {o1_matmul_dims[0][0]} must be divisible by {r}"
+    assert (o1_matmul_dims[0][1] % s == 0), f"Matmul dimension {o1_matmul_dims[0][1]} must be divisible by {s}"
+    assert (o1_matmul_dims[1][1] % s == 0), f"Matmul dimension {o1_matmul_dims[1][1]} must be divisible by {s}"
+    assert (o1_matmul_dims[1][0] % t == 0), f"Matmul dimension {o1_matmul_dims[1][0]} must be divisible by {t}"
 
     # If you get errors during CDO generation due to running out of program
     # memory, it may be because too much code is generated due to ObjectFIFO
@@ -209,9 +226,9 @@ def my_mha(
         Wkv_l1_ty = np.ndarray[(kv_matmul_dims[1] * kv_matmul_dims[2],), np.dtype[dtype_in]]
         kv_l1_ty = np.ndarray[(kv_matmul_dims[0] * kv_matmul_dims[2],), np.dtype[dtype_out]]
 
-        q_l1_ty_in = np.ndarray[(o1_matmul_dims[0] * o1_matmul_dims[1],), np.dtype[dtype_out]]
-        k_l1_ty_in = np.ndarray[(o1_matmul_dims[1] * o1_matmul_dims[2],), np.dtype[dtype_out]]
-        o1_l1_ty = np.ndarray[(o1_matmul_dims[0] * o1_matmul_dims[2],), np.dtype[dtype_out]]
+        q_l1_ty_in = np.ndarray[(o1_matmul_dims[0][0] * o1_matmul_dims[0][1],), np.dtype[dtype_out]]
+        k_l1_ty_in = np.ndarray[(o1_matmul_dims[1][0] * o1_matmul_dims[1][1],), np.dtype[dtype_out]]
+        o1_l1_ty = np.ndarray[(o1_matmul_dims[0][0] * o1_matmul_dims[1][0],), np.dtype[dtype_out]]
 
         # AIE Core Function declarations
         # Last part of the name is whether the right matrix is row major
@@ -222,9 +239,9 @@ def my_mha(
             matmul_vectorized_func_name + f"_{q_matmul_dims[0]}_{q_matmul_dims[1]}_{q_matmul_dims[2]}_1",
             inputs=[X_l1_ty, Wq_l1_ty, q_l1_ty],
         )
-        zero_attn_score = external_func(f"zero_{dtype_out_str}_{o1_matmul_dims[0]}_{o1_matmul_dims[1]}_{o1_matmul_dims[2]}_0", inputs=[o1_l1_ty])
+        zero_attn_score = external_func(f"zero_{dtype_out_str}_{o1_matmul_dims[0][0]}_{o1_matmul_dims[0][1]}_{o1_matmul_dims[1][0]}_0", inputs=[o1_l1_ty])
         matmul_attn_score = external_func(
-            matmul_vectorized_func_name + f"_{o1_matmul_dims[0]}_{o1_matmul_dims[1]}_{o1_matmul_dims[2]}_0",
+            matmul_vectorized_func_name + f"_{o1_matmul_dims[0][0]}_{o1_matmul_dims[0][1]}_{o1_matmul_dims[1][0]}_0",
             inputs=[q_l1_ty_in, k_l1_ty_in, o1_l1_ty],
         )
 
@@ -323,27 +340,27 @@ def my_mha(
         q_l3l2_fifos = object_fifo(f"q_L3L2", shim_tiles[2], mem_tiles[2], fifo_depth, q_l1_ty_in,)
         q_l2l1_fifos = object_fifo(f"q_L2L1", mem_tiles[2], core_tiles[0][2], fifo_depth, q_l1_ty_in,
                                     [
-                                        (o1_matmul_dims[0] // r, r * o1_matmul_dims[1]),
-                                        (o1_matmul_dims[1] // s, s),
-                                        (r, o1_matmul_dims[1]),
+                                        (o1_matmul_dims[0][0] // r, r * o1_matmul_dims[0][1]),
+                                        (o1_matmul_dims[0][1] // s, s),
+                                        (r, o1_matmul_dims[0][1]),
                                         (s, 1),
                                     ],)
         object_fifo_link(q_l3l2_fifos, q_l2l1_fifos)
         k_l3l2_fifos = object_fifo(f"k_L3L2", shim_tiles[2], mem_tiles[2], fifo_depth, k_l1_ty_in,)
         k_l2l1_fifos = object_fifo(f"k_L2L1", mem_tiles[2], core_tiles[0][2], fifo_depth, k_l1_ty_in,
                                     [
-                                        (o1_matmul_dims[1] // t, t * o1_matmul_dims[2]),
-                                        (o1_matmul_dims[2] // s, s),
-                                        (t, o1_matmul_dims[2]),
+                                        (o1_matmul_dims[0][1] // t, t * o1_matmul_dims[1][1]),
+                                        (o1_matmul_dims[1][1] // s, s),
+                                        (t, o1_matmul_dims[1][1]),
                                         (s, 1),
                                     ],)
         object_fifo_link(k_l3l2_fifos, k_l2l1_fifos)
         o1_l1l2_fifos = object_fifo(f"o1_L1L2", core_tiles[0][2], mem_tiles[2], fifo_depth, o1_l1_ty)
         o1_l2l3_fifos = object_fifo(f"o1_L2L3", mem_tiles[2], shim_tiles[2], fifo_depth, o1_l1_ty,
                                     [
-                                        (o1_matmul_dims[0] // r, r * o1_matmul_dims[2]),
+                                        (o1_matmul_dims[0][0] // r, r * o1_matmul_dims[1][0]),
                                         (r, t),
-                                        (o1_matmul_dims[2] // t, r * t),
+                                        (o1_matmul_dims[1][0] // t, r * t),
                                         (t, 1),
                                     ],)
         object_fifo_link(o1_l1l2_fifos, o1_l2l3_fifos)
@@ -397,13 +414,13 @@ def my_mha(
                                 X_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
                             v_l1l2_fifos[row].release(ObjectFifoPort.Produce, 1)
 
-        @core(core_tiles[0][2], f"mha_mm_{o1_matmul_dims[0]}x{o1_matmul_dims[1]}x{o1_matmul_dims[2]}_col_major.o", stack_size=0xD00)
+        @core(core_tiles[0][2], f"mha_mm_{o1_matmul_dims[0][0]}x{o1_matmul_dims[0][1]}x{o1_matmul_dims[1][0]}_col_major.o", stack_size=0xD00)
         def core_body():
             for _ in range_(0xFFFFFFFF):
                 for _ in range_(H):
                     elem_o1 = o1_l1l2_fifos.acquire(ObjectFifoPort.Produce, 1)
                     zero_attn_score(elem_o1)
-                    for _ in range_(head_dim // o1_matmul_dims[1]):
+                    for _ in range_(head_dim // o1_matmul_dims[0][1]):
                         elem_in_q = q_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
                         elem_in_k = k_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
                         matmul_attn_score(elem_in_q, elem_in_k, elem_o1)
@@ -488,14 +505,14 @@ def my_mha(
                         dma_wait(q_l2l3_fifos, k_l2l3_fifos, v_l2l3_fifos)
                 
                 for head in range(H):
-                    for row_offset in range(0, M, o1_matmul_dims[0]):
+                    for row_offset in range(0, M, o1_matmul_dims[0][0]):
                         npu_dma_memcpy_nd(
                             metadata=q_l3l2_fifos,
                             bd_id=0,
                             mem=C,
                             offsets=[0, 0, 0, row_offset * N + head * head_dim],
-                            sizes=[M // o1_matmul_dims[2], head_dim // o1_matmul_dims[1], o1_matmul_dims[0], o1_matmul_dims[1]],
-                            strides=[0, o1_matmul_dims[1], N, 1],
+                            sizes=[M // o1_matmul_dims[1][0], head_dim // o1_matmul_dims[0][1], o1_matmul_dims[0][0], o1_matmul_dims[0][1]],
+                            strides=[0, o1_matmul_dims[0][1], N, 1],
                         )
 
                         npu_dma_memcpy_nd(
@@ -503,8 +520,8 @@ def my_mha(
                             bd_id=1,
                             mem=C,
                             offsets=[0, 0, 0, M * N + head * head_dim],
-                            sizes=[M // o1_matmul_dims[2], head_dim // o1_matmul_dims[1], o1_matmul_dims[2], o1_matmul_dims[1]],
-                            strides=[o1_matmul_dims[2] * N, o1_matmul_dims[1], N, 1],
+                            sizes=[M // o1_matmul_dims[1][0], head_dim // o1_matmul_dims[1][1], o1_matmul_dims[1][0], o1_matmul_dims[1][1]],
+                            strides=[o1_matmul_dims[1][0] * N, o1_matmul_dims[1][1], N, 1],
                         )
 
                         npu_dma_memcpy_nd(
@@ -512,8 +529,8 @@ def my_mha(
                             bd_id=2,
                             mem=C,
                             offsets=[0, 0, 0, 3 * M * N + head * M * M + row_offset * M],
-                            sizes=[1, M // o1_matmul_dims[2], o1_matmul_dims[0], o1_matmul_dims[2]],
-                            strides=[0, o1_matmul_dims[2], M, 1],
+                            sizes=[1, M // o1_matmul_dims[1][0], o1_matmul_dims[0][0], o1_matmul_dims[1][0]],
+                            strides=[0, o1_matmul_dims[1][0], M, 1],
                         )
 
                         dma_wait(o1_l2l3_fifos)
