@@ -45,12 +45,6 @@ dtype_in?=bf16
 dtype_out?=bf16
 trace_size?=0
 
-SKIP_KERNELS=true
-KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n}
-ifeq (${b_col_maj}, 1)
-	KERNEL_DEFINES+=-DB_COL_MAJ
-endif
-
 include ${srcdir}/../../makefile-common
 
 ifeq ($(devicename),npu2)
@@ -59,26 +53,29 @@ else
 kernels_dir=${srcdir}/../../../../../aie_kernels/aie2
 endif
 
+SKIP_KERNELS=true
+KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -I${srcdir}/../../../../../aie_kernels 
+
 # Define matmul and softmax dimension lists
 # If these values are changed, make sure to update the corresponding kernel code's
 # combos(X) and "#if" macros. 
-matmul_dims := 32x64x64 
+matmul_dims := 32x64x64 16x32x256
 
 # Add "nm ${@D}/${@F}" at the end of the command to see the symbols in the object file 
 # Pattern rule for matmul kernels, select row or col major based on b_col_maj
-build/mha_mm_%_row_major.o:
+build/mha_mm_%_row_major.o: ${srcdir}/mm_aie2.cc
 	$(eval dims := $(subst x, ,$*))
 	$(eval m := $(word 1,${dims}))
 	$(eval k := $(word 2,${dims}))
 	$(eval n := $(word 3,${dims}))
-	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -I${srcdir}/../../../../../aie_kernels -c ${srcdir}/mm_aie2.cc -o $(@F)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -c $< -o $(@F)
 
-build/mha_mm_%_col_major.o:
+build/mha_mm_%_col_major.o: ${srcdir}/mm_aie2.cc
 	$(eval dims := $(subst x, ,$*))
 	$(eval m := $(word 1,${dims}))
 	$(eval k := $(word 2,${dims}))
 	$(eval n := $(word 3,${dims}))
-	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DB_COL_MAJ -D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -I${srcdir}/../../../../../aie_kernels -c ${srcdir}/mm_aie2.cc -o $(@F)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DB_COL_MAJ ${KERNEL_DEFINES} -c $< -o $(@F)
 
 # Convenience targets to build all kernels
 matmul_objs_row_m := $(addprefix build/mha_mm_,$(addsuffix _row_major.o,$(matmul_dims)))
