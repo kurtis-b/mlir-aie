@@ -244,6 +244,7 @@ def my_mha(
             matmul_vectorized_func_name + f"_{o1_matmul_dims[0][0]}_{o1_matmul_dims[0][1]}_{o1_matmul_dims[1][0]}_0",
             inputs=[q_l1_ty_in, k_l1_ty_in, o1_l1_ty],
         )
+        div_projs = external_func(f"div_2d_bf16", inputs=[o1_l1_ty, o1_l1_ty])
 
         if dev == "npu":
             tiles = [[tile(col + 0, row) for col in range(0, n_aie_cols)] for row in range(0, 6)] # 1st to 3rd columns
@@ -426,6 +427,7 @@ def my_mha(
                         matmul_attn_score(elem_in_q, elem_in_k, elem_o1)
                         q_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
                         k_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                    div_projs(elem_o1, elem_o1)
                     o1_l1l2_fifos.release(ObjectFifoPort.Produce, 1)
 
         # To/from AIE-array data movement
