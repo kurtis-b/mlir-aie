@@ -245,6 +245,7 @@ def my_mha(
             matmul_vectorized_func_name + f"_{o1_matmul_dims[0][0]}_{o1_matmul_dims[0][1]}_{o1_matmul_dims[1][0]}_0",
             inputs=[q_l1_ty_in, k_l1_ty_in, o1_l1_ty],
         )
+        div_projs = external_func(f"div_2d_bf16", inputs=[o1_l1_ty, o1_l1_ty])
         softmax_o2 = external_func(
             f"softmax_{dtype_in_str}",
             inputs=[o2_l1_ty, o2_l1_ty],
@@ -435,6 +436,7 @@ def my_mha(
                         matmul_attn_score(elem_in_q, elem_in_k, elem_o1)
                         q_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
                         k_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                    div_projs(elem_o1, elem_o1)
                     o1_l1l2_fifos.release(ObjectFifoPort.Produce, 1)
 
         @core(core_tiles[1][2], f"mha_softmax.o") # Make sure to use the bundled obj file, not the softmax-only obj file
