@@ -19,6 +19,7 @@ M?=256
 K?=768
 N?=768
 H?=12
+H_DIM := $(shell echo $$(($(N)/$(H))))
 
 ifeq ($(devicename),npu2)
 n_aie_cols?=4
@@ -63,19 +64,37 @@ matmul_dims := 32x64x64 16x32x256
 
 # Add "nm ${@D}/${@F}" at the end of the command to see the symbols in the object file 
 # Pattern rule for matmul kernels, select row or col major based on b_col_maj
-build/mha_mm_%_row_major.o: ${srcdir}/mm_aie2.cc
-	$(eval dims := $(subst x, ,$*))
-	$(eval m := $(word 1,${dims}))
-	$(eval k := $(word 2,${dims}))
-	$(eval n := $(word 3,${dims}))
-	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -c $< -o $(@F)
 
-build/mha_mm_%_col_major.o: ${srcdir}/mm_aie2.cc
-	$(eval dims := $(subst x, ,$*))
-	$(eval m := $(word 1,${dims}))
-	$(eval k := $(word 2,${dims}))
-	$(eval n := $(word 3,${dims}))
-	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DB_COL_MAJ ${KERNEL_DEFINES} -c $< -o $(@F)
+# Extract dimensions from the pattern stem (e.g., 32x64x64)
+define extract_dims
+$(eval dims := $(subst x, ,$*))
+$(eval m := $(word 1,${dims}))
+$(eval k := $(word 2,${dims}))
+$(eval n := $(word 3,${dims}))
+endef
+
+build/div_%.o: ${kernels_dir}/div.cc
+	$(call extract_dims)
+	mkdir -p $(@D)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -DDIM_HEAD=${H_DIM} -c $< -o $(@F)
+
+build/mm_%_row_major.o: ${srcdir}/mm_aie2.cc
+	$(call extract_dims)
+	mkdir -p $(@D)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
+
+build/mha_mm_%_row_major.o: build/mm_%_row_major.o build/div_%.o
+	mkdir -p $(@D)
+	ar rvs $@ $^
+
+build/mm_%_col_major.o: ${srcdir}/mm_aie2.cc
+	$(call extract_dims)
+	mkdir -p $(@D)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DB_COL_MAJ ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
+
+build/mha_mm_%_col_major.o: build/mm_%_col_major.o build/div_%.o
+	mkdir -p $(@D)
+	ar rvs $@ $^
 
 # Convenience targets to build all kernels
 matmul_objs_row_m := $(addprefix build/mha_mm_,$(addsuffix _row_major.o,$(matmul_dims)))

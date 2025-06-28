@@ -19,6 +19,7 @@ M?=256
 K?=768
 N?=768
 H?=12
+H_DIM := $(shell echo $$(($(N)/$(H))))
 
 ifeq ($(devicename),npu2)
 n_aie_cols?=4
@@ -28,7 +29,7 @@ endif
 b_col_maj?=0
 
 aieargs=--dev ${devicename} -M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 1
+runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 5
 target_suffix=mha
 
 # set this flag to 1 for linear buffer allocation
@@ -65,19 +66,43 @@ softmax_dims := 16x256
 
 # Add "nm ${@D}/${@F}" at the end of the command to see the symbols in the object file 
 # Pattern rule for matmul kernels, select row or col major based on b_col_maj
-build/mha_mm_%_row_major.o: ${srcdir}/mm_aie2.cc
-	$(eval dims := $(subst x, ,$*))
-	$(eval m := $(word 1,${dims}))
-	$(eval k := $(word 2,${dims}))
-	$(eval n := $(word 3,${dims}))
-	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -c $< -o $(@F)
 
-build/mha_mm_%_col_major.o: ${srcdir}/mm_aie2.cc
-	$(eval dims := $(subst x, ,$*))
-	$(eval m := $(word 1,${dims}))
-	$(eval k := $(word 2,${dims}))
-	$(eval n := $(word 3,${dims}))
-	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DB_COL_MAJ ${KERNEL_DEFINES} -c $< -o $(@F)
+# Extract dimensions from the pattern stem (e.g., 32x64x64)
+define extract_dims
+$(eval dims := $(subst x, ,$*))
+$(eval m := $(word 1,${dims}))
+$(eval k := $(word 2,${dims}))
+$(eval n := $(word 3,${dims}))
+endef
+
+define extract_dims_softmax
+$(eval dims := $(subst x, ,$*))
+$(eval m := $(word 1,${dims}))
+$(eval n := $(word 2,${dims}))
+endef
+
+build/div_%.o: ${kernels_dir}/div.cc
+	$(call extract_dims)
+	mkdir -p $(@D)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -DDIM_HEAD=${H_DIM} -c $< -o $(@F)
+
+build/mm_%_row_major.o: ${srcdir}/mm_aie2.cc
+	$(call extract_dims)
+	mkdir -p $(@D)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
+
+build/mha_mm_%_row_major.o: build/mm_%_row_major.o build/div_%.o
+	mkdir -p $(@D)
+	ar rvs $@ $^
+
+build/mm_%_col_major.o: ${srcdir}/mm_aie2.cc
+	$(call extract_dims)
+	mkdir -p $(@D)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DB_COL_MAJ ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
+
+build/mha_mm_%_col_major.o: build/mm_%_col_major.o build/div_%.o
+	mkdir -p $(@D)
+	ar rvs $@ $^
 
 # Bundle rule for matmul kernels
 matmul_objs_row_m := $(addprefix build/mha_mm_,$(addsuffix _row_major.o,$(matmul_dims)))
@@ -91,9 +116,7 @@ endif
 
 # Pattern rule for softmax kernels
 build/mha_softmax_%.o: ${kernels_dir}/softmax.cc
-	$(eval dims := $(subst x, ,$*))
-	$(eval m := $(word 1,${dims}))
-	$(eval n := $(word 2,${dims}))
+	$(call extract_dims_softmax)
 	@mkdir -p $(@D)
 ifeq ($(devicename),npu)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -I. -I${aie2_runtime_dir} -c $< -o $(@F)

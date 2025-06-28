@@ -182,7 +182,7 @@ void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
         }
         // Scalar divide by head_dim (not embed_dim) for per-head scaling
         // C[h * M * M + i * M + j] = Tout(sum);
-        attn_scores[h * M * M + i * M + j] = Tout(sum);
+        attn_scores[h * M * M + i * M + j] = Tout(sum / head_dim);
       }
     }
   }
@@ -648,20 +648,14 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
   //   }
 
   // Check the first head result
-  //   for (int row = 0; row < M; row++) {
-  //     for (int col = 0; col < M; col++) {
-  //       if (C[3 * M * N + row * M + col] != CRef[3 * M * N + row * M + col])
-  //       {
-  //         std::cout << "C[" << row << ", " << col << "] = " << std::setw(4)
-  //                   << std::setprecision(2) << std::fixed
-  //                   << (float)C[3 * M * N + row * M + col]
-  //                   << " (expected: " << std::setw(4) << std::setprecision(2)
-  //                   << std::fixed << (float)CRef[3 * M * N + row * M + col]
-  //                   << ")"
-  //                   << std::endl;
-  //       }
-  //     }
-  //   }
+  for (int row = 0; row < 1; row++) {
+    for (int col = 0; col < 10; col++) {
+      std::cout << "C[" << row << ", " << col
+                << "] = " << C[3 * M * N + row * M + col]
+                << " (expected: " << CRef[3 * M * N + row * M + col] << ")"
+                << std::endl;
+    }
+  }
 
   return n_errors;
 }
