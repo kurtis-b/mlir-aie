@@ -426,6 +426,13 @@ int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
     }
   }
   print_error_summary(std::cout, n_errors, errors, max_rel_error);
+  // Check the first few results
+  for (int row = 0; row < 1; row++) {
+    for (int col = 0; col < 10; col++) {
+      std::cout << "C[" << row << ", " << col << "] = " << C[row * N + col]
+                << " (expected: " << CRef[row * N + col] << ")" << std::endl;
+    }
+  }
 
   if (n_errors > 0) {
     std::cout << std::endl << "Reference:" << std::endl;
