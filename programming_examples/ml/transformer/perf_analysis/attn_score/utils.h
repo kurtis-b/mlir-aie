@@ -181,7 +181,7 @@ void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
           sum += Q_proj[q_idx] * K_proj[k_idx];
         }
         // Scalar divide by head_dim (not embed_dim) for per-head scaling
-        // C[h * M * M + i * M + j] = Tout(sum);
+        // attn_scores[h * M * M + i * M + j] = Tout(sum);
         attn_scores[h * M * M + i * M + j] = Tout(sum / head_dim);
       }
     }
@@ -639,14 +639,6 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
   }
 
   print_error_summary(std::cout, n_errors, errors, max_rel_error);
-
-  //   if (n_errors > 0) {
-  //   std::cout << std::endl << "Reference:" << std::endl;
-  //   matmul_common::print_matrix(CRef, M);
-  //   std::cout << std::endl << "Output:" << std::endl;
-  //   matmul_common::print_matrix(C, M);
-  //   }
-
   // Check the first head result
   for (int row = 0; row < 1; row++) {
     for (int col = 0; col < 10; col++) {
@@ -656,6 +648,13 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
                 << std::endl;
     }
   }
+
+  //   if (n_errors > 0) {
+  //   std::cout << std::endl << "Reference:" << std::endl;
+  //   matmul_common::print_matrix(CRef, M);
+  //   std::cout << std::endl << "Output:" << std::endl;
+  //   matmul_common::print_matrix(C, M);
+  //   }
 
   return n_errors;
 }

@@ -452,8 +452,8 @@ def my_mha(
         # To/from AIE-array data movement
         @runtime_sequence(
             np.ndarray[((M * K) + (2 * K * N),), np.dtype[dtype_in]], # Order: X, W_Q, W_K
-            np.ndarray[(M * K,), np.dtype[dtype_in]], # Order: W_V
-            np.ndarray[(M * M,), np.dtype[dtype_out]], # Order: Q, K, V, o1
+            np.ndarray[(K * N,), np.dtype[dtype_in]], # Order: W_V
+            np.ndarray[((3 * M * N) + (H * M * M),), np.dtype[dtype_out]], # Order: Q, K, V, o2
         )
         def sequence(A, B, C):
                 # One iteration generates the output for 32 rows, so need to repeat
