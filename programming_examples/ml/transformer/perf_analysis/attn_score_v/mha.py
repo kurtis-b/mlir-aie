@@ -389,7 +389,13 @@ def my_mha(
                                     ],)
         object_fifo_link(v_l3l2_fifos, v_l2l1_fifos)
         o3_l1l2_fifos = object_fifo(f"o3_L1L2", core_tiles[2][2], mem_tiles[3], fifo_depth, o3_l1_ty)
-        o3_l2l3_fifos = object_fifo(f"o3_L2L3", mem_tiles[3], shim_tiles[3], fifo_depth, o3_l1_ty)
+        o3_l2l3_fifos = object_fifo(f"o3_L2L3", mem_tiles[3], shim_tiles[3], fifo_depth, o3_l1_ty,
+                                    [
+                                       (o3_matmul_dims[0] // r, r * o3_matmul_dims[2]),
+                                       (r, t),
+                                       (o3_matmul_dims[2] // t, r * t),
+                                       (t, 1),
+                                    ],)
         object_fifo_link(o3_l1l2_fifos, o3_l2l3_fifos)
 
         # Set up compute tiles
@@ -483,8 +489,8 @@ def my_mha(
         # To/from AIE-array data movement
         @runtime_sequence(
             np.ndarray[((M * K) + (2 * K * N),), np.dtype[dtype_in]], # Order: X, W_Q, W_K
-            np.ndarray[(M * K,), np.dtype[dtype_in]], # Order: W_V
-            np.ndarray[(M * M,), np.dtype[dtype_out]], # Order: Q, K, V, o1
+            np.ndarray[(K * N,), np.dtype[dtype_in]], # Order: W_V
+            np.ndarray[((4 * M * N),), np.dtype[dtype_out]], # Order: Q, K, V, o3
         )
         def sequence(A, B, C):
                 # One iteration generates the output for 32 rows, so need to repeat
