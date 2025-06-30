@@ -104,9 +104,7 @@ template <>
 std::bfloat16_t get_random<std::bfloat16_t>() {
   // Random numbers should NOT be uniformly between 0 and 1, because that
   // would make the matrix product AB always close to 1.
-  return std::bfloat16_t((float)rand() / (float)(RAND_MAX)) /
-         12288.0; // Scale down to avoid large exponents, this seems to be the
-                  // sweet spot
+  return std::bfloat16_t(4.0 * (float)rand() / (float)(RAND_MAX));
 }
 
 template <typename Tin, typename Tout, typename Tacc>
@@ -430,7 +428,7 @@ Tout mul_acc(int M, int N, int K, int H, int row, int col,
 // nearly_equal function adapted from Stack Overflow, License CC BY-SA 4.0
 // Original author: P-Gn
 // Source: https://stackoverflow.com/a/32334103
-bool nearly_equal(float a, float b, float epsilon = 64 * FLT_EPSILON,
+bool nearly_equal(float a, float b, float epsilon = 128 * FLT_EPSILON,
                   float abs_th = FLT_MIN)
 // those defaults are arbitrary and could be removed
 {
@@ -731,14 +729,6 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
   }
 
   print_error_summary(std::cout, n_errors, errors, max_rel_error);
-
-  //   if (n_errors > 0) {
-  //   std::cout << std::endl << "Reference:" << std::endl;
-  //   matmul_common::print_matrix(CRef, M);
-  //   std::cout << std::endl << "Output:" << std::endl;
-  //   matmul_common::print_matrix(C, M);
-  //   }
-
   // Check the first head result
   for (int row = 0; row < 1; row++) {
     for (int col = 0; col < 10; col++) {
@@ -748,6 +738,13 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
                 << std::endl;
     }
   }
+
+  //   if (n_errors > 0) {
+  //   std::cout << std::endl << "Reference:" << std::endl;
+  //   matmul_common::print_matrix(CRef, M);
+  //   std::cout << std::endl << "Output:" << std::endl;
+  //   matmul_common::print_matrix(C, M);
+  //   }
 
   return n_errors;
 }

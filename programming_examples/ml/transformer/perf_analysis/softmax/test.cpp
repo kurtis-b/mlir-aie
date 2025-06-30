@@ -167,7 +167,7 @@ int main(int argc, const char *argv[]) {
     // }
   }
   for (int i = M * K; i < ((M * K) + (K * N)); i++) {
-    AVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
+    AVec[i] = matmul_common::get_random<B_DATATYPE>();
     // Write to the anti-diagonal (top right to bottom left)
     // int row = (i - (M * K + K * N)) / N;
     // int col = (i - (M * K + K * N)) % N;
@@ -179,7 +179,7 @@ int main(int argc, const char *argv[]) {
     // }
   }
   for (int i = ((M * K) + (K * N)); i < A_VOLUME; i++) {
-    AVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
+    AVec[i] = matmul_common::get_random<B_DATATYPE>();
     // Write to the anti-diagonal (top right to bottom left)
     // int row = (i - (M * K + K * N)) / N;
     // int col = (i - (M * K + K * N)) % N;
@@ -194,7 +194,7 @@ int main(int argc, const char *argv[]) {
   B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
   std::vector<B_DATATYPE> BVec(B_VOLUME);
   for (int i = 0; i < B_VOLUME; i++) {
-    BVec[i] = matmul_common::get_random<B_DATATYPE>() * i;
+    BVec[i] = matmul_common::get_random<B_DATATYPE>();
   }
   memcpy(bufB, BVec.data(), (BVec.size() * sizeof(B_DATATYPE)));
 
