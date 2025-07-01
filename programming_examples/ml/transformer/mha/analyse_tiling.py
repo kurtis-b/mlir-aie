@@ -126,3 +126,48 @@ for tile, info in sorted(core_loop_bounds.items()):
         print(f"Tile {tile}: {instances} iterations of {matmul['m']}x{matmul['k']}x{matmul['n']}, matmul dtype={matmul['dtype']}, MACs={matmul['macs_one_iter'] * instances}")
     else:
         print(f"Tile {tile}: {info.get('instances', 1)} iterations")
+
+with open(aie_mha_file, 'r') as f:
+    inside_sequence = False
+    metadata_counts = {}
+    metadata_shapes = {}
+    metadata_shape_counts = {}
+
+    for line in f:
+        if not inside_sequence:
+            if re.search(r'aiex\.runtime_sequence\s+@sequence\(', line):
+                inside_sequence = True
+        else:
+            if line.strip() == "}":
+                break
+
+            # Match lines with metadata
+            meta_match = re.search(r'@([^}\s]+)}', line)
+            shape_match = re.search(r'\[([^\]]+)\]\[([^\]]+)\]\[([^\]]+)\]', line)
+            if meta_match and shape_match:
+                meta_str = meta_match.group(1)
+                shape_str = shape_match.group(2)
+                shape_nums = tuple(int(x.strip()) for x in shape_str.split(','))
+                metadata_counts[meta_str] = metadata_counts.get(meta_str, 0) + 1
+                if meta_str not in metadata_shapes:
+                    metadata_shapes[meta_str] = []
+                metadata_shapes[meta_str].append(shape_nums)
+                # Count unique shapes
+                if meta_str not in metadata_shape_counts:
+                    metadata_shape_counts[meta_str] = {}
+                metadata_shape_counts[meta_str][shape_nums] = metadata_shape_counts[meta_str].get(shape_nums, 0) + 1
+
+print("\nMetadata counts and shapes:")
+for meta, count in sorted(metadata_counts.items()):
+    print(f"Metadata {meta}: {count} occurrences")
+    if meta in metadata_shapes:
+        unique_shapes = metadata_shape_counts[meta]
+        print(f"  Unique shapes:")
+        for shape, shape_count in sorted(unique_shapes.items()):
+            print(f"    Shape {shape}: {shape_count} occurrences")
+        num_accesses = 1
+        for shape, shape_count in unique_shapes.items():
+            num_accesses *= shape[0] * shape[1] * shape_count
+        print(f"  Number of accesses: {num_accesses}")
+    else:
+        print("  No shapes recorded.")
