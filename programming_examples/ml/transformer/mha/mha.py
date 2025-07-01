@@ -128,12 +128,12 @@ def my_mha(
         np.dtype(dtype_out).itemsize >= np.dtype(dtype_in).itemsize
     ), f"Output dtype ({dtype_out}) must be equal or larger to input dtype ({dtype_in})"
 
-    q_matmul_dims = (32, 64, 64)
-    kv_matmul_dims = (32, 64, 64)
+    q_matmul_dims = (32, 128, 64)
+    kv_matmul_dims = (32, 128, 64)
     o1_matmul_dims = [(16, 32), (256, 32)]
     o2_softmax_dims = (16, 256)
     o3_matmul_dims = (o2_softmax_dims[0], o2_softmax_dims[1], 16)
-    o4_matmul_dims = (o3_matmul_dims[0], o3_matmul_dims[2], 128)
+    o4_matmul_dims = (o3_matmul_dims[0], o3_matmul_dims[2], 256)
     matmul_dims = [q_matmul_dims, kv_matmul_dims, o3_matmul_dims]
     
     # r, s, t are the dimensions required by the microkernel MAC instructions.
@@ -261,7 +261,7 @@ def my_mha(
             matmul_vectorized_func_name + f"_{o3_matmul_dims[0]}_{o3_matmul_dims[1]}_{o3_matmul_dims[2]}_1",
             inputs=[o2_l1_ty, v_l1_ty_in, o3_l1_ty],
         )
-        zero_o4 = external_func(f"zero_{dtype_out_str}_{o4_matmul_dims[0]}_{o4_matmul_dims[1]}_{o4_matmul_dims[2]}_1", inputs=[Wo_l1_ty])
+        zero_o4 = external_func(f"zero_{dtype_out_str}_{o4_matmul_dims[0]}_{o4_matmul_dims[1]}_{o4_matmul_dims[2]}_1", inputs=[o4_l1_ty])
         matmul_o4 = external_func(
             matmul_vectorized_func_name + f"_{o4_matmul_dims[0]}_{o4_matmul_dims[1]}_{o4_matmul_dims[2]}_1",
             inputs=[o3_l1_ty, Wo_l1_ty, o4_l1_ty],
