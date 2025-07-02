@@ -159,12 +159,12 @@ with open(aie_mha_file, 'r') as f:
 
 print("\nMetadata counts and shapes:")
 for meta, count in sorted(metadata_counts.items()):
-    print(f"Metadata {meta}: {count} occurrences")
+    print(f"Metadata {meta}: {count} instances")
     if meta in metadata_shapes:
         unique_shapes = metadata_shape_counts[meta]
         print(f"  Unique shapes:")
         for shape, shape_count in sorted(unique_shapes.items()):
-            print(f"    Shape {shape}: {shape_count} occurrences")
+            print(f"    Shape {shape}: {shape_count} instances")
         num_accesses = 1
         for shape, shape_count in unique_shapes.items():
             num_accesses *= shape[0] * shape[1] * shape_count
