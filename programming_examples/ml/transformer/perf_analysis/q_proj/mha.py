@@ -112,10 +112,10 @@ def my_mha(
 ):
     if dev == "npu":
         n_aie_rows_projs = 1
-        start_row = 1
+        start_row_q = 1
     else:
         n_aie_rows_projs = 2
-        start_row = 2
+        start_row_q = 2
     o4_rows = 4
     head_dim = N // H
 
@@ -221,7 +221,7 @@ def my_mha(
         q_l1l2_fifos = [None] * n_aie_rows_projs
 
         X_l3l2_fifos = object_fifo(f"X_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, X_l2_ty)
-        X_l2l1_fifos = object_fifo(f"X_L2L1", mem_tiles[0], [core_tiles[start_row + row][0] for row in range(n_aie_rows_projs)], fifo_depth, X_l1_ty,
+        X_l2l1_fifos = object_fifo(f"X_L2L1", mem_tiles[0], [core_tiles[start_row_q + row][0] for row in range(n_aie_rows_projs)], fifo_depth, X_l1_ty,
                                     [
                                         (q_matmul_dims[0] // r, r * q_matmul_dims[1]),
                                         (q_matmul_dims[1] // s, s),
@@ -232,7 +232,7 @@ def my_mha(
         
         Wq_l3l2_fifos = object_fifo(f"Wq_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, Wq_l2_ty,)
         for row in range(n_aie_rows_projs):
-            Wq_l2l1_fifos[row] = object_fifo(f"Wq_L2L1_{row}", mem_tiles[0], core_tiles[start_row + row][0], fifo_depth, Wq_l1_ty,
+            Wq_l2l1_fifos[row] = object_fifo(f"Wq_L2L1_{row}", mem_tiles[0], core_tiles[start_row_q + row][0], fifo_depth, Wq_l1_ty,
                                             [
                                                 (q_matmul_dims[1] // s, s * q_matmul_dims[2]),
                                                 (q_matmul_dims[2] // t, t),
@@ -242,7 +242,7 @@ def my_mha(
         object_fifo_link(Wq_l3l2_fifos, Wq_l2l1_fifos, [], [q_matmul_dims[1] * q_matmul_dims[2] * i for i in range(n_aie_rows_projs)])
 
         for row in range(n_aie_rows_projs):
-            q_l1l2_fifos[row] = object_fifo(f"q_L1L2_{row}", core_tiles[start_row + row][0], mem_tiles[0], fifo_depth, q_l1_ty,)
+            q_l1l2_fifos[row] = object_fifo(f"q_L1L2_{row}", core_tiles[start_row_q + row][0], mem_tiles[0], fifo_depth, q_l1_ty,)
         q_l2l3_fifos = object_fifo(f"q_L2L3", mem_tiles[0], shim_tiles[0], fifo_depth, q_l2_ty,
                                     [
                                         (q_matmul_dims[0] // r, r * q_matmul_dims[2]),
@@ -253,7 +253,7 @@ def my_mha(
         object_fifo_link(q_l1l2_fifos, q_l2l3_fifos, [q_matmul_dims[0] * q_matmul_dims[2] * i for i in range(n_aie_rows_projs)], [])
 
         for row in range(n_aie_rows_projs):
-            @core(core_tiles[start_row + row][0], f"mha_mm_{q_matmul_dims[0]}x{q_matmul_dims[1]}x{q_matmul_dims[2]}.o", stack_size=0xD00)
+            @core(core_tiles[start_row_q + row][0], f"mha_mm_{q_matmul_dims[0]}x{q_matmul_dims[1]}x{q_matmul_dims[2]}.o", stack_size=0xD00)
             def core_body():
                 for _ in range_(0xFFFFFFFF):
                     for _ in range_(N // q_matmul_dims[2] // n_aie_rows_projs):
