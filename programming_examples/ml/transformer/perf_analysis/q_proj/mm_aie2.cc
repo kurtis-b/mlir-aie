@@ -750,8 +750,8 @@ extern "C" {
 
 #ifdef bf16_bf16_ONLY
 #if defined(DIM_M) && defined(DIM_K) && defined(DIM_N)
-#if (DIM_M == 32) && (DIM_K == 64) && (DIM_N == 64)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 64, 64)
+#if (DIM_M == 64) && (DIM_K == 64) && (DIM_N == 64)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 64, 64, 64)
 #endif
 #endif
 #endif
