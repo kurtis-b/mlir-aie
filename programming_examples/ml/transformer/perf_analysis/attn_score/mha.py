@@ -133,10 +133,15 @@ def my_mha(
 
     left_mtx_in = {
         X_STR: {
+            L1_POS_STR: [(0, 0), (1, 0), (2, 0), (3, 0), (0, 2), (1, 2)],
             L2_POS_STR: 0,
             L3_POS_STR: 0,
-            L1_POS_STR: [(0, 0), (1, 0), (2, 0), (3, 0), (0, 2), (1, 2)],
         },
+        Q_STR: {
+            L1_POS_STR: [(0, 1), (0, 3)],
+            L2_POS_STR: 1,
+            L3_POS_STR: 1,
+        }
     }
     right_mtx_in = {
         WQ_STR: {
@@ -154,6 +159,11 @@ def my_mha(
             L2_POS_STR: 2,
             L3_POS_STR: 2,
         },
+        K_STR: {
+            L1_POS_STR: [(0, 1), (0, 3)],
+            L2_POS_STR: 3,
+            L3_POS_STR: 3,
+        }
     }
     mtx_out = {
         Q_STR: {
@@ -178,6 +188,12 @@ def my_mha(
     dtype_in = dtype_map[dtype_in_str]
     dtype_out = dtype_map[dtype_out_str]
 
+    for key, val in left_mtx_in.items():
+        l1_list = val.get(L1_POS_STR, [])
+        assert len(l1_list) == len(set(l1_list)), f"Multiple left matrix tiles found in left_mtx_in[{key}][{L1_POS_STR}]"
+    for key, val in right_mtx_in.items():
+        l1_list = val.get(L1_POS_STR, [])
+        assert len(l1_list) == len(set(l1_list)), f"Multiple right matrix tiles found in right_mtx_in[{key}][{L1_POS_STR}]"
     assert np.issubdtype(dtype_in, np.integer) == np.issubdtype(
         dtype_out, np.integer
     ), f"Input dtype ({dtype_in}) and output dtype ({dtype_out}) must either both be integral or both be float"
@@ -270,6 +286,9 @@ def my_mha(
         v_l1_ty_out = np.ndarray[(v_proj_dims[0] * v_proj_dims[2],), np.dtype[dtype_out]]
 
         # L2/L1 tiles for attention score calculation
+        q_l2_ty_in = np.ndarray[(attn_score_mm_dims[0] * attn_score_mm_dims[1] * len(left_mtx_in[Q_STR][L1_POS_STR]),), np.dtype[dtype_out]]
+        k_l2_ty_in = np.ndarray[(attn_score_mm_dims[2] * attn_score_mm_dims[1] * len(right_mtx_in[K_STR][L1_POS_STR]),), np.dtype[dtype_out]]
+        attn_score_l2_ty = np.ndarray[(attn_score_mm_dims[0] * attn_score_mm_dims[2]* len(left_mtx_in[Q_STR][L1_POS_STR]),), np.dtype[dtype_out]]
         q_l1_ty_in = np.ndarray[(attn_score_mm_dims[0] * attn_score_mm_dims[1],), np.dtype[dtype_out]]
         k_l1_ty_in = np.ndarray[(attn_score_mm_dims[2] * attn_score_mm_dims[1],), np.dtype[dtype_out]]
         attn_score_l1_ty = np.ndarray[(attn_score_mm_dims[0] * attn_score_mm_dims[2],), np.dtype[dtype_out]]
@@ -407,30 +426,34 @@ def my_mha(
 
         # AIE-array data movement for attention score calculation
         # L3 to L2 data movement
-        q_l3l2_fifos = object_fifo(f"q_L3L2", shim_tiles[1], mem_tiles[1], fifo_depth, q_l1_ty_in,)
-        k_l3l2_fifos = object_fifo(f"k_L3L2", shim_tiles[3], mem_tiles[3], fifo_depth, k_l1_ty_in,)
+        q_l3l2_fifos = object_fifo(f"q_L3L2", shim_tiles[left_mtx_in[Q_STR][L3_POS_STR]], mem_tiles[left_mtx_in[Q_STR][L2_POS_STR]], fifo_depth, q_l2_ty_in,)
+        k_l3l2_fifos = object_fifo(f"k_L3L2", shim_tiles[right_mtx_in[K_STR][L3_POS_STR]], mem_tiles[right_mtx_in[K_STR][L2_POS_STR]], fifo_depth, k_l2_ty_in,)
         # L2 to L1 data movement
-        q_l2l1_fifos = object_fifo(f"q_L2L1", mem_tiles[1], core_tiles[0][1], fifo_depth, q_l1_ty_in,
-                                    [
-                                        (attn_score_mm_dims[0] // r, r * attn_score_mm_dims[1]),
-                                        (attn_score_mm_dims[1] // s, s),
-                                        (r, attn_score_mm_dims[1]),
-                                        (s, 1),
-                                    ],)
-        k_l2l1_fifos = object_fifo(f"k_L2L1", mem_tiles[3], core_tiles[0][1], fifo_depth, k_l1_ty_in,
-                                    [
-                                        (attn_score_mm_dims[2] // t, t * attn_score_mm_dims[1]),
-                                        (attn_score_mm_dims[1] // s, s),
-                                        (t, attn_score_mm_dims[1]),
-                                        (s, 1),
-                                    ],)
+        q_l2l1_fifos = [object_fifo(
+            f"q_L2L1_{l1_pos[ROW_IDX]}_{l1_pos[COL_IDX]}", mem_tiles[left_mtx_in[Q_STR][L2_POS_STR]], core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], fifo_depth, q_l1_ty_in,
+            [
+                (attn_score_mm_dims[0] // r, r * attn_score_mm_dims[1]),
+                (attn_score_mm_dims[1] // s, s),
+                (r, attn_score_mm_dims[1]),
+                (s, 1),
+            ],) for l1_pos in left_mtx_in[Q_STR][L1_POS_STR]]
+        k_l2l1_fifos = [object_fifo(
+            f"k_L2L1_{l1_pos[ROW_IDX]}_{l1_pos[COL_IDX]}", mem_tiles[right_mtx_in[K_STR][L2_POS_STR]], core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], fifo_depth, k_l1_ty_in,
+            [
+                (attn_score_mm_dims[2] // t, t * attn_score_mm_dims[1]),
+                (attn_score_mm_dims[1] // s, s),
+                (t, attn_score_mm_dims[1]),
+                (s, 1),
+            ],) for l1_pos in right_mtx_in[K_STR][L1_POS_STR]]
         # L3 to L1 links
-        object_fifo_link(q_l3l2_fifos, q_l2l1_fifos)
-        object_fifo_link(k_l3l2_fifos, k_l2l1_fifos)
+        object_fifo_link(q_l3l2_fifos, q_l2l1_fifos, [], [attn_score_mm_dims[0] * attn_score_mm_dims[1] * i for i in range(len(left_mtx_in[Q_STR][L1_POS_STR]))])
+        object_fifo_link(k_l3l2_fifos, k_l2l1_fifos, [], [attn_score_mm_dims[1] * attn_score_mm_dims[2] * i for i in range(len(right_mtx_in[K_STR][L1_POS_STR]))])
         # L1 to L2 data movement
-        attn_score_l1l2_fifos = object_fifo(f"attn_score_L1L2", core_tiles[0][1], mem_tiles[3], fifo_depth, attn_score_l1_ty)
+        attn_score_l1l2_fifos = [object_fifo(
+            f"attn_score_L1L2_{l1_pos[ROW_IDX]}_{l1_pos[COL_IDX]}", core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], mem_tiles[mtx_out[ATTN_SCORE_STR][L2_POS_STR]], fifo_depth, attn_score_l1_ty,
+        ) for l1_pos in left_mtx_in[Q_STR][L1_POS_STR]]
         # L2 to L3 data movement
-        attn_score_l2l3_fifos = object_fifo(f"attn_score_L2L3", mem_tiles[3], shim_tiles[3], fifo_depth, attn_score_l1_ty,
+        attn_score_l2l3_fifos = object_fifo(f"attn_score_L2L3", mem_tiles[mtx_out[ATTN_SCORE_STR][L2_POS_STR]], shim_tiles[mtx_out[ATTN_SCORE_STR][L3_POS_STR]], fifo_depth, attn_score_l2_ty,
                                     [
                                         (attn_score_mm_dims[0] // r, r * attn_score_mm_dims[2]),
                                         (r, t),
@@ -438,7 +461,7 @@ def my_mha(
                                         (t, 1),
                                     ],)
         # L1 to L3 links
-        object_fifo_link(attn_score_l1l2_fifos, attn_score_l2l3_fifos)
+        object_fifo_link(attn_score_l1l2_fifos, attn_score_l2l3_fifos, [attn_score_mm_dims[0] * attn_score_mm_dims[2] * i for i in range(len(left_mtx_in[Q_STR][L1_POS_STR]))], [])
 
         # Compute for Q, K, V projections
         for row, l1_pos in enumerate(right_mtx_in[WQ_STR][L1_POS_STR]):
@@ -499,20 +522,21 @@ def my_mha(
                         v_l1l2_fifos[row].release(ObjectFifoPort.Produce, 1)
 
         # Compute for attention score
-        @core(core_tiles[0][1], f"mha_mm_{attn_score_mm_dims[0]}x{attn_score_mm_dims[1]}x{attn_score_mm_dims[2]}_col_major.o", stack_size=0xD00)
-        def core_body():
-            for _ in range_(0xFFFFFFFF):
-                for _ in range_(H):
-                    elem_attn_score = attn_score_l1l2_fifos.acquire(ObjectFifoPort.Produce, 1)
-                    zero_attn_score(elem_attn_score)
-                    for _ in range_(head_dim // attn_score_mm_dims[1]):
-                        elem_in_q = q_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                        elem_in_k = k_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                        matmul_attn_score(elem_in_q, elem_in_k, elem_attn_score)
-                        q_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
-                        k_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
-                    div_projs(elem_attn_score, elem_attn_score)
-                    attn_score_l1l2_fifos.release(ObjectFifoPort.Produce, 1)
+        for head, l1_pos in enumerate(left_mtx_in[Q_STR][L1_POS_STR]):
+            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_mm_dims[0]}x{attn_score_mm_dims[1]}x{attn_score_mm_dims[2]}_col_major.o", stack_size=0xD00)
+            def core_body():
+                for _ in range_(0xFFFFFFFF):
+                    for _ in range_(H):
+                        elem_attn_score = attn_score_l1l2_fifos[head].acquire(ObjectFifoPort.Produce, 1)
+                        zero_attn_score(elem_attn_score)
+                        for _ in range_(head_dim // attn_score_mm_dims[1]):
+                            elem_in_q = q_l2l1_fifos[head].acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_k = k_l2l1_fifos[head].acquire(ObjectFifoPort.Consume, 1)
+                            matmul_attn_score(elem_in_q, elem_in_k, elem_attn_score)
+                            q_l2l1_fifos[head].release(ObjectFifoPort.Consume, 1)
+                            k_l2l1_fifos[head].release(ObjectFifoPort.Consume, 1)
+                        div_projs(elem_attn_score, elem_attn_score)
+                        attn_score_l1l2_fifos[head].release(ObjectFifoPort.Produce, 1)
 
         # To/from AIE-array data movement
         @runtime_sequence(
@@ -590,15 +614,17 @@ def my_mha(
                         dma_wait(q_l2l3_fifos, k_l2l3_fifos, v_l2l3_fifos)
                 
                 # Send the data for calculating attention scores
-                for head in range(H):
+                for head in range(0, H, len(left_mtx_in[Q_STR][L1_POS_STR])):
                     for row_offset in range(0, M, attn_score_mm_dims[0]):
+                        # Since we need the full rows of attention score for softmax, the tiling is done 
+                        # such that the full rows are calculated. No need to tile the columns in this case.
                         npu_dma_memcpy_nd(
                             metadata=q_l3l2_fifos,
                             bd_id=0,
                             mem=C,
                             offsets=[0, 0, 0, row_offset * N + head * head_dim],
-                            sizes=[M // attn_score_mm_dims[2], head_dim // attn_score_mm_dims[1], attn_score_mm_dims[0], attn_score_mm_dims[1]],
-                            strides=[0, attn_score_mm_dims[1], N, 1],
+                            sizes=[head_dim // attn_score_mm_dims[1], len(left_mtx_in[Q_STR][L1_POS_STR]), attn_score_mm_dims[0], attn_score_mm_dims[1]],
+                            strides=[attn_score_mm_dims[1], head_dim, N, 1],
                         )
 
                         npu_dma_memcpy_nd(
@@ -606,8 +632,8 @@ def my_mha(
                             bd_id=1,
                             mem=C,
                             offsets=[0, 0, 0, M * N + head * head_dim],
-                            sizes=[M // attn_score_mm_dims[2], head_dim // attn_score_mm_dims[1], attn_score_mm_dims[2], attn_score_mm_dims[1]],
-                            strides=[attn_score_mm_dims[2] * N, attn_score_mm_dims[1], N, 1],
+                            sizes=[head_dim // attn_score_mm_dims[1], len(right_mtx_in[K_STR][L1_POS_STR]), attn_score_mm_dims[2], attn_score_mm_dims[1]],
+                            strides=[attn_score_mm_dims[1], head_dim, N, 1],
                         )
 
                         npu_dma_memcpy_nd(
@@ -615,8 +641,8 @@ def my_mha(
                             bd_id=2,
                             mem=C,
                             offsets=[0, 0, 0, 3 * M * N + head * M * M + row_offset * M],
-                            sizes=[1, M // attn_score_mm_dims[2], attn_score_mm_dims[0], attn_score_mm_dims[2]],
-                            strides=[0, attn_score_mm_dims[2], M, 1],
+                            sizes=[1, len(left_mtx_in[Q_STR][L1_POS_STR]), attn_score_mm_dims[0], attn_score_mm_dims[2]],
+                            strides=[0, M * M, M, 1],
                         )
 
                         dma_wait(attn_score_l2l3_fifos)
