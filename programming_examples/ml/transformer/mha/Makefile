@@ -61,33 +61,34 @@ KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N
 # Define matmul and softmax dimension lists
 # If these values are changed, make sure to update the corresponding kernel code's
 # combos(X) and "#if" macros. 
-matmul_dims := 32x128x64 16x32x256 16x256x16 16x16x256
-softmax_dims := 32x256
+matmul_dims := 64x64x64 16x32x256 16x256x16 16x16x256
+softmax_dims := 16x256
+add_dims := 16x256
 
 # Add "nm ${@D}/${@F}" at the end of the command to see the symbols in the object file 
 # Pattern rule for matmul kernels, select row or col major based on b_col_maj
 
 # Extract dimensions from the pattern stem (e.g., 32x64x64)
-define extract_dims
+define extract_dims_3d
 $(eval dims := $(subst x, ,$*))
 $(eval m := $(word 1,${dims}))
 $(eval k := $(word 2,${dims}))
 $(eval n := $(word 3,${dims}))
 endef
 
-define extract_dims_softmax
+define extract_dims_2d
 $(eval dims := $(subst x, ,$*))
 $(eval m := $(word 1,${dims}))
 $(eval n := $(word 2,${dims}))
 endef
 
 build/div_%.o: ${kernels_dir}/div.cc
-	$(call extract_dims)
+	$(call extract_dims_3d)
 	mkdir -p $(@D)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -DDIM_HEAD=${H_DIM} -c $< -o $(@F)
 
 build/mm_%_row_major.o: ${srcdir}/mm_aie2.cc
-	$(call extract_dims)
+	$(call extract_dims_3d)
 	mkdir -p $(@D)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
 
@@ -96,7 +97,7 @@ build/mha_mm_%_row_major.o: build/mm_%_row_major.o build/div_%.o
 	ar rvs $@ $^
 
 build/mm_%_col_major.o: ${srcdir}/mm_aie2.cc
-	$(call extract_dims)
+	$(call extract_dims_3d)
 	mkdir -p $(@D)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DB_COL_MAJ ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
 
@@ -116,7 +117,7 @@ endif
 
 # Pattern rule for softmax kernels
 build/mha_softmax_%.o: ${kernels_dir}/softmax.cc
-	$(call extract_dims_softmax)
+	$(call extract_dims_2d)
 	@mkdir -p $(@D)
 ifeq ($(devicename),npu)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -I. -I${aie2_runtime_dir} -c $< -o $(@F)
@@ -133,9 +134,17 @@ build/mha_softmax.o: $(addprefix build/mha_softmax_,$(addsuffix .o,$(softmax_dim
 	ar rvs $@ $+
 endif
 
+build/mha_add_%.o: ${kernels_dir}/add.cc
+	$(call extract_dims_2d)
+	@mkdir -p $(@D)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F)
+
+# Bundle rule for add kernel
+add_objs := $(addprefix build/mha_add_,$(addsuffix .o,$(add_dims)))
+
 # Convenience targets to build all kernels
 .PHONY: build_kernels
-build_kernels: build/mha_softmax.o $(matmul_objs_row_m) $(matmul_objs_col_m)
+build_kernels: build/mha_softmax.o $(add_objs) $(matmul_objs_row_m) $(matmul_objs_col_m)
 
 .PHONY: run
 run: ${targetname}.exe ${xclbin_target}
