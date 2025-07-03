@@ -61,7 +61,7 @@ KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N
 # Define matmul and softmax dimension lists
 # If these values are changed, make sure to update the corresponding kernel code's
 # combos(X) and "#if" macros. 
-matmul_dims := 32x64x64 16x32x256
+matmul_dims := 64x64x64 16x32x256
 softmax_dims := 16x256
 
 # Add "nm ${@D}/${@F}" at the end of the command to see the symbols in the object file 
