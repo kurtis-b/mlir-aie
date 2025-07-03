@@ -110,12 +110,80 @@ def my_mha(
     trace_size,
     generate_taps=False,
 ):
-    if dev == "npu":
-        n_aie_rows_projs = 1
-        n_aie_cols_projs = 1
-    else:
-        n_aie_rows_projs = 2
-        n_aie_cols_projs = 1
+    """
+    Generates a matrix multiplication design for the Multi-Head Attention, 
+    up to the attention score calculation. Due to the number of L3 channels
+    needed in this design, 4 columns of the AIE array are required. This means
+    a full encoder can't be run on the Phoenix, i.e. the FFN and layer norm
+    layers can't be run on the array. 
+    """
+    X_PATH_STR = "x_proj"
+    WQ_PATH_STR = "q_proj"
+    WK_PATH_STR = "k_proj"
+    WV_PATH_STR = "v_proj"
+    Q_PATH_STR = "q"
+    K_PATH_STR = "k"
+    V_PATH_STR = "v"
+    ATTN_SCORE_STR = "attn_score"
+    NUM_ROWS_STR = "num_rows"
+    NUM_COLS_STR = "num_cols"
+    L3_COL_STR = "l3_col"
+    L2_COL_STR = "l2_col"
+    L1_START_ROW_STR = "l1_start_row"
+    L1_START_COL_STR = "l1_start_col"
+
+    # Assume that the compute tiles used for each of these items starts at
+    # (l1_start_col_str, l1_start_row_str), then upwards for up to 
+    # num_rows_str tiles and to the right for up to num_cols_str tiles.
+    comp_distr_in = {
+        # The data path for X will be decided by the tiles taken up by 
+        # the WQ, WK, and WV paths
+        X_PATH_STR: {
+            L2_COL_STR: 0,
+            L3_COL_STR: 0,
+            NUM_ROWS_STR: 2,
+        },
+        # The projections should use the same number of rows so that the 
+        # compute count is the same for all three.
+        WQ_PATH_STR: {
+            NUM_ROWS_STR: 2,
+            NUM_COLS_STR: 1,
+            L1_START_ROW_STR: 0,
+            L1_START_COL_STR: 0,
+            L2_COL_STR: 0,
+            L3_COL_STR: 0,
+        },
+        WK_PATH_STR: {
+            NUM_ROWS_STR: 2,
+            NUM_COLS_STR: 1,
+            L1_START_ROW_STR: 2,
+            L1_START_COL_STR: 0,
+            L2_COL_STR: 2,
+            L3_COL_STR: 2,
+        },
+        WV_PATH_STR: {
+            NUM_ROWS_STR: 2,
+            NUM_COLS_STR: 1,
+            L1_START_ROW_STR: 0,
+            L1_START_COL_STR: 2,
+            L2_COL_STR: 2,
+            L3_COL_STR: 2,
+        },
+    }
+    comp_distr_out = {
+        Q_PATH_STR: {
+            L2_COL_STR: 0,
+            L3_COL_STR: 0,
+        },
+        K_PATH_STR: {
+            L2_COL_STR: 0,
+            L3_COL_STR: 0,
+        },
+        V_PATH_STR: {
+            L2_COL_STR: 2,
+            L3_COL_STR: 2,
+        },
+    }
     head_dim = N // H
 
     dtype_in = dtype_map[dtype_in_str]
@@ -128,12 +196,11 @@ def my_mha(
         np.dtype(dtype_out).itemsize >= np.dtype(dtype_in).itemsize
     ), f"Output dtype ({dtype_out}) must be equal or larger to input dtype ({dtype_in})"
 
-    q_matmul_dims = (32, 64, 64)
-    kv_matmul_dims = (32, 64, 64)
-    matmul_dims = [q_matmul_dims, kv_matmul_dims]
-
-    o1_matmul_dims = [(16, 32), (256, 32)]
-    o2_softmax_dims = (16, 256)
+    q_proj_dims = (64, 64, 64)
+    k_proj_dims = (64, 64, 64)
+    v_proj_dims = (64, 64, 64)
+    proj_dims = [q_proj_dims, k_proj_dims, v_proj_dims]
+    attn_score_mm_dims = (16, 32, 256)
     
     # r, s, t are the dimensions required by the microkernel MAC instructions.
     mac_dims = microkernel_mac_dim_map[dev][dtype_in_str]
@@ -151,52 +218,34 @@ def my_mha(
             "Invalid configuration: NPU2 (Strix/Strix Halo/Krackan) has 8 columns"
         )
 
-    # Input matrix A:
-    # Conceptually, we divide input A into (m * n_rows, k)-sized blocks. These
-    # blocks are _broadcast_ across AIE core columns, then _distributed_ across
-    # rows, s.t. each of the n_rows compute cores in a column receives a
-    # contiguous (m, k)-sized block of A.
-    for dims in matmul_dims:
-        assert (
-            M % (dims[0] * n_aie_rows_projs) == 0
-        ), """A must be tileable into (m * n_aie_rows_projs, dims[1])-sized blocks"""
     assert (
-        M % (o1_matmul_dims[0][0]) == 0
-    ), """A must be tileable into (m, dims[1])-sized blocks"""
-
-    # Both A and B are tiled in the K dimension into size k.
-    for dims in matmul_dims:
-        assert K % dims[1] == 0
-    assert K % o1_matmul_dims[0][1] == 0
-
-    # Input matrix B:
-    # Conceptually, we do the same as with A, but instead of broadcasting
-    # across columns we broadcast across rows and distribute across columns.
-    for dims in matmul_dims:
-        assert (
-            N % (dims[2] * n_aie_cols_projs) == 0
-        ), """B must be tileable into (k, dims[2] * n_aie_cols_projs)-sized blocks"""
+        N % H == 0
+    ), """Embedding dimension must be divisible by number of heads"""
     assert (
-        N % (o1_matmul_dims[1][0]) == 0
-    ), """B must be tileable into (k, dims[2])-sized blocks"""
-
-    assert (N % H == 0), """Embedding dimension must be divisible by number of heads"""
-    assert (head_dim % o1_matmul_dims[0][1] == 0), """Head dimension must be divisible by left matrix col dim"""
-    assert (head_dim % o1_matmul_dims[1][1] == 0), """Head dimension must be divisible by right matrix col dim"""
-    assert (M / o2_softmax_dims[1] == 1), """Softmax tile col size must be the whole sequence length"""
-    assert (o1_matmul_dims[0][0] == o2_softmax_dims[0]), """Softmax tile row size must be the same as the attn score"""
-    assert (o1_matmul_dims[1][0] == o2_softmax_dims[1]), """Softmax tile col size must be the same as the attn score"""
-
-    for dims in matmul_dims:
-        assert (dims[0] * dims[1] * dims[2] > 0), f"Matmul dimensions {dims} must be non-zero"
-        assert (dims[0] % r == 0), f"Matmul dimension {dims[0]} must be divisible by {r}"
-        assert (dims[1] % s == 0), f"Matmul dimension {dims[1]} must be divisible by {s}"
-        assert (dims[2] % t == 0), f"Matmul dimension {dims[2]} must be divisible by {t}"
-    assert (o1_matmul_dims[0][0] * o1_matmul_dims[0][1] * o1_matmul_dims[1][0] > 0), f"Matmul dimensions {o1_matmul_dims} must be non-zero"
-    assert (o1_matmul_dims[0][0] % r == 0), f"Matmul dimension {o1_matmul_dims[0][0]} must be divisible by {r}"
-    assert (o1_matmul_dims[0][1] % s == 0), f"Matmul dimension {o1_matmul_dims[0][1]} must be divisible by {s}"
-    assert (o1_matmul_dims[1][1] % s == 0), f"Matmul dimension {o1_matmul_dims[1][1]} must be divisible by {s}"
-    assert (o1_matmul_dims[1][0] % t == 0), f"Matmul dimension {o1_matmul_dims[1][0]} must be divisible by {t}"
+        head_dim % attn_score_mm_dims[1] == 0
+    ), """Head dimension must be divisible by left mtx col dim"""
+    for data_path in comp_distr_in.values():
+        for dims in proj_dims:
+            assert (
+                dims[0] * dims[1] * dims[2] > 0
+            ), f"Matmul dims {dims} must be non-zero"
+            assert (
+                M % dims[0]  == 0
+            ), """A must be tileable into (m, dims[1])-sized blocks"""
+            assert K % dims[1] == 0
+            if NUM_ROWS_STR in data_path:
+                assert (
+                    N % (dims[2] * data_path[NUM_ROWS_STR]) == 0
+                ), """B must be tileable into (k, dims[2] * n_aie_rows_projs)-sized blocks"""
+            assert (
+                dims[0] % r == 0
+            ), f"Matmul dim {dims[0]} must be divisible by {r}"
+            assert (
+                dims[1] % s == 0
+            ), f"Matmul dim {dims[1]} must be divisible by {s}"
+            assert (
+                dims[2] % t == 0
+            ), f"Matmul dim {dims[2]} must be divisible by {t}"
 
     # If you get errors during CDO generation due to running out of program
     # memory, it may be because too much code is generated due to ObjectFIFO
@@ -213,250 +262,310 @@ def my_mha(
 
     @device(dev_ty)
     def device_body():
-        X_l2_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[1],), np.dtype[dtype_in]]
-        X_l1_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[1],), np.dtype[dtype_in]]
+        # L2 tiles for Q, K, V projections
+        X_l2_ty = np.ndarray[(q_proj_dims[0] * q_proj_dims[1],), np.dtype[dtype_in]]
+        Wq_l2_ty = np.ndarray[(q_proj_dims[1] * q_proj_dims[2] * comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR],), np.dtype[dtype_in]]
+        Wk_l2_ty = np.ndarray[(k_proj_dims[1] * k_proj_dims[2] * comp_distr_in[WK_PATH_STR][NUM_ROWS_STR],), np.dtype[dtype_in]]
+        Wv_l2_ty = np.ndarray[(v_proj_dims[1] * v_proj_dims[2] * comp_distr_in[WV_PATH_STR][NUM_ROWS_STR],), np.dtype[dtype_in]]
+        q_l2_ty = np.ndarray[(q_proj_dims[0] * q_proj_dims[2] * comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR],), np.dtype[dtype_out]]
+        k_l2_ty = np.ndarray[(k_proj_dims[0] * k_proj_dims[2] * comp_distr_in[WK_PATH_STR][NUM_ROWS_STR],), np.dtype[dtype_out]]
+        v_l2_ty = np.ndarray[(v_proj_dims[0] * v_proj_dims[2] * comp_distr_in[WV_PATH_STR][NUM_ROWS_STR],), np.dtype[dtype_out]]
 
-        Wq_l2_ty = np.ndarray[(q_matmul_dims[1] * q_matmul_dims[2] * n_aie_rows_projs,), np.dtype[dtype_in]]
-        q_l2_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[2] * n_aie_rows_projs,), np.dtype[dtype_out]]
-        Wq_l1_ty = np.ndarray[(q_matmul_dims[1] * q_matmul_dims[2],), np.dtype[dtype_in]]
-        q_l1_ty = np.ndarray[(q_matmul_dims[0] * q_matmul_dims[2],), np.dtype[dtype_out]]
+        # L1 tiles for Q, K, V projections
+        X_l1_ty = np.ndarray[(q_proj_dims[0] * q_proj_dims[1],), np.dtype[dtype_in]]
+        Wq_l1_ty = np.ndarray[(q_proj_dims[1] * q_proj_dims[2],), np.dtype[dtype_in]]
+        Wk_l1_ty = np.ndarray[(k_proj_dims[1] * k_proj_dims[2],), np.dtype[dtype_in]]
+        Wv_l1_ty = np.ndarray[(v_proj_dims[1] * v_proj_dims[2],), np.dtype[dtype_in]]
+        q_l1_ty_out = np.ndarray[(q_proj_dims[0] * q_proj_dims[2],), np.dtype[dtype_out]]
+        k_l1_ty_out = np.ndarray[(k_proj_dims[0] * k_proj_dims[2],), np.dtype[dtype_out]]
+        v_l1_ty_out = np.ndarray[(v_proj_dims[0] * v_proj_dims[2],), np.dtype[dtype_out]]
 
-        Wkv_l2_ty = np.ndarray[(kv_matmul_dims[1] * kv_matmul_dims[2] * n_aie_rows_projs,), np.dtype[dtype_in]]
-        kv_l2_ty = np.ndarray[(kv_matmul_dims[0] * kv_matmul_dims[2] * n_aie_rows_projs,), np.dtype[dtype_out]]
-        Wkv_l1_ty = np.ndarray[(kv_matmul_dims[1] * kv_matmul_dims[2],), np.dtype[dtype_in]]
-        kv_l1_ty = np.ndarray[(kv_matmul_dims[0] * kv_matmul_dims[2],), np.dtype[dtype_out]]
-
-        q_l1_ty_in = np.ndarray[(o1_matmul_dims[0][0] * o1_matmul_dims[0][1],), np.dtype[dtype_out]]
-        k_l1_ty_in = np.ndarray[(o1_matmul_dims[1][0] * o1_matmul_dims[1][1],), np.dtype[dtype_out]]
-        o1_l1_ty = np.ndarray[(o1_matmul_dims[0][0] * o1_matmul_dims[1][0],), np.dtype[dtype_out]]
+        # L2/L1 tiles for attention score calculation
+        q_l1_ty_in = np.ndarray[(attn_score_mm_dims[0] * attn_score_mm_dims[1],), np.dtype[dtype_out]]
+        k_l1_ty_in = np.ndarray[(attn_score_mm_dims[2] * attn_score_mm_dims[1],), np.dtype[dtype_out]]
+        attn_score_l1_ty = np.ndarray[(attn_score_mm_dims[0] * attn_score_mm_dims[2],), np.dtype[dtype_out]]
 
         # AIE Core Function declarations
         # Last part of the name is whether the right matrix is row major
-        # Need to declare the external functions for each object file used in the design 
         matmul_vectorized_func_name = f"matmul_{dtype_in_str}_{dtype_out_str}"
-        zero_projs = external_func(f"zero_{dtype_out_str}_{q_matmul_dims[0]}_{q_matmul_dims[1]}_{q_matmul_dims[2]}_1", inputs=[q_l1_ty])
+        zero_projs = external_func(
+            f"zero_{dtype_out_str}_{q_proj_dims[0]}_{q_proj_dims[1]}_{q_proj_dims[2]}_1",
+            inputs=[q_l1_ty_out]
+        )
         matmul_projs = external_func(
-            matmul_vectorized_func_name + f"_{q_matmul_dims[0]}_{q_matmul_dims[1]}_{q_matmul_dims[2]}_1",
-            inputs=[X_l1_ty, Wq_l1_ty, q_l1_ty],
+            matmul_vectorized_func_name + f"_{q_proj_dims[0]}_{q_proj_dims[1]}_{q_proj_dims[2]}_1",
+            inputs=[X_l1_ty, Wq_l1_ty, q_l1_ty_out]
         )
-        zero_attn_score = external_func(f"zero_{dtype_out_str}_{o1_matmul_dims[0][0]}_{o1_matmul_dims[0][1]}_{o1_matmul_dims[1][0]}_0", inputs=[o1_l1_ty])
+        zero_attn_score = external_func(
+            f"zero_{dtype_out_str}_{attn_score_mm_dims[0]}_{attn_score_mm_dims[1]}_{attn_score_mm_dims[2]}_0",
+            inputs=[attn_score_l1_ty]
+        )
         matmul_attn_score = external_func(
-            matmul_vectorized_func_name + f"_{o1_matmul_dims[0][0]}_{o1_matmul_dims[0][1]}_{o1_matmul_dims[1][0]}_0",
-            inputs=[q_l1_ty_in, k_l1_ty_in, o1_l1_ty],
+            matmul_vectorized_func_name + f"_{attn_score_mm_dims[0]}_{attn_score_mm_dims[1]}_{attn_score_mm_dims[2]}_0",
+            inputs=[q_l1_ty_in, k_l1_ty_in, attn_score_l1_ty]
         )
-        div_projs = external_func(f"div_2d_bf16", inputs=[o1_l1_ty, o1_l1_ty])
+        div_projs = external_func(
+            f"div_2d_bf16", 
+            inputs=[attn_score_l1_ty, attn_score_l1_ty]
+        )
 
         if dev == "npu":
-            tiles = [[tile(col + 0, row) for col in range(0, n_aie_cols)] for row in range(0, 6)] # 1st to 3rd columns
+            tiles = [[tile(col + 0, row) for col in range(0, n_aie_cols)] for row in range(0, 6)] # 1st to 4th columns
         else:
-            tiles = [[tile(col + 0, row) for col in range(0, n_aie_cols)] for row in range(0, 6)] # 1st to 3rd columns
+            tiles = [[tile(col + 0, row) for col in range(0, n_aie_cols)] for row in range(0, 6)] # 1st to 4th columns
         shim_tiles = tiles[0]
         mem_tiles = tiles[1]
         core_tiles = tiles[2:]
 
-        # AIE-array data movement with object fifos
-        Wq_l2l1_fifos = [None] * n_aie_rows_projs
-        q_l1l2_fifos = [None] * n_aie_rows_projs
-        Wk_l2l1_fifos = [None] * n_aie_rows_projs
-        Wv_l2l1_fifos = [None] * n_aie_rows_projs
-        k_l1l2_fifos = [None] * n_aie_rows_projs
-        v_l1l2_fifos = [None] * n_aie_rows_projs
-
-        X_l3l2_fifos = object_fifo(f"X_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, X_l2_ty)
-        X_l2l1_fifos = object_fifo(f"X_L2L1", mem_tiles[0], [core_tiles[2 + row][0] for row in range(n_aie_rows_projs)] + [core_tiles[0 + row][0] for row in range(n_aie_rows_projs)] + [core_tiles[2 + row][1] for row in range(n_aie_rows_projs)], fifo_depth, X_l1_ty,
-                                    [
-                                        (q_matmul_dims[0] // r, r * q_matmul_dims[1]),
-                                        (q_matmul_dims[1] // s, s),
-                                        (r, q_matmul_dims[1]),
-                                        (s, 1),
-                                    ],)
+        # AIE-array data movement for Q, K, V projections
+        Wq_l2l1_fifos = [None] * comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR]
+        Wk_l2l1_fifos = [None] * comp_distr_in[WK_PATH_STR][NUM_ROWS_STR]
+        Wv_l2l1_fifos = [None] * comp_distr_in[WV_PATH_STR][NUM_ROWS_STR]
+        q_l1l2_fifos = [None] * comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR]
+        k_l1l2_fifos = [None] * comp_distr_in[WK_PATH_STR][NUM_ROWS_STR]
+        v_l1l2_fifos = [None] * comp_distr_in[WV_PATH_STR][NUM_ROWS_STR]
+        # L3 to L2 data movement
+        X_l3l2_fifos = object_fifo(
+            f"X_L3L2", shim_tiles[comp_distr_in[X_PATH_STR][L3_COL_STR]], mem_tiles[comp_distr_in[X_PATH_STR][L2_COL_STR]], fifo_depth, X_l2_ty
+        )
+        Wq_l3l2_fifos = object_fifo(
+            f"Wq_L3L2", shim_tiles[comp_distr_in[WQ_PATH_STR][L3_COL_STR]], mem_tiles[comp_distr_in[WQ_PATH_STR][L2_COL_STR]], fifo_depth, Wq_l2_ty
+        )
+        Wk_l3l2_fifos = object_fifo(
+            f"Wk_L3L2", shim_tiles[comp_distr_in[WK_PATH_STR][L3_COL_STR]], mem_tiles[comp_distr_in[WK_PATH_STR][L2_COL_STR]], fifo_depth, Wk_l2_ty
+        )
+        Wv_l3l2_fifos = object_fifo(
+            f"Wv_L3L2", shim_tiles[comp_distr_in[WV_PATH_STR][L3_COL_STR]], mem_tiles[comp_distr_in[WV_PATH_STR][L2_COL_STR]], fifo_depth, Wv_l2_ty
+        )
+        # L2 to L1 data movement
+        x_core_tiles = [core_tiles[comp_distr_in[WQ_PATH_STR][L1_START_ROW_STR] + row][comp_distr_in[WQ_PATH_STR][L1_START_COL_STR]] for row in range(comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR])]
+        x_core_tiles = x_core_tiles +[core_tiles[comp_distr_in[WK_PATH_STR][L1_START_ROW_STR] + row][comp_distr_in[WK_PATH_STR][L1_START_COL_STR]] for row in range(comp_distr_in[WK_PATH_STR][NUM_ROWS_STR])]
+        x_core_tiles = x_core_tiles +[core_tiles[comp_distr_in[WV_PATH_STR][L1_START_ROW_STR] + row][comp_distr_in[WV_PATH_STR][L1_START_COL_STR]] for row in range(comp_distr_in[WV_PATH_STR][NUM_ROWS_STR])]
+        X_l2l1_fifos = object_fifo(
+            f"X_L2L1", mem_tiles[comp_distr_in[X_PATH_STR][L2_COL_STR]], x_core_tiles, fifo_depth, X_l1_ty,
+            [
+                (q_proj_dims[0] // r, r * q_proj_dims[1]),
+                (q_proj_dims[1] // s, s),
+                (r, q_proj_dims[1]),
+                (s, 1),
+            ],
+        )
+        for row in range(comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR]):
+            Wq_l2l1_fifos[row] = object_fifo(
+                f"Wq_L2L1_{row}", mem_tiles[comp_distr_in[WQ_PATH_STR][L2_COL_STR]], core_tiles[comp_distr_in[WQ_PATH_STR][L1_START_ROW_STR] + row][comp_distr_in[WQ_PATH_STR][L1_START_COL_STR]], fifo_depth, Wq_l1_ty,
+                [
+                    (q_proj_dims[1] // s, s * q_proj_dims[2]),
+                    (q_proj_dims[2] // t, t),
+                    (s, q_proj_dims[2]),
+                    (t, 1),
+                ],
+            )
+        for row in range(comp_distr_in[WK_PATH_STR][NUM_ROWS_STR]):
+            Wk_l2l1_fifos[row] = object_fifo(
+                f"Wk_L2L1_{row}", mem_tiles[comp_distr_in[WK_PATH_STR][L2_COL_STR]], core_tiles[comp_distr_in[WK_PATH_STR][L1_START_ROW_STR] + row][comp_distr_in[WK_PATH_STR][L1_START_COL_STR]], fifo_depth, Wk_l1_ty,
+                [
+                    (k_proj_dims[1] // s, s * k_proj_dims[2]),
+                    (k_proj_dims[2] // t, t),
+                    (s, k_proj_dims[2]),
+                    (t, 1),
+                ],
+            )
+        for row in range(comp_distr_in[WV_PATH_STR][NUM_ROWS_STR]):
+            Wv_l2l1_fifos[row] = object_fifo(
+                f"Wv_L2L1_{row}", mem_tiles[comp_distr_in[WV_PATH_STR][L2_COL_STR]], core_tiles[comp_distr_in[WV_PATH_STR][L1_START_ROW_STR] + row][comp_distr_in[WV_PATH_STR][L1_START_COL_STR]], fifo_depth, Wv_l1_ty,
+                [
+                    (v_proj_dims[1] // s, s * v_proj_dims[2]),
+                    (v_proj_dims[2] // t, t),
+                    (s, v_proj_dims[2]),
+                    (t, 1),
+                ],
+            )
+        # L3 to L1 links
         object_fifo_link(X_l3l2_fifos, X_l2l1_fifos)
-        
-        Wq_l3l2_fifos = object_fifo(f"Wq_L3L2", shim_tiles[0], mem_tiles[0], fifo_depth, Wq_l2_ty)
-        for row in range(n_aie_rows_projs):
-            Wq_l2l1_fifos[row] = object_fifo(f"Wq_L2L1_{row}", mem_tiles[0], core_tiles[2 + row][0], fifo_depth, Wq_l1_ty,
-                                        [
-                                            (q_matmul_dims[1] // s, s * q_matmul_dims[2]),
-                                            (q_matmul_dims[2] // t, t),
-                                            (s, q_matmul_dims[2]),
-                                            (t, 1),
-                                        ],)
-        object_fifo_link(Wq_l3l2_fifos, Wq_l2l1_fifos, [], [q_matmul_dims[1] * q_matmul_dims[2] * i for i in range(n_aie_rows_projs)])
-        
-        Wk_l3l2_fifos = object_fifo(f"Wk_L3L2", shim_tiles[1], mem_tiles[0], fifo_depth, Wkv_l2_ty)
-        for row in range(n_aie_rows_projs):
-            Wk_l2l1_fifos[row] = object_fifo(f"Wk_L2L1_{row}", mem_tiles[0], core_tiles[0 + row][0], fifo_depth, Wkv_l1_ty,
-                                        [
-                                            (kv_matmul_dims[1] // s, s * kv_matmul_dims[2]),
-                                            (kv_matmul_dims[2] // t, t),
-                                            (s, kv_matmul_dims[2]),
-                                            (t, 1),
-                                        ],)
-        object_fifo_link(Wk_l3l2_fifos, Wk_l2l1_fifos, [], [kv_matmul_dims[0] * kv_matmul_dims[2] * i for i in range(n_aie_rows_projs)])
+        object_fifo_link(Wq_l3l2_fifos, Wq_l2l1_fifos, [], [q_proj_dims[1] * q_proj_dims[2] * i for i in range(comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR])])
+        object_fifo_link(Wk_l3l2_fifos, Wk_l2l1_fifos, [], [k_proj_dims[1] * k_proj_dims[2] * i for i in range(comp_distr_in[WK_PATH_STR][NUM_ROWS_STR])])
+        object_fifo_link(Wv_l3l2_fifos, Wv_l2l1_fifos, [], [v_proj_dims[1] * v_proj_dims[2] * i for i in range(comp_distr_in[WV_PATH_STR][NUM_ROWS_STR])])
+        # L1 to L2 data movement
+        for row in range(comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR]):
+            q_l1l2_fifos[row] = object_fifo(
+                f"q_L1L2_{row}", core_tiles[comp_distr_in[WQ_PATH_STR][L1_START_ROW_STR] + row][comp_distr_in[WQ_PATH_STR][L1_START_COL_STR]], mem_tiles[comp_distr_out[Q_PATH_STR][L2_COL_STR]], fifo_depth, q_l1_ty_out,
+            )
+        for row in range(comp_distr_in[WK_PATH_STR][NUM_ROWS_STR]):
+            k_l1l2_fifos[row] = object_fifo(
+                f"k_L1L2_{row}", core_tiles[comp_distr_in[WK_PATH_STR][L1_START_ROW_STR] + row][comp_distr_in[WK_PATH_STR][L1_START_COL_STR]], mem_tiles[comp_distr_out[K_PATH_STR][L2_COL_STR]], fifo_depth, k_l1_ty_out,
+            )
+        for row in range(comp_distr_in[WV_PATH_STR][NUM_ROWS_STR]):
+            v_l1l2_fifos[row] = object_fifo(
+                f"v_L1L2_{row}", core_tiles[comp_distr_in[WV_PATH_STR][L1_START_ROW_STR] + row][comp_distr_in[WV_PATH_STR][L1_START_COL_STR]], mem_tiles[comp_distr_out[V_PATH_STR][L2_COL_STR]], fifo_depth, v_l1_ty_out,
+            )
+        # L2 to L3 data movement
+        q_l2l3_fifos = object_fifo(
+            f"q_L2L3", mem_tiles[comp_distr_out[Q_PATH_STR][L2_COL_STR]], shim_tiles[comp_distr_out[Q_PATH_STR][L3_COL_STR]], fifo_depth, q_l2_ty,
+            [
+                (q_proj_dims[0] // r, r * q_proj_dims[2]),
+                (r, t),
+                (q_proj_dims[2] // t, r * t),
+                (t, 1),
+            ],
+        )
+        k_l2l3_fifos = object_fifo(
+            f"k_L2L3", mem_tiles[comp_distr_out[K_PATH_STR][L2_COL_STR]], shim_tiles[comp_distr_out[K_PATH_STR][L3_COL_STR]], fifo_depth, k_l2_ty,
+            [
+                (k_proj_dims[0] // r, r * k_proj_dims[2]),
+                (r, t),
+                (k_proj_dims[2] // t, r * t),
+                (t, 1),
+            ],
+        )
+        v_l2l3_fifos = object_fifo(
+            f"v_L2L3", mem_tiles[comp_distr_out[V_PATH_STR][L2_COL_STR]], shim_tiles[comp_distr_out[V_PATH_STR][L3_COL_STR]], fifo_depth, v_l2_ty,
+            [
+                (v_proj_dims[0] // r, r * v_proj_dims[2]),
+                (r, t),
+                (v_proj_dims[2] // t, r * t),
+                (t, 1),
+            ],
+        )
+        # L1 to L3 links
+        object_fifo_link(q_l1l2_fifos, q_l2l3_fifos, [q_proj_dims[0] * q_proj_dims[2] * i for i in range(comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR])], [])
+        object_fifo_link(k_l1l2_fifos, k_l2l3_fifos, [k_proj_dims[0] * k_proj_dims[2] * i for i in range(comp_distr_in[WK_PATH_STR][NUM_ROWS_STR])], [])
+        object_fifo_link(v_l1l2_fifos, v_l2l3_fifos, [v_proj_dims[1] * v_proj_dims[2] * i for i in range(comp_distr_in[WV_PATH_STR][NUM_ROWS_STR])], [])
 
-        for row in range(n_aie_rows_projs):
-            v_l1l2_fifos[row] = object_fifo(f"v_L1L2_{row}", core_tiles[2 + row][1], mem_tiles[1], fifo_depth, kv_l1_ty) 
-        v_l2l3_fifos = object_fifo(f"v_L2L3", mem_tiles[1], shim_tiles[1], fifo_depth, kv_l2_ty,
+        # AIE-array data movement for attention score calculation
+        # L3 to L2 data movement
+        q_l3l2_fifos = object_fifo(f"q_L3L2", shim_tiles[1], mem_tiles[1], fifo_depth, q_l1_ty_in,)
+        k_l3l2_fifos = object_fifo(f"k_L3L2", shim_tiles[3], mem_tiles[3], fifo_depth, k_l1_ty_in,)
+        # L2 to L1 data movement
+        q_l2l1_fifos = object_fifo(f"q_L2L1", mem_tiles[1], core_tiles[0][1], fifo_depth, q_l1_ty_in,
                                     [
-                                       (kv_matmul_dims[0] // r, r * kv_matmul_dims[2]),
-                                       (r, t),
-                                       (kv_matmul_dims[2] // t, r * t),
-                                       (t, 1),
-                                    ],)
-        object_fifo_link(v_l1l2_fifos, v_l2l3_fifos, [kv_matmul_dims[1] * kv_matmul_dims[2] * i for i in range(n_aie_rows_projs)], [])
-
-        for row in range(n_aie_rows_projs):
-            q_l1l2_fifos[row] = object_fifo(f"q_L1L2_{row}", core_tiles[2 + row][0], mem_tiles[0], fifo_depth, q_l1_ty)
-        q_l2l3_fifos = object_fifo(f"q_L2L3", mem_tiles[0], shim_tiles[0], fifo_depth, q_l2_ty,
-                                    [
-                                       (q_matmul_dims[0] // r, r * q_matmul_dims[2]),
-                                       (r, t),
-                                       (q_matmul_dims[2] // t, r * t),
-                                       (t, 1),
-                                    ],)
-        object_fifo_link(q_l1l2_fifos, q_l2l3_fifos, [q_matmul_dims[0] * q_matmul_dims[2] * i for i in range(n_aie_rows_projs)], [])
-        
-        Wv_l3l2_fifos = object_fifo(f"Wv_L3L2", shim_tiles[1], mem_tiles[1], fifo_depth, Wkv_l2_ty)
-        for row in range(n_aie_rows_projs):
-            Wv_l2l1_fifos[row] = object_fifo(f"Wv_L2L1_{row}", mem_tiles[1], core_tiles[2 + row][1], fifo_depth, Wkv_l1_ty,
-                                        [
-                                            (kv_matmul_dims[1] // s, s * kv_matmul_dims[2]),
-                                            (kv_matmul_dims[2] // t, t),
-                                            (s, kv_matmul_dims[2]),
-                                            (t, 1),
-                                        ],)
-        object_fifo_link(Wv_l3l2_fifos, Wv_l2l1_fifos, [], [kv_matmul_dims[1] * kv_matmul_dims[2] * i for i in range(n_aie_rows_projs)])
-
-        for row in range(n_aie_rows_projs):
-            k_l1l2_fifos[row] = object_fifo(f"k_L1L2_{row}", core_tiles[0 + row][0], mem_tiles[0], fifo_depth, kv_l1_ty) 
-        k_l2l3_fifos = object_fifo(f"k_L2L3", mem_tiles[0], shim_tiles[0], fifo_depth, kv_l2_ty,
-                                    [
-                                       (kv_matmul_dims[0] // r, r * kv_matmul_dims[2]),
-                                       (r, t),
-                                       (kv_matmul_dims[2] // t, r * t),
-                                       (t, 1),
-                                    ],)
-        object_fifo_link(k_l1l2_fifos, k_l2l3_fifos, [kv_matmul_dims[0] * kv_matmul_dims[2] * i for i in range(n_aie_rows_projs)], []) 
-
-        q_l3l2_fifos = object_fifo(f"q_L3L2", shim_tiles[2], mem_tiles[2], fifo_depth, q_l1_ty_in,)
-        q_l2l1_fifos = object_fifo(f"q_L2L1", mem_tiles[2], core_tiles[0][2], fifo_depth, q_l1_ty_in,
-                                    [
-                                        (o1_matmul_dims[0][0] // r, r * o1_matmul_dims[0][1]),
-                                        (o1_matmul_dims[0][1] // s, s),
-                                        (r, o1_matmul_dims[0][1]),
+                                        (attn_score_mm_dims[0] // r, r * attn_score_mm_dims[1]),
+                                        (attn_score_mm_dims[1] // s, s),
+                                        (r, attn_score_mm_dims[1]),
                                         (s, 1),
                                     ],)
+        k_l2l1_fifos = object_fifo(f"k_L2L1", mem_tiles[3], core_tiles[0][1], fifo_depth, k_l1_ty_in,
+                                    [
+                                        (attn_score_mm_dims[2] // t, t * attn_score_mm_dims[1]),
+                                        (attn_score_mm_dims[1] // s, s),
+                                        (t, attn_score_mm_dims[1]),
+                                        (s, 1),
+                                    ],)
+        # L3 to L1 links
         object_fifo_link(q_l3l2_fifos, q_l2l1_fifos)
-        k_l3l2_fifos = object_fifo(f"k_L3L2", shim_tiles[2], mem_tiles[2], fifo_depth, k_l1_ty_in,)
-        k_l2l1_fifos = object_fifo(f"k_L2L1", mem_tiles[2], core_tiles[0][2], fifo_depth, k_l1_ty_in,
-                                    [
-                                        (o1_matmul_dims[0][1] // t, t * o1_matmul_dims[1][1]),
-                                        (o1_matmul_dims[1][1] // s, s),
-                                        (t, o1_matmul_dims[1][1]),
-                                        (s, 1),
-                                    ],)
         object_fifo_link(k_l3l2_fifos, k_l2l1_fifos)
-        o1_l1l2_fifos = object_fifo(f"o1_L1L2", core_tiles[0][2], mem_tiles[2], fifo_depth, o1_l1_ty)
-        o1_l2l3_fifos = object_fifo(f"o1_L2L3", mem_tiles[2], shim_tiles[2], fifo_depth, o1_l1_ty,
+        # L1 to L2 data movement
+        attn_score_l1l2_fifos = object_fifo(f"attn_score_L1L2", core_tiles[0][1], mem_tiles[3], fifo_depth, attn_score_l1_ty)
+        # L2 to L3 data movement
+        attn_score_l2l3_fifos = object_fifo(f"attn_score_L2L3", mem_tiles[3], shim_tiles[3], fifo_depth, attn_score_l1_ty,
                                     [
-                                        (o1_matmul_dims[0][0] // r, r * o1_matmul_dims[1][0]),
+                                        (attn_score_mm_dims[0] // r, r * attn_score_mm_dims[2]),
                                         (r, t),
-                                        (o1_matmul_dims[1][0] // t, r * t),
+                                        (attn_score_mm_dims[2] // t, r * t),
                                         (t, 1),
                                     ],)
-        object_fifo_link(o1_l1l2_fifos, o1_l2l3_fifos)
+        # L1 to L3 links
+        object_fifo_link(attn_score_l1l2_fifos, attn_score_l2l3_fifos)
 
-        # Set up compute tiles
-        for row in range(n_aie_rows_projs):
-            @core(core_tiles[2 + row][0], f"mha_mm_{q_matmul_dims[0]}x{q_matmul_dims[1]}x{q_matmul_dims[2]}_row_major.o", stack_size=0xD00)
+        # Compute for Q, K, V projections
+        for row in range(comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR]):
+            @core(
+                core_tiles[comp_distr_in[WQ_PATH_STR][L1_START_ROW_STR] + row][comp_distr_in[WQ_PATH_STR][L1_START_COL_STR]],
+                f"mha_mm_{q_proj_dims[0]}x{q_proj_dims[1]}x{q_proj_dims[2]}_row_major.o",
+                stack_size=0xD00
+            )
             def core_body():
                 for _ in range_(0xFFFFFFFF):
-                    for _ in range_(H):
-                        for _ in range_(head_dim // q_matmul_dims[2]):
-                            elem_q = q_l1l2_fifos[row].acquire(ObjectFifoPort.Produce, 1)
-                            zero_projs(elem_q)
-                            for _ in range_(K // q_matmul_dims[1]):
-                                elem_in_X = X_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                                elem_in_wq = Wq_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
-                                matmul_projs(elem_in_X, elem_in_wq, elem_q)
-                                Wq_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
-                                X_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
-                            q_l1l2_fifos[row].release(ObjectFifoPort.Produce, 1)
+                    for _ in range_(N // q_proj_dims[2] // comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR]):
+                        elem_q = q_l1l2_fifos[row].acquire(ObjectFifoPort.Produce, 1)
+                        zero_projs(elem_q)
+                        for _ in range_(K // q_proj_dims[1]):
+                            elem_in_X = X_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_wq = Wq_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
+                            matmul_projs(elem_in_X, elem_in_wq, elem_q)
+                            Wq_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
+                            X_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                        q_l1l2_fifos[row].release(ObjectFifoPort.Produce, 1)
 
-        for row in range(n_aie_rows_projs):
-            @core(core_tiles[0 + row][0], f"mha_mm_{kv_matmul_dims[0]}x{kv_matmul_dims[1]}x{kv_matmul_dims[2]}_row_major.o", stack_size=0xD00)
+        for row in range(comp_distr_in[WK_PATH_STR][NUM_ROWS_STR]):
+            @core(
+                core_tiles[comp_distr_in[WK_PATH_STR][L1_START_ROW_STR] + row][comp_distr_in[WK_PATH_STR][L1_START_COL_STR]],
+                f"mha_mm_{k_proj_dims[0]}x{k_proj_dims[1]}x{k_proj_dims[2]}_row_major.o",
+                stack_size=0xD00
+            )
             def core_body():
                 for _ in range_(0xFFFFFFFF):
-                    for _ in range_(H):
-                        for _ in range_(head_dim // kv_matmul_dims[2]):
-                            elem_k = k_l1l2_fifos[row].acquire(ObjectFifoPort.Produce, 1)
-                            zero_projs(elem_k)
-                            for _ in range_(K // kv_matmul_dims[1]):
-                                elem_in_xk = X_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                                elem_in_wk = Wk_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
-                                matmul_projs(elem_in_xk, elem_in_wk, elem_k)
-                                Wk_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
-                                X_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
-                            k_l1l2_fifos[row].release(ObjectFifoPort.Produce, 1)
+                    for _ in range_(N // k_proj_dims[2] // comp_distr_in[WK_PATH_STR][NUM_ROWS_STR]):
+                        elem_k = k_l1l2_fifos[row].acquire(ObjectFifoPort.Produce, 1)
+                        zero_projs(elem_k)
+                        for _ in range_(K // k_proj_dims[1]):
+                            elem_in_xk = X_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_wk = Wk_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
+                            matmul_projs(elem_in_xk, elem_in_wk, elem_k)
+                            Wk_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
+                            X_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                        k_l1l2_fifos[row].release(ObjectFifoPort.Produce, 1)
 
-        for row in range(n_aie_rows_projs):
-            @core(core_tiles[2 + row][1], f"mha_mm_{kv_matmul_dims[0]}x{kv_matmul_dims[1]}x{kv_matmul_dims[2]}_row_major.o", stack_size=0xD00)
+        for row in range(comp_distr_in[WV_PATH_STR][NUM_ROWS_STR]):
+            @core(
+                core_tiles[comp_distr_in[WV_PATH_STR][L1_START_ROW_STR] + row][comp_distr_in[WV_PATH_STR][L1_START_COL_STR]],
+                f"mha_mm_{v_proj_dims[0]}x{v_proj_dims[1]}x{v_proj_dims[2]}_row_major.o",
+                stack_size=0xD00
+            )
             def core_body():
                 for _ in range_(0xFFFFFFFF):
-                    for _ in range_(H):
-                        for _ in range_(head_dim // kv_matmul_dims[2]):
-                            elem_v = v_l1l2_fifos[row].acquire(ObjectFifoPort.Produce, 1)
-                            zero_projs(elem_v)
-                            for _ in range_(K // kv_matmul_dims[1]):
-                                elem_in_xv = X_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                                elem_in_wv = Wv_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
-                                matmul_projs(elem_in_xv, elem_in_wv, elem_v)
-                                Wv_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
-                                X_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
-                            v_l1l2_fifos[row].release(ObjectFifoPort.Produce, 1)
+                    for _ in range_(N // v_proj_dims[2] // comp_distr_in[WV_PATH_STR][NUM_ROWS_STR]):
+                        elem_v = v_l1l2_fifos[row].acquire(ObjectFifoPort.Produce, 1)
+                        zero_projs(elem_v)
+                        for _ in range_(K // v_proj_dims[1]):
+                            elem_in_xv = X_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_wv = Wv_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
+                            matmul_projs(elem_in_xv, elem_in_wv, elem_v)
+                            Wv_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
+                            X_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
+                        v_l1l2_fifos[row].release(ObjectFifoPort.Produce, 1)
 
-        @core(core_tiles[0][2], f"mha_mm_{o1_matmul_dims[0][0]}x{o1_matmul_dims[0][1]}x{o1_matmul_dims[1][0]}_col_major.o", stack_size=0xD00)
+        # Compute for attention score
+        @core(core_tiles[0][1], f"mha_mm_{attn_score_mm_dims[0]}x{attn_score_mm_dims[1]}x{attn_score_mm_dims[2]}_col_major.o", stack_size=0xD00)
         def core_body():
             for _ in range_(0xFFFFFFFF):
                 for _ in range_(H):
-                    elem_o1 = o1_l1l2_fifos.acquire(ObjectFifoPort.Produce, 1)
-                    zero_attn_score(elem_o1)
-                    for _ in range_(head_dim // o1_matmul_dims[0][1]):
+                    elem_attn_score = attn_score_l1l2_fifos.acquire(ObjectFifoPort.Produce, 1)
+                    zero_attn_score(elem_attn_score)
+                    for _ in range_(head_dim // attn_score_mm_dims[1]):
                         elem_in_q = q_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
                         elem_in_k = k_l2l1_fifos.acquire(ObjectFifoPort.Consume, 1)
-                        matmul_attn_score(elem_in_q, elem_in_k, elem_o1)
+                        matmul_attn_score(elem_in_q, elem_in_k, elem_attn_score)
                         q_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
                         k_l2l1_fifos.release(ObjectFifoPort.Consume, 1)
-                    div_projs(elem_o1, elem_o1)
-                    o1_l1l2_fifos.release(ObjectFifoPort.Produce, 1)
+                    div_projs(elem_attn_score, elem_attn_score)
+                    attn_score_l1l2_fifos.release(ObjectFifoPort.Produce, 1)
 
         # To/from AIE-array data movement
         @runtime_sequence(
-            np.ndarray[((M * K) + (2 * K * N),), np.dtype[dtype_in]], # Order: X, W_Q, W_K
-            np.ndarray[(K * N,), np.dtype[dtype_in]], # Order: W_V
-            np.ndarray[((3 * M * N) + (H * M * M),), np.dtype[dtype_out]], # Order: Q, K, V, o1
+            np.ndarray[((M * K) + (2 * K * N),), np.dtype[dtype_in]],       # Order: X, W_Q, W_K
+            np.ndarray[(K * N,), np.dtype[dtype_in]],                       # Order: W_V
+            np.ndarray[((3 * M * N) + (H * M * M),), np.dtype[dtype_out]],  # Order: Q, K, V, attn_score
         )
         def sequence(A, B, C):
-                # One iteration generates the output for 32 rows, so need to repeat
-                # for the rest of the output's sequence
-                for row_offset in range(0, M, q_matmul_dims[0]):
+                # Send the data for calculating Q, K, V projections
+                for row_offset in range(0, M, q_proj_dims[0]):
                     npu_dma_memcpy_nd(
                         metadata=X_l3l2_fifos,
                         bd_id=0,
                         mem=A,
                         offsets=[0, 0, 0, row_offset * K],
-                        sizes=[N // q_matmul_dims[2], K // q_matmul_dims[1], q_matmul_dims[0], q_matmul_dims[1]],
-                        strides=[0, q_matmul_dims[1], K, 1],
+                        sizes=[N // q_proj_dims[2] // comp_distr_in[X_PATH_STR][NUM_ROWS_STR], K // q_proj_dims[1], q_proj_dims[0], q_proj_dims[1]],
+                        strides=[0, q_proj_dims[1], K, 1],
                     )
 
-                    for col_offset in range(0, N, q_matmul_dims[2] * n_aie_cols_projs):
+                    for col_offset in range(0, N, q_proj_dims[2] * comp_distr_in[X_PATH_STR][NUM_ROWS_STR]):
                         npu_dma_memcpy_nd(
                             metadata=Wq_l3l2_fifos,
                             bd_id=1,
                             mem=A,
                             offsets=[0, 0, 0, M * K + col_offset],
-                            sizes=[K // q_matmul_dims[1], n_aie_rows_projs, q_matmul_dims[1], q_matmul_dims[2]],
-                            strides=[q_matmul_dims[1] * N, q_matmul_dims[2], N, 1],
+                            sizes=[K // q_proj_dims[1], comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR], q_proj_dims[1], q_proj_dims[2]],
+                            strides=[q_proj_dims[1] * N, q_proj_dims[2], N, 1],
                         )
 
                         npu_dma_memcpy_nd(
@@ -464,8 +573,8 @@ def my_mha(
                             bd_id=2,
                             mem=A,
                             offsets=[0, 0, 0, M * K + K * N + col_offset],
-                            sizes=[K // kv_matmul_dims[1], n_aie_rows_projs, kv_matmul_dims[1], kv_matmul_dims[2]],
-                            strides=[kv_matmul_dims[1] * N, kv_matmul_dims[2], N, 1],
+                            sizes=[K // k_proj_dims[1], comp_distr_in[WK_PATH_STR][NUM_ROWS_STR], k_proj_dims[1], k_proj_dims[2]],
+                            strides=[k_proj_dims[1] * N, k_proj_dims[2], N, 1],
                         )
 
                         npu_dma_memcpy_nd(
@@ -473,8 +582,8 @@ def my_mha(
                             bd_id=3,
                             mem=B,
                             offsets=[0, 0, 0, col_offset],
-                            sizes=[K // kv_matmul_dims[1], n_aie_rows_projs, kv_matmul_dims[1], kv_matmul_dims[2]],
-                            strides=[kv_matmul_dims[1] * N, kv_matmul_dims[2], N, 1],
+                            sizes=[K // v_proj_dims[1], comp_distr_in[WV_PATH_STR][NUM_ROWS_STR], v_proj_dims[1], v_proj_dims[2]],
+                            strides=[v_proj_dims[1] * N, v_proj_dims[2], N, 1],
                         )
 
                         npu_dma_memcpy_nd(
@@ -482,8 +591,8 @@ def my_mha(
                             bd_id=4,
                             mem=C,
                             offsets=[0, 0, 0, row_offset * N + col_offset],
-                            sizes=[1, n_aie_rows_projs, q_matmul_dims[0], q_matmul_dims[2]],
-                            strides=[0, q_matmul_dims[0] * q_matmul_dims[2], N, 1],
+                            sizes=[1, comp_distr_in[WQ_PATH_STR][NUM_ROWS_STR], q_proj_dims[0], q_proj_dims[2]],
+                            strides=[0, q_proj_dims[2], N, 1],
                         )
 
                         npu_dma_memcpy_nd(
@@ -491,8 +600,8 @@ def my_mha(
                             bd_id=5,
                             mem=C,
                             offsets=[0, 0, 0, M * N + row_offset * N + col_offset],
-                            sizes=[1, n_aie_rows_projs, kv_matmul_dims[0], kv_matmul_dims[2]],
-                            strides=[0, kv_matmul_dims[0] * kv_matmul_dims[2], N, 1],
+                            sizes=[1, comp_distr_in[WK_PATH_STR][NUM_ROWS_STR], k_proj_dims[0], k_proj_dims[2]],
+                            strides=[0, k_proj_dims[2], N, 1],
                         )
 
                         npu_dma_memcpy_nd(
@@ -500,21 +609,22 @@ def my_mha(
                             bd_id=6,
                             mem=C,
                             offsets=[0, 0, 0, 2 * M * N + row_offset * N + col_offset],
-                            sizes=[1, n_aie_rows_projs, kv_matmul_dims[0], kv_matmul_dims[2]],
-                            strides=[0, kv_matmul_dims[0] * kv_matmul_dims[2], N, 1],
+                            sizes=[1, comp_distr_in[WV_PATH_STR][NUM_ROWS_STR], v_proj_dims[0], v_proj_dims[2]],
+                            strides=[0, v_proj_dims[2], N, 1],
                         )
 
                         dma_wait(q_l2l3_fifos, k_l2l3_fifos, v_l2l3_fifos)
                 
+                # Send the data for calculating attention scores
                 for head in range(H):
-                    for row_offset in range(0, M, o1_matmul_dims[0][0]):
+                    for row_offset in range(0, M, attn_score_mm_dims[0]):
                         npu_dma_memcpy_nd(
                             metadata=q_l3l2_fifos,
                             bd_id=0,
                             mem=C,
                             offsets=[0, 0, 0, row_offset * N + head * head_dim],
-                            sizes=[M // o1_matmul_dims[1][0], head_dim // o1_matmul_dims[0][1], o1_matmul_dims[0][0], o1_matmul_dims[0][1]],
-                            strides=[0, o1_matmul_dims[0][1], N, 1],
+                            sizes=[M // attn_score_mm_dims[2], head_dim // attn_score_mm_dims[1], attn_score_mm_dims[0], attn_score_mm_dims[1]],
+                            strides=[0, attn_score_mm_dims[1], N, 1],
                         )
 
                         npu_dma_memcpy_nd(
@@ -522,20 +632,20 @@ def my_mha(
                             bd_id=1,
                             mem=C,
                             offsets=[0, 0, 0, M * N + head * head_dim],
-                            sizes=[M // o1_matmul_dims[1][0], head_dim // o1_matmul_dims[1][1], o1_matmul_dims[1][0], o1_matmul_dims[1][1]],
-                            strides=[o1_matmul_dims[1][0] * N, o1_matmul_dims[1][1], N, 1],
+                            sizes=[M // attn_score_mm_dims[2], head_dim // attn_score_mm_dims[1], attn_score_mm_dims[2], attn_score_mm_dims[1]],
+                            strides=[attn_score_mm_dims[2] * N, attn_score_mm_dims[1], N, 1],
                         )
 
                         npu_dma_memcpy_nd(
-                            metadata=o1_l2l3_fifos,
+                            metadata=attn_score_l2l3_fifos,
                             bd_id=2,
                             mem=C,
                             offsets=[0, 0, 0, 3 * M * N + head * M * M + row_offset * M],
-                            sizes=[1, M // o1_matmul_dims[1][0], o1_matmul_dims[0][0], o1_matmul_dims[1][0]],
-                            strides=[0, o1_matmul_dims[1][0], M, 1],
+                            sizes=[1, M // attn_score_mm_dims[2], attn_score_mm_dims[0], attn_score_mm_dims[2]],
+                            strides=[0, attn_score_mm_dims[2], M, 1],
                         )
 
-                        dma_wait(o1_l2l3_fifos)
+                        dma_wait(attn_score_l2l3_fifos)
 
 
 if __name__ == "__main__":
