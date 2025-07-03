@@ -299,7 +299,7 @@ def my_mha(
         q_l1_ty_in = np.ndarray[(attn_score_mm_dims[0] * attn_score_mm_dims[1],), np.dtype[dtype_out]]
         k_l1_ty_in = np.ndarray[(attn_score_mm_dims[2] * attn_score_mm_dims[1],), np.dtype[dtype_out]]
         attn_score_l1_ty = np.ndarray[(attn_score_mm_dims[0] * attn_score_mm_dims[2],), np.dtype[dtype_out]]
-        attn_score_l1_ty = np.ndarray[(softmax_dims[0] * softmax_dims[1],), np.dtype[dtype_out]]
+        softmax_l1_ty = np.ndarray[(softmax_dims[0] * softmax_dims[1],), np.dtype[dtype_out]]
 
         # AIE Core Function declarations
         # Last part of the name is whether the right matrix is row major
@@ -326,7 +326,7 @@ def my_mha(
         )
         softmax_attn_score = external_func(
             f"softmax_{dtype_in_str}",
-            inputs=[attn_score_l1_ty, attn_score_l1_ty],
+            inputs=[softmax_l1_ty, softmax_l1_ty],
         )
 
         if dev == "npu":
@@ -533,7 +533,7 @@ def my_mha(
             core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], 
             mem_tiles[mtx_out[ATTN_SCORE_STR][L2_POS_STR]], 
             fifo_depth, 
-            attn_score_l1_ty,
+            softmax_l1_ty,
         ) for l1_pos in intermediate_mtx_in[ATTN_SCORE_STR][L1_POS_STR]]
         # L2 to L3 data movement
         softmax_l2l3_fifos = object_fifo(
@@ -631,7 +631,7 @@ def my_mha(
             @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_softmax.o", stack_size=0xD00) # Make sure to use the bundled obj file, not the softmax-only obj file
             def core_body():
                 for _ in range_(0xFFFFFFFF):
-                    for _ in range_(H):
+                    for _ in range_(H // len(intermediate_mtx_in[ATTN_SCORE_STR][L1_POS_STR])):
                         elem_attn_score = softmax_l1l2_fifos[head].acquire(ObjectFifoPort.Produce, 1)
                         elem_o1 = attn_score_l2l1_fifos[head].acquire(ObjectFifoPort.Consume, 1)
                         softmax_attn_score(elem_o1, elem_attn_score)
