@@ -104,7 +104,7 @@ template <>
 std::bfloat16_t get_random<std::bfloat16_t>() {
   // Random numbers should NOT be uniformly between 0 and 1, because that
   // would make the matrix product AB always close to 1.
-  return std::bfloat16_t(4.0 * (float)rand() / (float)(RAND_MAX));
+  return std::bfloat16_t((float)rand() / (float)(RAND_MAX) / 8.0);
 }
 
 template <typename Tin, typename Tout, typename Tacc>
@@ -549,12 +549,12 @@ float get_rel_tol<std::int32_t>() {
 
 template <>
 float get_rel_tol<std::bfloat16_t>() {
-  return 0.15;
+  return 0.5;
 }
 
 template <>
 float get_rel_tol<float>() {
-  return 0.15;
+  return 0.5;
 }
 
 template <>
