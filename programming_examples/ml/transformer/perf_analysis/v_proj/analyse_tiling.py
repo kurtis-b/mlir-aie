@@ -1,6 +1,8 @@
 import os
 import re
 from collections import defaultdict
+import json
+from collections import OrderedDict
 
 # Path to the input file
 input_file = os.path.join(
@@ -92,7 +94,7 @@ with open(aie_mha_file, 'r') as f:
                     parts = matmul_str.split('_')
                     if len(parts) >= 5:
                         dtype = f"{parts[0]}_{parts[1]}"
-                        m, k, n = map(int, parts[-3:])
+                        m, k, n = map(int, parts[-4:-1])
                         macs = m * k * n
                         if tile not in core_loop_bounds:
                             core_loop_bounds[tile] = {}
@@ -129,7 +131,7 @@ for tile, info in sorted(core_loop_bounds.items()):
 
 with open(aie_mha_file, 'r') as f:
     inside_sequence = False
-    metadata_counts = {}
+    metadata_symbols = OrderedDict()
     metadata_shapes = {}
     metadata_shape_counts = {}
 
@@ -148,7 +150,8 @@ with open(aie_mha_file, 'r') as f:
                 meta_str = meta_match.group(1)
                 shape_str = shape_match.group(2)
                 shape_nums = tuple(int(x.strip()) for x in shape_str.split(','))
-                metadata_counts[meta_str] = metadata_counts.get(meta_str, 0) + 1
+                if meta_str not in metadata_symbols:
+                    metadata_symbols[meta_str] = None
                 if meta_str not in metadata_shapes:
                     metadata_shapes[meta_str] = []
                 metadata_shapes[meta_str].append(shape_nums)
@@ -157,17 +160,37 @@ with open(aie_mha_file, 'r') as f:
                     metadata_shape_counts[meta_str] = {}
                 metadata_shape_counts[meta_str][shape_nums] = metadata_shape_counts[meta_str].get(shape_nums, 0) + 1
 
+# Prepare and print metadata summary in a more readable format
 print("\nMetadata counts and shapes:")
-for meta, count in sorted(metadata_counts.items()):
-    print(f"Metadata {meta}: {count} instances")
+metadata_json = {}
+for meta in metadata_symbols.keys():
+    entry = {
+        "unique_shapes": [],
+        "num_tiles": 1
+    }
     if meta in metadata_shapes:
         unique_shapes = metadata_shape_counts[meta]
-        print(f"  Unique shapes:")
         for shape, shape_count in sorted(unique_shapes.items()):
-            print(f"    Shape {shape}: {shape_count} instances")
-        num_accesses = 1
-        for shape, shape_count in unique_shapes.items():
-            num_accesses *= shape[0] * shape[1] * shape_count
-        print(f"  Number of accesses: {num_accesses}")
+            entry["unique_shapes"].append({
+                "shape": shape,
+                "shape_count": shape_count
+            })
+            entry["num_tiles"] *= shape[0] * shape[1] * shape_count
     else:
-        print("  No shapes recorded.")
+        entry["unique_shapes"] = []
+        entry["num_tiles"] = 0
+    metadata_json[meta] = entry
+
+# Print in a more human-friendly way
+for meta, entry in metadata_json.items():
+    print(f"\nMetadata symbol: {meta}")
+    print(f"  Total tiles passed: {entry['num_tiles']}")
+    if entry["unique_shapes"]:
+        print("  Unique shapes and counts:")
+        for shape_info in entry["unique_shapes"]:
+            print(f"    Shape: {shape_info['shape']}, Count: {shape_info['shape_count']}")
+    else:
+        print("  No shapes found.")
+
+# Optionally, still print the JSON for reference
+#print(json.dumps(metadata_json, indent=2))

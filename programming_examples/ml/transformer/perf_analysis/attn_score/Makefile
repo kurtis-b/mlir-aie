@@ -66,20 +66,28 @@ matmul_dims := 64x64x64 16x32x256
 # Pattern rule for matmul kernels, select row or col major based on b_col_maj
 
 # Extract dimensions from the pattern stem (e.g., 32x64x64)
-define extract_dims
+define extract_dims_3d
 $(eval dims := $(subst x, ,$*))
 $(eval m := $(word 1,${dims}))
 $(eval k := $(word 2,${dims}))
 $(eval n := $(word 3,${dims}))
 endef
 
-build/div_%.o: ${kernels_dir}/div.cc
-	$(call extract_dims)
+# Have to use Phx div kernel for Strix since there's no source for it in the Strix directory
+div_src := ${srcdir}/../../../../../aie_kernels/aie2/div.cc
+ifeq ($(devicename),npu2)
+mm_src := ${srcdir}/mm_aie2p.cc
+else
+mm_src := ${srcdir}/mm_aie2.cc
+endif
+
+build/div_%.o: ${div_src}
+	$(call extract_dims_3d)
 	mkdir -p $(@D)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -DDIM_HEAD=${H_DIM} -c $< -o $(@F)
 
-build/mm_%_row_major.o: ${srcdir}/mm_aie2.cc
-	$(call extract_dims)
+build/mm_%_row_major.o: ${mm_src}
+	$(call extract_dims_3d)
 	mkdir -p $(@D)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
 
@@ -87,8 +95,8 @@ build/mha_mm_%_row_major.o: build/mm_%_row_major.o build/div_%.o
 	mkdir -p $(@D)
 	ar rvs $@ $^
 
-build/mm_%_col_major.o: ${srcdir}/mm_aie2.cc
-	$(call extract_dims)
+build/mm_%_col_major.o: ${mm_src}
+	$(call extract_dims_3d)
 	mkdir -p $(@D)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DB_COL_MAJ ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
 
@@ -96,10 +104,11 @@ build/mha_mm_%_col_major.o: build/mm_%_col_major.o build/div_%.o
 	mkdir -p $(@D)
 	ar rvs $@ $^
 
-# Convenience targets to build all kernels
+# Bundle rule for matmul kernels
 matmul_objs_row_m := $(addprefix build/mha_mm_,$(addsuffix _row_major.o,$(matmul_dims)))
 matmul_objs_col_m := $(addprefix build/mha_mm_,$(addsuffix _col_major.o,$(matmul_dims)))
 
+# Convenience targets to build all kernels
 .PHONY: build_kernels
 build_kernels: $(matmul_objs_row_m) $(matmul_objs_col_m)
 
