@@ -63,18 +63,47 @@ matmul_dims := 64x64x64
 
 # Add "nm ${@D}/${@F}" at the end of the command to see the symbols in the object file 
 # Pattern rule for matmul kernels, select row or col major based on b_col_maj
-build/mha_mm_%.o: ${srcdir}/mm_aie2.cc
-	$(eval dims := $(subst x, ,$*))
-	$(eval m := $(word 1,${dims}))
-	$(eval k := $(word 2,${dims}))
-	$(eval n := $(word 3,${dims}))
-	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -c $< -o $(@F)
+
+# Extract dimensions from the pattern stem (e.g., 32x64x64)
+define extract_dims_3d
+$(eval dims := $(subst x, ,$*))
+$(eval m := $(word 1,${dims}))
+$(eval k := $(word 2,${dims}))
+$(eval n := $(word 3,${dims}))
+endef
+
+ifeq ($(devicename),npu2)
+mm_src := ${srcdir}/mm_aie2p.cc
+else
+mm_src := ${srcdir}/mm_aie2.cc
+endif
+
+
+build/mm_%_row_major.o: ${mm_src}
+	$(call extract_dims_3d)
+	mkdir -p $(@D)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
+
+build/mha_mm_%_row_major.o: build/mm_%_row_major.o
+	mkdir -p $(@D)
+	ar rvs $@ $^
+
+build/mm_%_col_major.o: ${mm_src}
+	$(call extract_dims_3d)
+	mkdir -p $(@D)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DB_COL_MAJ ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
+
+build/mha_mm_%_col_major.o: build/mm_%_col_major.o
+	mkdir -p $(@D)
+	ar rvs $@ $^
+
+# Bundle rule for matmul kernels
+matmul_objs_row_m := $(addprefix build/mha_mm_,$(addsuffix _row_major.o,$(matmul_dims)))
+matmul_objs_col_m := $(addprefix build/mha_mm_,$(addsuffix _col_major.o,$(matmul_dims)))
 
 # Convenience targets to build all kernels
-matmul_objs := $(addprefix build/mha_mm_,$(addsuffix .o,$(matmul_dims))) 
-
 .PHONY: build_kernels
-build_kernels: $(matmul_objs)
+build_kernels: $(matmul_objs_row_m) $(matmul_objs_col_m)
 
 .PHONY: run
 run: ${targetname}.exe ${xclbin_target}
