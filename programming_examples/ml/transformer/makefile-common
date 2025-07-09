@@ -202,4 +202,4 @@ clean: clean_trace
 
 .PHONY: clean_trace
 clean_trace:
-	rm -rf tmpTrace parse*.json traces/trace_${target_suffix}.json trace.txt
+	rm -rf tmpTrace parse*.json trace_${target_suffix}.json trace.txt
