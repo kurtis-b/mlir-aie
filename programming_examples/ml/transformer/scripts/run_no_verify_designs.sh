@@ -3,7 +3,7 @@
 output_file="run_no_verify_exec_times.csv"
 echo "design,avg_us,min_us,max_us" > "$output_file"
 
-for dir in add_and_norm ffn-1 ffn-2 mha; do
+for dir in mha add_and_norm ffn-1 ffn-2; do
     if [ -d "$dir" ]; then
         echo "Processing $dir"
         cd "$dir" || continue
