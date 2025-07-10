@@ -62,7 +62,7 @@ int main(int argc, const char *argv[]) {
 
   matmul_common::parse_options(argc, argv, options, vm);
   int verbosity = vm["verbosity"].as<int>();
-  int do_verify = vm["verify"].as<bool>();
+  int do_verify = vm["verify"].as<int>();
   int n_iterations = vm["iters"].as<int>();
   int n_warmup_iterations = vm["warmup"].as<int>();
   int trace_size = vm["trace_sz"].as<int>();

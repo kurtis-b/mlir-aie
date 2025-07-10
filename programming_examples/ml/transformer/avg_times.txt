@@ -1,5 +1,0 @@
-add_and_norm/: Avg NPU matmul time: 424.30 us
-ffn-1/: Avg NPU matmul time: 3820.44 us
-ffn-2/: Avg NPU matmul time: 3141.60 us
-full_design/: No avg time found
-mha/: Avg NPU matmul time: 12442.28 us
