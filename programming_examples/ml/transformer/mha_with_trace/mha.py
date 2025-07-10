@@ -135,7 +135,7 @@ def my_mha(
     enable_tracing = True if trace_size > 0 else False
     
     head_dim = N // H
-    
+
     X_STR = "x_proj"
     WQ_STR = "q_proj"
     WK_STR = "k_proj"

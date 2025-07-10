@@ -41,7 +41,7 @@ void add_default_options(cxxopts::Options &options) {
       "path of file containing userspace instructions sent to the NPU",
       cxxopts::value<std::string>())(
       "verify", "whether to verify the AIE computed output",
-      cxxopts::value<bool>()->default_value("true"))(
+      cxxopts::value<int>()->default_value("1"))(
       "rows,M", "Matrix size M", cxxopts::value<int>()->default_value("512"))(
       "inner,K", "Matrix size K", cxxopts::value<int>()->default_value("512"))(
       "columns,N", "Matrix size N",
@@ -549,12 +549,12 @@ float get_rel_tol<std::int32_t>() {
 
 template <>
 float get_rel_tol<std::bfloat16_t>() {
-  return 0.5;
+  return 0.05;
 }
 
 template <>
 float get_rel_tol<float>() {
-  return 0.5;
+  return 0.05;
 }
 
 template <>

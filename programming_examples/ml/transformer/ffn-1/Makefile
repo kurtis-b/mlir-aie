@@ -31,8 +31,9 @@ b_col_maj?=0
 
 kernels=ffn-1_mm_${m}x${k}x${n}
 aieargs=--dev ${devicename} -M $M -K $K -N $N --dtype_in ${dtype_in} --dtype_out ${dtype_out} -m $m -k $k -n $n --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj}
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 50
-target_suffix=ffn-1_${m}x${k}x${n}
+runargs_verif=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 5 --verify 1
+runargs_no_verif=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 1000 --verify 0
+target_suffix=ffn-1
 
 # set this flag to 1 for linear buffer allocation
 # else, 0 for bank-aware
@@ -69,12 +70,17 @@ build/ffn-1_mm_${m}x${k}x${n}.o: build/mm_${m}x${k}x${n}.o build/relu_${m}x${n}.
 	mkdir -p ${@D}
 	ar rvs $@ $^
 
-.PHONY: run
-run: ${targetname}.exe ${xclbin_target}
+.PHONY: run_verif
+run_verif: ${targetname}.exe ${xclbin_target}
 	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
-	${powershell} ./$< -x ${xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N ${runargs}
+	${powershell} ./$< -x ${xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N ${runargs_verif}
 
-trace: ${targetname}.exe ${trace_xclbin_target} ${insts_target}
+.PHONY: run_no_verif
+run_no_verif: ${targetname}.exe ${xclbin_target}
 	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
-	${powershell} ./$< -x ${trace_xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N ${runargs} -t ${trace_size}
+	${powershell} ./$< -x ${xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N ${runargs_no_verif}
+
+trace_no_verif: ${targetname}.exe ${trace_xclbin_target} ${insts_target}
+	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
+	${powershell} ./$< -x ${trace_xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N ${runargs_no_verif} -t ${trace_size}
 	${srcdir}/../../../utils/parse_trace.py --input trace.txt --mlir ${trace_mlir_target} --output trace_${target_suffix}.json
