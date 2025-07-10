@@ -25,7 +25,7 @@ n?=64
 ifeq ($(devicename),npu2)
 n_aie_cols?=2
 else 
-n_aie_cols?=1
+n_aie_cols?=2
 endif
 b_col_maj?=0
 
