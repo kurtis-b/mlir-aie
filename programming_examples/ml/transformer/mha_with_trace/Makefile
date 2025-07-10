@@ -29,7 +29,7 @@ endif
 b_col_maj?=0
 
 # Unless the full_design flag is set, the python code will remove a part of the tiles used in the design based on the tile to be traced
-# This is due to compiler error popping up when trying to compile the full design with trace
+# This was added to work around compiler error popping up when trying to compile the full design with trace or empty trace data
 # For some reason trace with (0,0) doesn't compile, so using (0,1) by default for tracing
 trace_tile?=(0,1)
 aieargs=--dev ${devicename} -M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj} --trace-tile '${trace_tile}'
@@ -40,8 +40,8 @@ ifeq (${full_design}, 1)
   aieargs+=--full-design
 endif
 
-verify?=0
-runargs=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 5 --verify ${verify}
+runargs_verif=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 5 --verify 1
+runargs_no_verif=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 1000 --verify 0
 target_suffix=mha
 
 # set this flag to 1 for linear buffer allocation
@@ -158,14 +158,19 @@ add_objs := $(addprefix build/mha_add_,$(addsuffix .o,$(add_dims)))
 .PHONY: build_kernels
 build_kernels: build/mha_softmax.o $(add_objs) $(matmul_objs_row_m) $(matmul_objs_col_m)
 
-.PHONY: run
-run: ${targetname}.exe ${xclbin_target}
+.PHONY: run_verif
+run_verif: ${targetname}.exe ${xclbin_target}
 	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
-	${powershell} ./$< -x ${xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N -H $H ${runargs}
+	${powershell} ./$< -x ${xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N -H $H ${runargs_verif}
 
-trace: ${targetname}.exe ${trace_xclbin_target} ${insts_target}
+.PHONY: run_no_verif
+run_no_verif: ${targetname}.exe ${xclbin_target}
 	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
-	${powershell} ./$< -x ${trace_xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N -H $H ${runargs} -t ${trace_size}
+	${powershell} ./$< -x ${xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N -H $H ${runargs_no_verif}
+
+trace_no_verif: ${targetname}.exe ${trace_xclbin_target} ${insts_target}
+	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
+	${powershell} ./$< -x ${trace_xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N -H $H ${runargs_no_verif} -t ${trace_size}
 	${srcdir}/../../../utils/parse_trace.py --input trace.txt --mlir ${trace_mlir_target} --output trace_${target_suffix}.json
 
 clean_traces:
