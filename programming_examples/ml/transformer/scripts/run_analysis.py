@@ -532,6 +532,9 @@ def analyse_execution_times(csv_file, output_dir):
             min_times.append(combined_min)
             max_times.append(combined_max)
 
+    # Sort the data by avg_times (lowest to highest)
+    sorted_data = sorted(zip(avg_times, min_times, max_times, designs))
+    avg_times, min_times, max_times, designs = map(list, zip(*sorted_data))
     fig, ax = plt.subplots(figsize=(max(8, len(designs) * 1.2), 5))
     x = range(len(designs))
     ax.bar(x, avg_times, color='skyblue', label='Avg (us)')
