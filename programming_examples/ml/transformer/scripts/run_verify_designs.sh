@@ -3,7 +3,7 @@
 output_file="run_verify_results.txt"
 > "$output_file"
 
-for dir in add_and_norm ffn-1 ffn-2 mha; do
+for dir in mha add_and_norm ffn-1 ffn-2; do
     if [ -d "$dir" ]; then
         echo "Processing $dir"
         cd "$dir" || continue
