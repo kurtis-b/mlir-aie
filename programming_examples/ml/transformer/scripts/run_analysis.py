@@ -546,7 +546,7 @@ def analyse_execution_times(csv_file, output_dir):
     ax.set_ylabel('Execution Time (us)')
     ax.set_xlabel('Design')
     ax.set_title('Execution Times Across Designs')
-    ax.legend()
+    ax.legend(loc='upper left')
     plt.tight_layout()
     plot_file = os.path.join(output_dir, "execution_times.png")
     plt.savefig(plot_file)
