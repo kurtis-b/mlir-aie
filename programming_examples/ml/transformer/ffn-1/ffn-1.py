@@ -192,7 +192,7 @@ def my_matmul(
     n_A_tiles_per_shim = n_aie_rows // n_aie_cols if n_aie_cols < 4 else 1
 
     if dev == "npu":
-        if n_aie_cols == 1:
+        if n_aie_cols == 2:
             dev_ty = AIEDevice.npu1_4col
     else:
         if n_aie_cols == 2:
