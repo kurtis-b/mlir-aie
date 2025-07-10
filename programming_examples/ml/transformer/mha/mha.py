@@ -12,6 +12,7 @@ from aie.extras.context import mlir_mod_ctx
 
 from aie.dialects.aie import *
 from aie.dialects.aiex import *
+import aie.utils.trace as trace_utils
 from aie.helpers.dialects.ext.scf import _for as range_
 from aie.helpers.taplib import TensorTiler2D, TensorAccessSequence
 
@@ -111,12 +112,13 @@ def my_mha(
     generate_taps=False,
 ):
     """
-    Generates a matrix multiplication design for the Multi-Head Attention, 
-    up to the attention score calculation. Due to the number of L3 channels
+    Generates a design for Multi-Head Attention. Due to the number of L3 channels
     needed in this design, 4 columns of the AIE array are required. This means
     a full encoder can't be run on the Phoenix, i.e. the FFN and layer norm
     layers can't be run on the array. 
     """
+    head_dim = N // H
+
     X_STR = "x_proj"
     WQ_STR = "q_proj"
     WK_STR = "k_proj"
@@ -135,7 +137,6 @@ def my_mha(
     L1_POS_STR = "l1_row_col"
     COL_IDX = 1
     ROW_IDX = 0
-
     left_mtx_in = {
         X_STR: {
             L1_POS_STR: [(0, 0), (1, 0), (2, 0), (3, 0), (0, 2), (1, 2)],
@@ -214,7 +215,6 @@ def my_mha(
             L3_POS_STR: 3,
         }
     }
-    head_dim = N // H
 
     dtype_in = dtype_map[dtype_in_str]
     dtype_out = dtype_map[dtype_out_str]
@@ -830,136 +830,135 @@ def my_mha(
             np.ndarray[((4 * M * N),), np.dtype[dtype_out]],                # Order: Q, K, V, attn_score_v
         )
         def sequence(A, B, C):
-                # Send the data for calculating Q, K, V projections
-                for row_offset in range(0, M, q_proj_dims[0]):
+            # Send the data for calculating Q, K, V projections
+            for row_offset in range(0, M, q_proj_dims[0]):
+                npu_dma_memcpy_nd(
+                    metadata=X_l3l2_fifos,
+                    bd_id=0,
+                    mem=A,
+                    offsets=[0, 0, 0, row_offset * K],
+                    sizes=[N // q_proj_dims[2] // len(right_mtx_in[WQ_STR][L1_POS_STR]), K // q_proj_dims[1], q_proj_dims[0], q_proj_dims[1]],
+                    strides=[0, q_proj_dims[1], K, 1],
+                )
+
+                for col_offset_q, col_offset_k, col_offset_v in zip(
+                    range(0, N, q_proj_dims[2] * len(right_mtx_in[WQ_STR][L1_POS_STR])),
+                    range(0, N, k_proj_dims[2] * len(right_mtx_in[WK_STR][L1_POS_STR])),
+                    range(0, N, v_proj_dims[2] * len(right_mtx_in[WV_STR][L1_POS_STR]))
+                ):
                     npu_dma_memcpy_nd(
-                        metadata=X_l3l2_fifos,
-                        bd_id=0,
+                        metadata=Wq_l3l2_fifos,
+                        bd_id=1,
                         mem=A,
-                        offsets=[0, 0, 0, row_offset * K],
-                        sizes=[N // q_proj_dims[2] // len(right_mtx_in[WQ_STR][L1_POS_STR]), K // q_proj_dims[1], q_proj_dims[0], q_proj_dims[1]],
-                        strides=[0, q_proj_dims[1], K, 1],
+                        offsets=[0, 0, 0, M * K + col_offset_q],
+                        sizes=[K // q_proj_dims[1], len(right_mtx_in[WQ_STR][L1_POS_STR]), q_proj_dims[1], q_proj_dims[2]],
+                        strides=[q_proj_dims[1] * N, q_proj_dims[2], N, 1],
                     )
 
-                    for col_offset_q, col_offset_k, col_offset_v in zip(
-                        range(0, N, q_proj_dims[2] * len(right_mtx_in[WQ_STR][L1_POS_STR])),
-                        range(0, N, k_proj_dims[2] * len(right_mtx_in[WK_STR][L1_POS_STR])),
-                        range(0, N, v_proj_dims[2] * len(right_mtx_in[WV_STR][L1_POS_STR]))
-                    ):
+                    npu_dma_memcpy_nd(
+                        metadata=Wk_l3l2_fifos,
+                        bd_id=2,
+                        mem=A,
+                        offsets=[0, 0, 0, M * K + K * N + col_offset_k],
+                        sizes=[K // k_proj_dims[1], len(right_mtx_in[WK_STR][L1_POS_STR]), k_proj_dims[1], k_proj_dims[2]],
+                        strides=[k_proj_dims[1] * N, k_proj_dims[2], N, 1],
+                    )
+
+                    npu_dma_memcpy_nd(
+                        metadata=Wv_l3l2_fifos,
+                        bd_id=3,
+                        mem=B,
+                        offsets=[0, 0, 0, col_offset_v],
+                        sizes=[K // v_proj_dims[1], len(right_mtx_in[WV_STR][L1_POS_STR]), v_proj_dims[1], v_proj_dims[2]],
+                        strides=[v_proj_dims[1] * N, v_proj_dims[2], N, 1],
+                    )
+
+                    npu_dma_memcpy_nd(
+                        metadata=q_l2l3_fifos,
+                        bd_id=4,
+                        mem=C,
+                        offsets=[0, 0, 0, row_offset * N + col_offset_q],
+                        sizes=[1, len(right_mtx_in[WQ_STR][L1_POS_STR]), q_proj_dims[0], q_proj_dims[2]],
+                        strides=[0, q_proj_dims[2], N, 1],
+                    )
+
+                    npu_dma_memcpy_nd(
+                        metadata=k_l2l3_fifos,
+                        bd_id=5,
+                        mem=C,
+                        offsets=[0, 0, 0, M * N + row_offset * N + col_offset_k],
+                        sizes=[1, len(right_mtx_in[WK_STR][L1_POS_STR]), k_proj_dims[0], k_proj_dims[2]],
+                        strides=[0, k_proj_dims[2], N, 1],
+                    )
+
+                    npu_dma_memcpy_nd(
+                        metadata=v_l2l3_fifos,
+                        bd_id=6,
+                        mem=C,
+                        offsets=[0, 0, 0, 2 * M * N + row_offset * N + col_offset_v],
+                        sizes=[1, len(right_mtx_in[WV_STR][L1_POS_STR]), v_proj_dims[0], v_proj_dims[2]],
+                        strides=[0, v_proj_dims[2], N, 1],
+                    )
+
+                    dma_wait(q_l2l3_fifos, k_l2l3_fifos, v_l2l3_fifos)
+            
+            # Send the data for calculating attention scores
+            for row_offset in range(0, M, output_mm_dims[0]):
+                for col_offset in range(0, N, output_mm_dims[2]):
+                    for head_offset in range(0, N, head_dim * len(left_mtx_in[Q_STR][L1_POS_STR])):
+                        # Since we need the full rows of attention score for softmax, the tiling is done 
+                        # such that the full rows are calculated. No need to tile the columns in this case.
                         npu_dma_memcpy_nd(
-                            metadata=Wq_l3l2_fifos,
+                            metadata=q_l3l2_fifos,
+                            bd_id=0,
+                            mem=C,
+                            offsets=[0, 0, 0, row_offset * N + head_offset],
+                            sizes=[head_dim // attn_score_mm_dims[1], len(left_mtx_in[Q_STR][L1_POS_STR]), attn_score_mm_dims[0], attn_score_mm_dims[1]],
+                            strides=[attn_score_mm_dims[1], head_dim, N, 1],
+                            issue_token=True,
+                        )
+
+                        npu_dma_memcpy_nd(
+                            metadata=k_l3l2_fifos,
                             bd_id=1,
-                            mem=A,
-                            offsets=[0, 0, 0, M * K + col_offset_q],
-                            sizes=[K // q_proj_dims[1], len(right_mtx_in[WQ_STR][L1_POS_STR]), q_proj_dims[1], q_proj_dims[2]],
-                            strides=[q_proj_dims[1] * N, q_proj_dims[2], N, 1],
+                            mem=C,
+                            offsets=[0, 0, 0, M * N + head_offset],
+                            sizes=[head_dim // attn_score_mm_dims[1], len(right_mtx_in[K_STR][L1_POS_STR]), attn_score_mm_dims[2], attn_score_mm_dims[1]],
+                            strides=[attn_score_mm_dims[1], head_dim, N, 1],
+                            issue_token=True,
                         )
 
+                        # Since the full row of the attention score is calculated, we don't need to tile the rows for V
                         npu_dma_memcpy_nd(
-                            metadata=Wk_l3l2_fifos,
+                            metadata=v_l3l2_fifos,
                             bd_id=2,
-                            mem=A,
-                            offsets=[0, 0, 0, M * K + K * N + col_offset_k],
-                            sizes=[K // k_proj_dims[1], len(right_mtx_in[WK_STR][L1_POS_STR]), k_proj_dims[1], k_proj_dims[2]],
-                            strides=[k_proj_dims[1] * N, k_proj_dims[2], N, 1],
+                            mem=C,
+                            offsets=[0, 0, 0, 2 * M * N + head_offset],
+                            sizes=[head_dim // attn_score_v_mm_dims[2], len(right_mtx_in[V_STR][L1_POS_STR]), attn_score_v_mm_dims[1], attn_score_v_mm_dims[2]],
+                            strides=[attn_score_v_mm_dims[2], head_dim, N, 1],
+                            issue_token=True,
                         )
 
                         npu_dma_memcpy_nd(
-                            metadata=Wv_l3l2_fifos,
+                            metadata=Wo_l3l2_fifos,
                             bd_id=3,
                             mem=B,
-                            offsets=[0, 0, 0, col_offset_v],
-                            sizes=[K // v_proj_dims[1], len(right_mtx_in[WV_STR][L1_POS_STR]), v_proj_dims[1], v_proj_dims[2]],
-                            strides=[v_proj_dims[1] * N, v_proj_dims[2], N, 1],
+                            offsets=[0, 0, 0, K * N + head_offset * N + col_offset],
+                            sizes=[head_dim // output_mm_dims[1], len(right_mtx_in[WO_STR][L1_POS_STR]), output_mm_dims[1], output_mm_dims[2]],
+                            strides=[output_mm_dims[1] * N, head_dim * N, N, 1],
+                            issue_token=True,
                         )
+                        dma_wait(q_l3l2_fifos, k_l3l2_fifos, v_l3l2_fifos, Wo_l3l2_fifos)
 
-                        npu_dma_memcpy_nd(
-                            metadata=q_l2l3_fifos,
-                            bd_id=4,
-                            mem=C,
-                            offsets=[0, 0, 0, row_offset * N + col_offset_q],
-                            sizes=[1, len(right_mtx_in[WQ_STR][L1_POS_STR]), q_proj_dims[0], q_proj_dims[2]],
-                            strides=[0, q_proj_dims[2], N, 1],
-                        )
-
-                        npu_dma_memcpy_nd(
-                            metadata=k_l2l3_fifos,
-                            bd_id=5,
-                            mem=C,
-                            offsets=[0, 0, 0, M * N + row_offset * N + col_offset_k],
-                            sizes=[1, len(right_mtx_in[WK_STR][L1_POS_STR]), k_proj_dims[0], k_proj_dims[2]],
-                            strides=[0, k_proj_dims[2], N, 1],
-                        )
-
-                        npu_dma_memcpy_nd(
-                            metadata=v_l2l3_fifos,
-                            bd_id=6,
-                            mem=C,
-                            offsets=[0, 0, 0, 2 * M * N + row_offset * N + col_offset_v],
-                            sizes=[1, len(right_mtx_in[WV_STR][L1_POS_STR]), v_proj_dims[0], v_proj_dims[2]],
-                            strides=[0, v_proj_dims[2], N, 1],
-                        )
-
-                        dma_wait(q_l2l3_fifos, k_l2l3_fifos, v_l2l3_fifos)
-                
-                # Send the data for calculating attention scores
-                for row_offset in range(0, M, output_mm_dims[0]):
-                    for col_offset in range(0, N, output_mm_dims[2]):
-                        for head_offset in range(0, N, head_dim * len(left_mtx_in[Q_STR][L1_POS_STR])):
-                            # Since we need the full rows of attention score for softmax, the tiling is done 
-                            # such that the full rows are calculated. No need to tile the columns in this case.
-                            npu_dma_memcpy_nd(
-                                metadata=q_l3l2_fifos,
-                                bd_id=0,
-                                mem=C,
-                                offsets=[0, 0, 0, row_offset * N + head_offset],
-                                sizes=[head_dim // attn_score_mm_dims[1], len(left_mtx_in[Q_STR][L1_POS_STR]), attn_score_mm_dims[0], attn_score_mm_dims[1]],
-                                strides=[attn_score_mm_dims[1], head_dim, N, 1],
-                                issue_token=True,
-                            )
-
-                            npu_dma_memcpy_nd(
-                                metadata=k_l3l2_fifos,
-                                bd_id=1,
-                                mem=C,
-                                offsets=[0, 0, 0, M * N + head_offset],
-                                sizes=[head_dim // attn_score_mm_dims[1], len(right_mtx_in[K_STR][L1_POS_STR]), attn_score_mm_dims[2], attn_score_mm_dims[1]],
-                                strides=[attn_score_mm_dims[1], head_dim, N, 1],
-                                issue_token=True,
-                            )
-
-                            # Since the full row of the attention score is calculated, we don't need to tile the rows for V
-                            npu_dma_memcpy_nd(
-                                metadata=v_l3l2_fifos,
-                                bd_id=2,
-                                mem=C,
-                                offsets=[0, 0, 0, 2 * M * N + head_offset],
-                                sizes=[head_dim // attn_score_v_mm_dims[2], len(right_mtx_in[V_STR][L1_POS_STR]), attn_score_v_mm_dims[1], attn_score_v_mm_dims[2]],
-                                strides=[attn_score_v_mm_dims[2], head_dim, N, 1],
-                                issue_token=True,
-                            )
-
-                            npu_dma_memcpy_nd(
-                                metadata=Wo_l3l2_fifos,
-                                bd_id=3,
-                                mem=B,
-                                offsets=[0, 0, 0, K * N + head_offset * N + col_offset],
-                                sizes=[head_dim // output_mm_dims[1], len(right_mtx_in[WO_STR][L1_POS_STR]), output_mm_dims[1], output_mm_dims[2]],
-                                strides=[output_mm_dims[1] * N, head_dim * N, N, 1],
-                                issue_token=True,
-                            )
-                            dma_wait(q_l3l2_fifos, k_l3l2_fifos, v_l3l2_fifos, Wo_l3l2_fifos)
-
-                        npu_dma_memcpy_nd(
-                            metadata=output_l2l3_fifos,
-                            bd_id=4,
-                            mem=C,
-                            offsets=[0, 0, 0, 3 * M * N + row_offset * N + col_offset],
-                            sizes=[1, 1, output_mm_dims[0], output_mm_dims[2]],
-                            strides=[0, 0, N, 1],
-                        )
-
-                        dma_wait(output_l2l3_fifos)
+                    npu_dma_memcpy_nd(
+                        metadata=output_l2l3_fifos,
+                        bd_id=4,
+                        mem=C,
+                        offsets=[0, 0, 0, 3 * M * N + row_offset * N + col_offset],
+                        sizes=[1, 1, output_mm_dims[0], output_mm_dims[2]],
+                        strides=[0, 0, N, 1],
+                    )
+                    dma_wait(output_l2l3_fifos)
 
 if __name__ == "__main__":
     main()
