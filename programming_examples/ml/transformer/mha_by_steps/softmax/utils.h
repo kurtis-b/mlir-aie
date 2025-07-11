@@ -189,7 +189,6 @@ void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
           sum += Q_proj[q_idx] * K_proj[k_idx];
         }
         // Scalar divide by head_dim (not embed_dim) for per-head scaling
-        // C[h * M * M + i * M + j] = Tout(sum);
         attn_scores[h * M * M + i * M + j] = Tout(sum / head_dim);
       }
     }

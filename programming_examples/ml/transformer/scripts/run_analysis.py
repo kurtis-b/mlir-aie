@@ -150,9 +150,9 @@ def analyse_memory_utilization(dev, input_file, output_dir):
     else:
         logger.info("No compute tiles found with row index > 1.")
 
-def analyse_computation_utilization(input_file, output_dir):
+def analyse_computation_distribution(input_file, output_dir):
     """
-    Analyze computation utilization for the given MLIR file.
+    Analyze computation distribution for the given MLIR file.
     This function reads the MLIR file, extracts loop upper bounds and matmul information,
     and generates a plot showing the normalized MACs per output tile generated.
     It also logs the details of the computation.
@@ -199,16 +199,19 @@ def analyse_computation_utilization(input_file, output_dir):
             if not inside_core:
                 m = core_block_re.match(line.strip())
                 if m:
+                    logger.debug(f"Found core block: {line.strip()}")
                     tile = f"({int(m.group(3))}, {int(m.group(4))})"
                     inside_core = True
                     scf_for_count = 0
             else:
                 # Check for matmul call
                 if "matmul" in line:
-                    # Example: func.call @matmul_bf16_bf16_32_24_256(...)
+                    logger.debug(f"Found matmul call in tile {tile}: {line.strip()}")
+                    # Example: func.call @matmul_bf16_bf16_64_64_64_1(...)
                     call_match = re.search(r'@matmul_([^(\s]+)\(', line)
                     if call_match:
-                        matmul_str = call_match.group(1)  # e.g., 'bf16_bf16_32_24_256'
+                        logger.debug(f"Matmul call found in tile {tile}: {call_match.group(0)}")
+                        matmul_str = call_match.group(1)  # e.g., 'bf16_bf16_64_64_64_1'
                         parts = matmul_str.split('_')
                         if len(parts) >= 5:
                             dtype = f"{parts[0]}_{parts[1]}"
@@ -216,6 +219,7 @@ def analyse_computation_utilization(input_file, output_dir):
                             macs = m * k * n
                             if tile not in core_loop_bounds:
                                 core_loop_bounds[tile] = {}
+                            logger.debug(f"Tile {tile} matmul: dtype={dtype}, m={m}, k={k}, n={n}, macs_one_iter={macs}")
                             core_loop_bounds[tile]['matmul'] = {
                                 'dtype': dtype.split('_')[0],  # e.g., 'bf16'
                                 'm': m,
@@ -225,6 +229,7 @@ def analyse_computation_utilization(input_file, output_dir):
                             }
                 m = scf_for_re.search(line)
                 if m:
+                    logger.debug(f"Found scf.for loop in tile {tile}: {line.strip()}")
                     scf_for_count += 1
                     if scf_for_count == 1:
                         continue  # Skip the first scf.for
@@ -296,6 +301,14 @@ def analyse_computation_utilization(input_file, output_dir):
         plt.close()
     else:
         logger.info("No tiles with matmul found for computation utilization plot.")
+
+def analyse_computation_utilization(input_file, output_dir):
+    """
+    Analyse computation utilization for the given MLIR file.
+    This function reads the MLIR file and extracts information about the computation patterns.
+    It generates plots and reports to visualize the computation distribution across tiles.
+    """
+    raise NotImplementedError("This function is not implemented yet. Please use 'analyse_computation_distribution' instead.")
 
 def analyse_loop_iterations(input_file, output_dir):
     """
@@ -512,6 +525,9 @@ def analyse_execution_times(csv_file, output_dir):
     avg_times = []
     min_times = []
     max_times = []
+    M = []
+    K = []
+    N = []
 
     with open(csv_file, 'r') as f:
         reader = csv.DictReader(f)
@@ -520,10 +536,14 @@ def analyse_execution_times(csv_file, output_dir):
             avg_times.append(float(row['avg_us']))
             min_times.append(float(row['min_us']))
             max_times.append(float(row['max_us']))
+            M.append(int(row['M']))
+            K.append(int(row['K']))
+            N.append(int(row['N']))
+
         # Add a combined data point for designs containing 'ffn'
         ffn_indices = [i for i, d in enumerate(designs) if 'ffn' in d]
         if len(ffn_indices) == 2:
-            combined_design = 'ffn-total'
+            combined_design = 'ffn'
             combined_avg = avg_times[ffn_indices[0]] + avg_times[ffn_indices[1]]
             combined_min = min_times[ffn_indices[0]] + min_times[ffn_indices[1]]
             combined_max = max_times[ffn_indices[0]] + max_times[ffn_indices[1]]
@@ -531,10 +551,67 @@ def analyse_execution_times(csv_file, output_dir):
             avg_times.append(combined_avg)
             min_times.append(combined_min)
             max_times.append(combined_max)
+            M.append(M[ffn_indices[0]])
+            K.append(K[ffn_indices[0]])
+            N.append(N[ffn_indices[0]])
+        for idx in sorted(ffn_indices, reverse=True):
+            del designs[idx]
+            del avg_times[idx]
+            del min_times[idx]
+            del max_times[idx]
+            del M[idx]
+            del K[idx]
+            del N[idx]
+        # Sum times for 'mha_by_steps/only_attn_steps' and 'mha_by_steps/only_proj_steps'
+        attn_idx = None
+        proj_idx = None
+        mha_idx = None
+        for i, d in enumerate(designs):
+            if d == 'mha_by_steps/only_attn_steps':
+                attn_idx = i
+            elif d == 'mha_by_steps/only_proj_steps':
+                proj_idx = i
+            elif d == 'mha':
+                mha_idx = i
+
+        if attn_idx is not None and proj_idx is not None and mha_idx is not None:
+            sum_avg = avg_times[attn_idx] + avg_times[proj_idx]
+            # sum_min = min_times[attn_idx] + min_times[proj_idx]
+            # sum_max = max_times[attn_idx] + max_times[proj_idx]
+            mha_avg = avg_times[mha_idx]
+            # mha_min = min_times[mha_idx]
+            # mha_max = max_times[mha_idx]
+
+            # Compare with mha, assert difference < 5%. No need to check min/max
+            # since they can vary more. 
+            for label, sum_val, mha_val in [
+            ('avg', sum_avg, mha_avg),
+            # ('min', sum_min, mha_min),
+            # ('max', sum_max, mha_max)
+            ]:
+                if mha_val > 0:
+                    diff = abs(sum_val - mha_val) / mha_val
+                    if diff >= 0.05:
+                        raise RuntimeError(
+                            f"Sum of {label} times for attn+proj ({sum_val}) differs from mha ({mha_val}) by more than 5% ({diff*100:.2f}%)"
+                        )
+
+            # Delete mha entry
+            del designs[mha_idx]
+            del avg_times[mha_idx]
+            del min_times[mha_idx]
+            del max_times[mha_idx]
+            del M[mha_idx]
+            del K[mha_idx]
+            del N[mha_idx]
+        # Replace 'mha_by_steps/only_attn_steps' with 'mha-attn' in designs
+        designs = ['mha-attn' if d == 'mha_by_steps/only_attn_steps' else d for d in designs]
+        # Replace 'mha_by_steps/only_proj_steps' with 'mha-proj' in designs
+        designs = ['mha-proj' if d == 'mha_by_steps/only_proj_steps' else d for d in designs]
 
     # Sort the data by avg_times (lowest to highest)
-    sorted_data = sorted(zip(avg_times, min_times, max_times, designs))
-    avg_times, min_times, max_times, designs = map(list, zip(*sorted_data))
+    sorted_data = sorted(zip(avg_times, min_times, max_times, designs, M, K, N))
+    avg_times, min_times, max_times, designs, M, K, N = map(list, zip(*sorted_data))
     fig, ax = plt.subplots(figsize=(max(8, len(designs) * 1.2), 5))
     x = range(len(designs))
     ax.bar(x, avg_times, color='skyblue', label='Avg (us)')
@@ -542,11 +619,37 @@ def analyse_execution_times(csv_file, output_dir):
                                         [max - avg for avg, max in zip(avg_times, max_times)] ],
                 fmt='o', color='orange', label='Min/Max (us)')
     ax.set_xticks(x)
-    ax.set_xticklabels(designs, rotation=45, ha='right')
+    # ax.set_xticklabels(designs, rotation=45, ha='right')
+    ax.set_xticklabels(designs, ha='center')
     ax.set_ylabel('Execution Time (us)')
     ax.set_xlabel('Design')
     ax.set_title('Execution Times Across Designs')
     ax.legend(loc='upper left')
+
+    # Annotate each bar with "MxKxN" and the product
+    # TODO: The number of AIEs is hardcoded, but it should be determined from the design files.
+    y_max = ax.get_ylim()[1]
+    # Increase the y-axis upper limit by 25% to add whitespace at the top
+    ax.set_ylim(top=y_max * 1.25)
+    y_text = y_max * 1.2  # Place annotation at the original top (now below the new limit)
+    for idx, (m, k, n, bar_height, design) in enumerate(zip(M, K, N, avg_times, designs)):
+        text = ""
+        if design == 'ffn':
+            text = f"{2*m*k*n/1e6:.1f}×10$^9$ MACs\n16 cores"
+        elif design == 'mha':
+            total_macs = 4 * m * k * n  + m * k * m + m * m * n
+            total_exps = m * m
+            text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n{total_exps/1e3:.1f}×10$^3$ Exps\n15 cores"
+        elif design == 'mha-attn':
+            total_macs = m * k * n + m * k * m + m * m * n
+            total_exps = m * m
+            text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n9 cores\n{total_exps/1e3:.1f}×10$^3$ Exps"
+        elif design == 'mha-proj':
+            total_macs = 3 * m * k * n
+            text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n6 cores"
+        if text:
+            ax.text(idx, y_text, text, ha='center', va='top', fontsize=9, rotation=0)
+
     plt.tight_layout()
     plot_file = os.path.join(output_dir, "execution_times.png")
     plt.savefig(plot_file)
@@ -558,13 +661,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyse tiling and memory usage for MHA.")
     parser.add_argument("--dev", type=str, choices=["npu", "npu2"], required=True, help="Type of device: 'npu' or 'npu2'.")
     parser.add_argument("--input_file", type=str, required=True, help="Path to the input file to parse.")
-    parser.add_argument("--task", type=str, choices=["mem-util", "comp-util", "loop-iters", "exec-times"], required=True, help="Task to perform: 'mem-util', 'comp-util', 'loop-iters', or 'exec-times'.")
+    parser.add_argument("--task", type=str, choices=["mem-util", "comp-dist", "comp-util", "loop-iters", "exec-times"], required=True, help="Task to perform: 'mem-util', 'comp-dist', 'comp-util', 'loop-iters', or 'exec-times'.")
     parser.add_argument("--output_dir", type=str, default="results", help="Directory to write output files to.")
     args = parser.parse_args()
 
     task = args.task
     if task == "mem-util":
         analyse_memory_utilization(args.dev, args.input_file, args.output_dir)
+    elif task == "comp-dist":
+        analyse_computation_distribution(args.input_file, args.output_dir)
     elif task == "comp-util":
         analyse_computation_utilization(args.input_file, args.output_dir)
     elif task == "loop-iters":
