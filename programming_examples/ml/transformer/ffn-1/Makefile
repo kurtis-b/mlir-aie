@@ -58,11 +58,13 @@ RELU_KERNEL_DEFINES=-DDIM_M=${m} -DDIM_N=${n}
 
 include ${srcdir}/../makefile-common
 
+relu_src := ${srcdir}/../../../../aie_kernels/aie2/relu.cc
+
 build/mm_${m}x${k}x${n}.o: ${kernels_dir}/mm.cc
 	mkdir -p ${@D}
 	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -c $< -o ${@F}
 
-build/relu_${m}x${n}.o: ${kernels_dir}/relu.cc
+build/relu_${m}x${n}.o: ${relu_src}
 	mkdir -p ${@D}
 	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} ${RELU_KERNEL_DEFINES} -c $< -o ${@F}
 
