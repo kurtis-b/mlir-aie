@@ -192,8 +192,8 @@ def my_mha(
             L3_POS_STR: 0,
         },
         V_STR: {
-            L2_POS_STR: 2,
-            L3_POS_STR: 2,
+            L2_POS_STR: 3,
+            L3_POS_STR: 3,
         },
         ATTN_SCORE_V_STR: {
             L2_POS_STR: 3,
@@ -226,7 +226,8 @@ def my_mha(
     attn_score_mm_dims = (16, 32, 256)
     softmax_dims = (attn_score_mm_dims[0], attn_score_mm_dims[2])
     attn_score_v_mm_dims = (softmax_dims[0], softmax_dims[1], 16)
-    mha_dims = [attn_score_mm_dims, attn_score_v_mm_dims]
+    output_mm_dims = (attn_score_v_mm_dims[0], attn_score_v_mm_dims[2], 256)
+    mha_dims = [attn_score_mm_dims, attn_score_v_mm_dims, output_mm_dims]
 
     # r, s, t are the dimensions required by the microkernel MAC instructions.
     mac_dims = microkernel_mac_dim_map[dev][dtype_in_str]
@@ -326,20 +327,22 @@ def my_mha(
         # AIE Core Function declarations
         # Last part of the name is whether the right matrix is row major
         matmul_vectorized_func_name = f"matmul_{dtype_in_str}_{dtype_out_str}"
+        row_major = 1
+        col_major = 0
         zero_projs = external_func(
-            f"zero_{dtype_out_str}_{q_proj_dims[0]}_{q_proj_dims[1]}_{q_proj_dims[2]}_1",
+            f"zero_{dtype_out_str}_{q_proj_dims[0]}_{q_proj_dims[1]}_{q_proj_dims[2]}_{row_major}",
             inputs=[q_l1_ty_out]
         )
         matmul_projs = external_func(
-            matmul_vectorized_func_name + f"_{q_proj_dims[0]}_{q_proj_dims[1]}_{q_proj_dims[2]}_1",
+            matmul_vectorized_func_name + f"_{q_proj_dims[0]}_{q_proj_dims[1]}_{q_proj_dims[2]}_{row_major}",
             inputs=[X_l1_ty, Wq_l1_ty, q_l1_ty_out]
         )
         zero_attn_score = external_func(
-            f"zero_{dtype_out_str}_{attn_score_mm_dims[0]}_{attn_score_mm_dims[1]}_{attn_score_mm_dims[2]}_0",
+            f"zero_{dtype_out_str}_{attn_score_mm_dims[0]}_{attn_score_mm_dims[1]}_{attn_score_mm_dims[2]}_{col_major}",
             inputs=[attn_score_l1_ty]
         )
         matmul_attn_score = external_func(
-            matmul_vectorized_func_name + f"_{attn_score_mm_dims[0]}_{attn_score_mm_dims[1]}_{attn_score_mm_dims[2]}_0",
+            matmul_vectorized_func_name + f"_{attn_score_mm_dims[0]}_{attn_score_mm_dims[1]}_{attn_score_mm_dims[2]}_{col_major}",
             inputs=[q_l1_ty_in, k_l1_ty_in, attn_score_l1_ty]
         )
         div_projs = external_func(
@@ -691,7 +694,7 @@ def my_mha(
             @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_mm_dims[0]}x{attn_score_mm_dims[1]}x{attn_score_mm_dims[2]}_col_major.o", stack_size=0xD00)
             def core_body():
                 for _ in range_(0xFFFFFFFF):
-                    for _ in range_(H):
+                    for _ in range_(H // len(left_mtx_in[Q_STR][L1_POS_STR])):
                         elem_attn_score = attn_score_l1l2_fifos[head].acquire(ObjectFifoPort.Produce, 1)
                         zero_attn_score(elem_attn_score)
                         for _ in range_(head_dim // attn_score_mm_dims[1]):
@@ -720,7 +723,7 @@ def my_mha(
             @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_v_mm_dims[0]}x{attn_score_v_mm_dims[1]}x{attn_score_v_mm_dims[2]}_row_major.o", stack_size=0xD00)
             def core_body():
                 for _ in range_(0xFFFFFFFF):
-                    for _ in range_(H):
+                    for _ in range_(H // len(left_mtx_in[SOFTMAX_STR][L1_POS_STR]):
                         elem_in_softmax = softmax_l2l1_fifos[head].acquire(ObjectFifoPort.Consume, 1)
                         for _ in range_(head_dim // attn_score_v_mm_dims[2]):
                             elem_attn_score_v = attn_score_v_l1l2_fifos[head].acquire(ObjectFifoPort.Produce, 1)
@@ -811,48 +814,41 @@ def my_mha(
                         dma_wait(q_l2l3_fifos, k_l2l3_fifos, v_l2l3_fifos)
                 
                 # Send the data for calculating attention scores
-                for row_offset in range(0, M, attn_score_mm_dims[0]):
-                    for head_offset in range(0, N, head_dim * len(left_mtx_in[Q_STR][L1_POS_STR])):
-                        # Since we need the full rows of attention score for softmax, the tiling is done 
-                        # such that the full rows are calculated. No need to tile the columns in this case.
-                        npu_dma_memcpy_nd(
-                            metadata=q_l3l2_fifos,
-                            bd_id=0,
-                            mem=C,
-                            offsets=[0, 0, 0, row_offset * N + head_offset],
-                            sizes=[head_dim // attn_score_mm_dims[1], len(left_mtx_in[Q_STR][L1_POS_STR]), attn_score_mm_dims[0], attn_score_mm_dims[1]],
-                            strides=[attn_score_mm_dims[1], head_dim, N, 1],
-                        )
+                for row_offset in range(0, M, output_mm_dims[0]):
+                    for col_offset in range(0, N, output_mm_dims[2]):
+                        for head_offset in range(0, N, head_dim * len(left_mtx_in[Q_STR][L1_POS_STR])):
+                            # Since we need the full rows of attention score for softmax, the tiling is done 
+                            # such that the full rows are calculated. No need to tile the columns in this case.
+                            npu_dma_memcpy_nd(
+                                metadata=q_l3l2_fifos,
+                                bd_id=0,
+                                mem=C,
+                                offsets=[0, 0, 0, row_offset * N + head_offset],
+                                sizes=[head_dim // attn_score_mm_dims[1], len(left_mtx_in[Q_STR][L1_POS_STR]), attn_score_mm_dims[0], attn_score_mm_dims[1]],
+                                strides=[attn_score_mm_dims[1], head_dim, N, 1],
+                                issue_token=True,
+                            )
 
-                        npu_dma_memcpy_nd(
-                            metadata=k_l3l2_fifos,
-                            bd_id=1,
-                            mem=C,
-                            offsets=[0, 0, 0, M * N + head_offset],
-                            sizes=[head_dim // attn_score_mm_dims[1], len(right_mtx_in[K_STR][L1_POS_STR]), attn_score_mm_dims[2], attn_score_mm_dims[1]],
-                            strides=[attn_score_mm_dims[1], head_dim, N, 1],
-                        )
+                            npu_dma_memcpy_nd(
+                                metadata=k_l3l2_fifos,
+                                bd_id=1,
+                                mem=C,
+                                offsets=[0, 0, 0, M * N + head_offset],
+                                sizes=[head_dim // attn_score_mm_dims[1], len(right_mtx_in[K_STR][L1_POS_STR]), attn_score_mm_dims[2], attn_score_mm_dims[1]],
+                                strides=[attn_score_mm_dims[1], head_dim, N, 1],
+                                issue_token=True,
+                            )
+                            
+                            npu_dma_memcpy_nd(
+                                metadata=attn_score_v_l2l3_fifos,
+                                bd_id=3,
+                                mem=C,
+                                offsets=[0, 0, 0, 3 * M * N + row_offset * N + head_offset],
+                                sizes=[head_dim // attn_score_v_mm_dims[2], len(right_mtx_in[V_STR][L1_POS_STR]), attn_score_v_mm_dims[0], attn_score_v_mm_dims[2]],
+                                strides=[attn_score_v_mm_dims[2], head_dim, N, 1],
+                            )
 
-                        # Since the full row of the attention score is calculated, we don't need to tile the rows for V
-                        npu_dma_memcpy_nd(
-                            metadata=v_l3l2_fifos,
-                            bd_id=2,
-                            mem=C,
-                            offsets=[0, 0, 0, 2 * M * N + head_offset],
-                            sizes=[head_dim // attn_score_v_mm_dims[2], len(right_mtx_in[V_STR][L1_POS_STR]), attn_score_v_mm_dims[1], attn_score_v_mm_dims[2]],
-                            strides=[attn_score_v_mm_dims[2], head_dim, N, 1],
-                        )
-
-                        npu_dma_memcpy_nd(
-                            metadata=attn_score_v_l2l3_fifos,
-                            bd_id=3,
-                            mem=C,
-                            offsets=[0, 0, 0, 3 * M * N + row_offset * N + head_offset],
-                            sizes=[head_dim // attn_score_v_mm_dims[2], len(right_mtx_in[V_STR][L1_POS_STR]), attn_score_v_mm_dims[0], attn_score_v_mm_dims[2]],
-                            strides=[attn_score_v_mm_dims[2], head_dim, N, 1],
-                        )
-
-                        dma_wait(attn_score_v_l2l3_fifos)
+                            dma_wait(attn_score_v_l2l3_fifos)
 
 
 if __name__ == "__main__":
