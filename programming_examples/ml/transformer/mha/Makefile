@@ -84,12 +84,21 @@ $(eval m := $(word 1,${dims}))
 $(eval n := $(word 2,${dims}))
 endef
 
-build/div_%.o: ${kernels_dir}/div.cc
+# Have to use Phx div kernel for Strix since there's no source for it in the Strix directory
+div_src := ${srcdir}/../../../../aie_kernels/aie2/div.cc
+add_src := ${srcdir}/../../../../aie_kernels/aie2/add.cc
+ifeq ($(devicename),npu2)
+mm_src := ${srcdir}/mm_aie2p.cc
+else
+mm_src := ${srcdir}/mm_aie2.cc
+endif
+
+build/div_%.o: ${div_src}
 	$(call extract_dims_3d)
 	mkdir -p $(@D)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -DDIM_HEAD=${H_DIM} -c $< -o $(@F)
 
-build/mm_%_row_major.o: ${srcdir}/mm_aie2.cc
+build/mm_%_row_major.o: ${mm_src}
 	$(call extract_dims_3d)
 	mkdir -p $(@D)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
@@ -98,7 +107,7 @@ build/mha_mm_%_row_major.o: build/mm_%_row_major.o build/div_%.o
 	mkdir -p $(@D)
 	ar rvs $@ $^
 
-build/mm_%_col_major.o: ${srcdir}/mm_aie2.cc
+build/mm_%_col_major.o: ${mm_src}
 	$(call extract_dims_3d)
 	mkdir -p $(@D)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DB_COL_MAJ ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
@@ -124,7 +133,7 @@ build/mha_softmax_%.o: ${kernels_dir}/softmax.cc
 ifeq ($(devicename),npu)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -I. -I${aie2_runtime_dir} -c $< -o $(@F)
 else ifeq ($(devicename),npu2)
-	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -c $< -o $(@F)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F)
 endif
 
 # Bundle rule for softmax kernel and lut_based_ops.o if npu
@@ -136,7 +145,7 @@ build/mha_softmax.o: $(addprefix build/mha_softmax_,$(addsuffix .o,$(softmax_dim
 	ar rvs $@ $+
 endif
 
-build/mha_add_%.o: ${kernels_dir}/add.cc
+build/mha_add_%.o: ${add_src}
 	$(call extract_dims_2d)
 	@mkdir -p $(@D)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F)
