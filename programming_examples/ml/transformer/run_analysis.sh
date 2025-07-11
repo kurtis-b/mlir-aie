@@ -1,6 +1,5 @@
 #!/usr/bin/bash
 
-
 if [ "${NPU2}" = "1" ]; then
     devicename="npu2"
 else
@@ -21,7 +20,7 @@ else
     echo "All designs passed verification."
     echo "Running designs without verification to gather execution times..."
     bash "$BASEDIR/scripts/run_no_verify_designs.sh"
-    for dir in "$BASEDIR/mha" "$BASEDIR/add_and_norm" "$BASEDIR/ffn-1" "$BASEDIR/ffn-2"; do
+    for dir in "$BASEDIR/mha" "$BASEDIR/mha_by_steps/only_attn_steps" "$BASEDIR/mha_by_steps/only_proj_steps" "$BASEDIR/add_and_norm" "$BASEDIR/ffn-1" "$BASEDIR/ffn-2"; do
         if [ -d "$dir" ]; then
             echo "Analysing $dir"
             cd "$dir" || continue
@@ -29,7 +28,7 @@ else
             mkdir -p results
             dirname=$(basename "$dir")
             python3 "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "build/aie_${dirname}.mlir.prj/input_physical.mlir" --task mem-util >> "$BASEDIR/analysis_results.txt" 2>&1
-            python3 "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "build/aie_${dirname}.mlir.prj/input_physical.mlir" --task comp-util >> "$BASEDIR/analysis_results.txt" 2>&1
+            python3 "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "build/aie_${dirname}.mlir" --task comp-dist >> "$BASEDIR/analysis_results.txt" 2>&1
             python3 "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "build/aie_${dirname}.mlir" --task loop-iters >> "$BASEDIR/analysis_results.txt" 2>&1
             cd "$BASEDIR"
         fi

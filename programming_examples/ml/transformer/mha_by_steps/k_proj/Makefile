@@ -8,7 +8,7 @@
 # 
 ##===----------------------------------------------------------------------===##
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
-subdir=perf_analysis/k_proj
+subdir=mha_by_steps/k_proj
 targetname=mha
 
 

@@ -180,7 +180,7 @@ void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
 
   // 2. Compute attention score per head: for each head, Q_h * K_h^T
   // Output C is [M * M * num_heads], row-major: for each head, [M x M]
-  std::vector<Tout> attn_score = std::vector<Tout>(H * M * M, 0);
+  std::vector<Tout> attn_score = std::vector<Tout>(num_heads * M * M, 0);
   for (int h = 0; h < num_heads; ++h) {
     for (int i = 0; i < M; ++i) {
       for (int j = 0; j < M; ++j) {
@@ -191,7 +191,7 @@ void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
           sum += Q_proj[q_idx] * K_proj[k_idx];
         }
         // Scalar divide by head_dim (not embed_dim) for per-head scaling
-        attn_score[i * M + j] = Tout(sum / head_dim);
+        attn_score[h * M * M + i * M + j] = Tout(sum / head_dim);
       }
     }
   }
@@ -201,9 +201,9 @@ void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
   for (int h = 0; h < num_heads; ++h) {
     for (int i = 0; i < M; ++i) {
       // Find max for numerical stability
-      Tacc max_score = attn_score[i * M];
+      Tacc max_score = attn_score[h * M * M + i * M];
       for (int j = 1; j < M; ++j) {
-        Tacc val = attn_score[i * M + j];
+        Tacc val = attn_score[h * M * M + i * M + j];
         if (val > max_score)
           max_score = val;
       }
@@ -211,23 +211,27 @@ void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
       Tacc sum_exp = 0;
       for (int j = 0; j < M; ++j) {
         if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_scores[" << h << "][" << i << "][" << j
-                    << "] before softmax: " << attn_score[i * M + j] << "\n";
+          std::cout << "attn_score[" << h << "][" << i << "][" << j
+                    << "] before softmax: " << attn_score[h * M * M + i * M + j]
+                    << "\n";
         }
-        Tacc exp_val = std::exp(attn_score[i * M + j] - max_score);
-        attn_score[i * M + j] = exp_val;
+        Tacc exp_val = std::exp(attn_score[h * M * M + i * M + j] - max_score);
+        attn_score[h * M * M + i * M + j] = exp_val;
         if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_scores[" << h << "][" << i << "][" << j
-                    << "] after exp: " << attn_score[i * M + j] << "\n";
+          std::cout << "attn_score[" << h << "][" << i << "][" << j
+                    << "] after exp: " << attn_score[h * M * M + i * M + j]
+                    << "\n";
         }
         sum_exp += exp_val;
       }
       // Normalize
       for (int j = 0; j < M; ++j) {
-        attn_score[i * M + j] = Tout(attn_score[i * M + j] / sum_exp);
+        attn_score[h * M * M + i * M + j] =
+            Tout(attn_score[h * M * M + i * M + j] / sum_exp);
         if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_scores[" << h << "][" << i << "][" << j
-                    << "] after softmax: " << attn_score[i * M + j] << "\n";
+          std::cout << "attn_score[" << h << "][" << i << "][" << j
+                    << "] after softmax: " << attn_score[h * M * M + i * M + j]
+                    << "\n";
         }
       }
     }
@@ -251,18 +255,16 @@ void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
     }
   }
 
-  // 5. For each head, calculate output = attn_score_v * W_O for each head
-  for (int h = 0; h < num_heads; ++h) {
-    for (int m = 0; m < M; ++m) {
-      for (int n = 0; n < head_dim; ++n) {
-        Tacc sum = 0;
-        for (int k = 0; k < N; ++k) {
-          int attn_idx = m * N + h * head_dim + k;
-          int w_idx = k * N + h * head_dim + n;
-          sum += attn_score_v[attn_idx] * W_O[w_idx];
-        }
-        out[m * N + h * head_dim + n] = Tout(sum);
+  // 5. Calculate output = attn_score_v * W_O
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      Tacc sum = 0;
+      for (int k = 0; k < K; ++k) {
+        int attn_idx = m * N + k;
+        int w_idx = k * N + n;
+        sum += attn_score_v[attn_idx] * W_O[w_idx];
       }
+      out[m * N + n] = Tout(sum);
     }
   }
 }
@@ -334,7 +336,7 @@ float matmul_timed(int M, int N, int K, int H, const std::vector<Tin> A,
 
   // 2. Compute attention score per head: for each head, Q_h * K_h^T
   // Output C is [M * M * num_heads], row-major: for each head, [M x M]
-  std::vector<Tout> attn_score = std::vector<Tout>(H * M * M, 0);
+  std::vector<Tout> attn_score = std::vector<Tout>(num_heads * M * M, 0);
   for (int h = 0; h < num_heads; ++h) {
     for (int i = 0; i < M; ++i) {
       for (int j = 0; j < M; ++j) {
@@ -345,7 +347,7 @@ float matmul_timed(int M, int N, int K, int H, const std::vector<Tin> A,
           sum += Q_proj[q_idx] * K_proj[k_idx];
         }
         // Scalar divide by head_dim (not embed_dim) for per-head scaling
-        attn_score[i * M + j] = Tout(sum / head_dim);
+        attn_score[h * M * M + i * M + j] = Tout(sum / head_dim);
       }
     }
   }
@@ -355,9 +357,9 @@ float matmul_timed(int M, int N, int K, int H, const std::vector<Tin> A,
   for (int h = 0; h < num_heads; ++h) {
     for (int i = 0; i < M; ++i) {
       // Find max for numerical stability
-      Tacc max_score = attn_score[i * M];
+      Tacc max_score = attn_score[h * M * M + i * M];
       for (int j = 1; j < M; ++j) {
-        Tacc val = attn_score[i * M + j];
+        Tacc val = attn_score[h * M * M + i * M + j];
         if (val > max_score)
           max_score = val;
       }
@@ -365,23 +367,27 @@ float matmul_timed(int M, int N, int K, int H, const std::vector<Tin> A,
       Tacc sum_exp = 0;
       for (int j = 0; j < M; ++j) {
         if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_scores[" << h << "][" << i << "][" << j
-                    << "] before softmax: " << attn_score[i * M + j] << "\n";
+          std::cout << "attn_score[" << h << "][" << i << "][" << j
+                    << "] before softmax: " << attn_score[h * M * M + i * M + j]
+                    << "\n";
         }
-        Tacc exp_val = std::exp(attn_score[i * M + j] - max_score);
-        attn_score[i * M + j] = exp_val;
+        Tacc exp_val = std::exp(attn_score[h * M * M + i * M + j] - max_score);
+        attn_score[h * M * M + i * M + j] = exp_val;
         if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_scores[" << h << "][" << i << "][" << j
-                    << "] after exp: " << attn_score[i * M + j] << "\n";
+          std::cout << "attn_score[" << h << "][" << i << "][" << j
+                    << "] after exp: " << attn_score[h * M * M + i * M + j]
+                    << "\n";
         }
         sum_exp += exp_val;
       }
       // Normalize
       for (int j = 0; j < M; ++j) {
-        attn_score[i * M + j] = Tout(attn_score[i * M + j] / sum_exp);
+        attn_score[h * M * M + i * M + j] =
+            Tout(attn_score[h * M * M + i * M + j] / sum_exp);
         if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_scores[" << h << "][" << i << "][" << j
-                    << "] after softmax: " << attn_score[i * M + j] << "\n";
+          std::cout << "attn_score[" << h << "][" << i << "][" << j
+                    << "] after softmax: " << attn_score[h * M * M + i * M + j]
+                    << "\n";
         }
       }
     }
@@ -405,18 +411,16 @@ float matmul_timed(int M, int N, int K, int H, const std::vector<Tin> A,
     }
   }
 
-  // 5. For each head, calculate output = attn_score_v * W_O for each head
-  for (int h = 0; h < num_heads; ++h) {
-    for (int m = 0; m < M; ++m) {
-      for (int n = 0; n < head_dim; ++n) {
-        Tacc sum = 0;
-        for (int k = 0; k < N; ++k) {
-          int attn_idx = m * N + h * head_dim + k;
-          int w_idx = k * N + h * head_dim + n;
-          sum += attn_score_v[attn_idx] * W_O[w_idx];
-        }
-        out[m * N + h * head_dim + n] = Tout(sum);
+  // 5. Calculate output = attn_score_v * W_O
+  for (int m = 0; m < M; ++m) {
+    for (int n = 0; n < N; ++n) {
+      Tacc sum = 0;
+      for (int k = 0; k < K; ++k) {
+        int attn_idx = m * N + k;
+        int w_idx = k * N + n;
+        sum += attn_score_v[attn_idx] * W_O[w_idx];
       }
+      out[m * N + n] = Tout(sum);
     }
   }
   return std::chrono::duration_cast<std::chrono::microseconds>(
@@ -768,8 +772,8 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
   for (int row = 0; row < M; row++) {
     for (int col = 0; col < N; col++) {
       std::optional<struct error<Tout>> error = verify_single(
-          std::cout, row, col, CRef[3 * M * N + row * M + col],
-          C[3 * M * N + row * M + col], abs_tol, rel_tol, 3 * M * N, "out");
+          std::cout, row, col, CRef[3 * M * N + row * N + col],
+          C[3 * M * N + row * N + col], abs_tol, rel_tol, 3 * M * N, "out");
       if (error.has_value()) {
         if (n_errors < max_printable_errors) {
           errors.push_back(*error);
@@ -798,8 +802,8 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
   for (int row = 0; row < 1; row++) {
     for (int col = 0; col < 10; col++) {
       std::cout << "C[" << row << ", " << col
-                << "] = " << C[3 * M * N + row * M + col]
-                << " (expected: " << CRef[3 * M * N + row * M + col] << ")"
+                << "] = " << C[3 * M * N + row * N + col]
+                << " (expected: " << CRef[3 * M * N + row * N + col] << ")"
                 << std::endl;
     }
   }
@@ -840,7 +844,7 @@ int verify_stochastic(int M, int N, int K, int H, std::vector<Tin> A,
     }
     Tout ref = mul_acc<Tin, Tout, Tacc>(M, N, K, H, row, col, A, B, b_col_maj);
     std::optional<struct error<Tout>> error = verify_single(
-        std::cout, row, col, ref, C[row * M + col], abs_tol, rel_tol);
+        std::cout, row, col, ref, C[row * N + col], abs_tol, rel_tol);
     if (error.has_value()) {
       if (n_errors < max_printable_errors) {
         errors.push_back(*error);
