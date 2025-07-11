@@ -629,9 +629,9 @@ def analyse_execution_times(csv_file, output_dir):
     # Annotate each bar with "MxKxN" and the product
     # TODO: The number of AIEs is hardcoded, but it should be determined from the design files.
     y_max = ax.get_ylim()[1]
-    # Increase the y-axis upper limit by 25% to add whitespace at the top
-    ax.set_ylim(top=y_max * 1.25)
-    y_text = y_max * 1.2  # Place annotation at the original top (now below the new limit)
+    # Increase the y-axis upper limit by 50% to add whitespace at the top
+    ax.set_ylim(top=y_max * 1.5)
+    y_text = y_max * 1.45  # Place annotation at the original top (now below the new limit)
     for idx, (m, k, n, bar_height, design) in enumerate(zip(M, K, N, avg_times, designs)):
         text = ""
         if design == 'ffn':
@@ -639,11 +639,13 @@ def analyse_execution_times(csv_file, output_dir):
         elif design == 'mha':
             total_macs = 4 * m * k * n  + m * k * m + m * m * n
             total_exps = m * m
-            text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n{total_exps/1e3:.1f}×10$^3$ Exps\n15 cores"
+            total_adds = m * n
+            text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n12 cores\n{total_exps/1e3:.1f}×10$^3$ Exps\n2 cores\n{total_adds/1e3:.1f}×10$^3$ Adds\n1 core"
         elif design == 'mha-attn':
             total_macs = m * k * n + m * k * m + m * m * n
             total_exps = m * m
-            text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n9 cores\n{total_exps/1e3:.1f}×10$^3$ Exps"
+            total_adds = m * n
+            text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n6 cores\n{total_exps/1e3:.1f}×10$^3$ Exps\n2 cores\n{total_adds/1e3:.1f}×10$^3$ Adds\n1 core"
         elif design == 'mha-proj':
             total_macs = 3 * m * k * n
             text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n6 cores"
