@@ -80,11 +80,14 @@ ifeq ($(dtype_out),i8)
 endif
 
 
-build/layernorm_${m}x${n}.o: ${kernels_dir}/layernorm.cc
+layernnorm_src := ${srcdir}/../../../../aie_kernels/aie2/layernorm.cc
+add_src := ${srcdir}/../../../../aie_kernels/aie2/add.cc
+
+build/layernorm_${m}x${n}.o: ${layernnorm_src}
 	mkdir -p ${@D}
 	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -I${srcdir}/../../../../aie_runtime_lib/AIE2 -c $< -o ${@F}
 
-build/add_${m}x${n}.o: ${kernels_dir}/add.cc
+build/add_${m}x${n}.o: ${add_src}
 	mkdir -p ${@D}
 	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -I${srcdir}/../../../../aie_runtime_lib/AIE2 -c $< -o ${@F}
 
