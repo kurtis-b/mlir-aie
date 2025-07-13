@@ -302,14 +302,6 @@ def analyse_computation_distribution(input_file, output_dir):
     else:
         logger.info("No tiles with matmul found for computation utilization plot.")
 
-def analyse_computation_utilization(input_file, output_dir):
-    """
-    Analyse computation utilization for the given MLIR file.
-    This function reads the MLIR file and extracts information about the computation patterns.
-    It generates plots and reports to visualize the computation distribution across tiles.
-    """
-    raise NotImplementedError("This function is not implemented yet. Please use 'analyse_computation_distribution' instead.")
-
 def analyse_loop_iterations(input_file, output_dir):
     """
     Analyse loop iterations in the MLIR file.
@@ -672,8 +664,6 @@ if __name__ == "__main__":
         analyse_memory_utilization(args.dev, args.input_file, args.output_dir)
     elif task == "comp-dist":
         analyse_computation_distribution(args.input_file, args.output_dir)
-    elif task == "comp-util":
-        analyse_computation_utilization(args.input_file, args.output_dir)
     elif task == "loop-iters":
         analyse_loop_iterations(args.input_file, args.output_dir)
     elif task == "exec-times":
