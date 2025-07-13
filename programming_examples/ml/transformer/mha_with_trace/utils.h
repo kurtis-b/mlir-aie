@@ -55,6 +55,10 @@ void add_default_options(cxxopts::Options &options) {
       "trace_file", "where to store trace output",
       cxxopts::value<std::string>()->default_value("trace.txt"))(
       "b_col_maj", "Is B matrix in colum-major format?",
+      cxxopts::value<int>()->default_value("0"))(
+      "trace_tile", "Tile to trace, e.g. (0,0)",
+      cxxopts::value<std::string>()->default_value("(0,0)"))(
+      "full_design", "Use full design (no pruning)",
       cxxopts::value<int>()->default_value("0"));
 }
 
@@ -109,7 +113,8 @@ std::bfloat16_t get_random<std::bfloat16_t>() {
 
 template <typename Tin, typename Tout, typename Tacc>
 void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
-            const std::vector<Tin> B, std::vector<Tout> &C, int b_col_maj) {
+            const std::vector<Tin> B, std::vector<Tout> &C, int b_col_maj,
+            bool compute_proj, bool full_design) {
   // Assume:
   // - A[0 .. M*K-1] is X (input)
   // - A[M*K .. M*K+K*N-1] is Q weights
@@ -134,137 +139,146 @@ void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
 
   // 1. Compute Q = X * W_Q, K = X * W_K, and V = X * W_V
   // Q = X * W_Q
-  for (int m = 0; m < M; ++m) {
-    for (int n = 0; n < N; ++n) {
-      Tacc sum = 0;
-      for (int k = 0; k < K; ++k) {
-        if (!b_col_maj) {
-          sum += Tacc(X[m * K + k] * W_Q[k * N + n]);
-        } else {
-          sum += Tacc(X[m * K + k] * W_Q[k + n * K]);
-        }
-      }
-      Q_proj[m * N + n] = Tout(sum);
-    }
-  }
-
-  // K = X * W_K
-  for (int m = 0; m < M; ++m) {
-    for (int n = 0; n < N; ++n) {
-      Tacc sum = 0;
-      for (int k = 0; k < K; ++k) {
-        if (!b_col_maj) {
-          sum += Tacc(X[m * K + k] * W_K[k * N + n]);
-        } else {
-          sum += Tacc(X[m * K + k] * W_K[k + n * K]);
-        }
-      }
-      K_proj[m * N + n] = Tout(sum);
-    }
-  }
-
-  // V = X * W_V
-  for (int m = 0; m < M; ++m) {
-    for (int n = 0; n < N; ++n) {
-      Tacc sum = 0;
-      for (int k = 0; k < K; ++k) {
-        if (!b_col_maj) {
-          sum += Tacc(X[m * K + k] * W_V[k * N + n]);
-        } else {
-          sum += Tacc(X[m * K + k] * W_V[k + n * K]);
-        }
-      }
-      V_proj[m * N + n] = Tout(sum);
-    }
-  }
-
-  // 2. Compute attention score per head: for each head, Q_h * K_h^T
-  // Output C is [M * M * num_heads], row-major: for each head, [M x M]
-  std::vector<Tout> attn_score = std::vector<Tout>(num_heads * M * M, 0);
-  for (int h = 0; h < num_heads; ++h) {
-    for (int i = 0; i < M; ++i) {
-      for (int j = 0; j < M; ++j) {
+  if (compute_proj || full_design) {
+    for (int m = 0; m < M; ++m) {
+      for (int n = 0; n < N; ++n) {
         Tacc sum = 0;
-        for (int n = 0; n < head_dim; ++n) {
-          int q_idx = i * N + h * head_dim + n;
-          int k_idx = j * N + h * head_dim + n;
-          sum += Q_proj[q_idx] * K_proj[k_idx];
+        for (int k = 0; k < K; ++k) {
+          if (!b_col_maj) {
+            sum += Tacc(X[m * K + k] * W_Q[k * N + n]);
+          } else {
+            sum += Tacc(X[m * K + k] * W_Q[k + n * K]);
+          }
         }
-        // Scalar divide by head_dim (not embed_dim) for per-head scaling
-        attn_score[h * M * M + i * M + j] = Tout(sum / head_dim);
+        Q_proj[m * N + n] = Tout(sum);
       }
     }
-  }
 
-  // 3. Apply softmax to attention scores per head
-  // For each head, for each row i, softmax over j (columns)
-  for (int h = 0; h < num_heads; ++h) {
-    for (int i = 0; i < M; ++i) {
-      // Find max for numerical stability
-      Tacc max_score = attn_score[h * M * M + i * M];
-      for (int j = 1; j < M; ++j) {
-        Tacc val = attn_score[h * M * M + i * M + j];
-        if (val > max_score)
-          max_score = val;
-      }
-      // Compute exp and sum
-      Tacc sum_exp = 0;
-      for (int j = 0; j < M; ++j) {
-        if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_score[" << h << "][" << i << "][" << j
-                    << "] before softmax: " << attn_score[h * M * M + i * M + j]
-                    << "\n";
-        }
-        Tacc exp_val = std::exp(attn_score[h * M * M + i * M + j] - max_score);
-        attn_score[h * M * M + i * M + j] = Tout(exp_val);
-        if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_score[" << h << "][" << i << "][" << j
-                    << "] after exp: " << attn_score[h * M * M + i * M + j]
-                    << "\n";
-        }
-        sum_exp += exp_val;
-      }
-      // Normalize
-      for (int j = 0; j < M; ++j) {
-        attn_score[h * M * M + i * M + j] =
-            Tout(attn_score[h * M * M + i * M + j] / sum_exp);
-        if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_score[" << h << "][" << i << "][" << j
-                    << "] after softmax: " << attn_score[h * M * M + i * M + j]
-                    << "\n";
-        }
-      }
-    }
-  }
-
-  // 4. For each head, calculate attn_score * V_proj and save to attn_score_v
-  std::vector<Tout> attn_score_v = std::vector<Tout>(M * N, 0);
-  for (int h = 0; h < num_heads; ++h) {
-    for (int i = 0; i < M; ++i) {
-      for (int n = 0; n < head_dim; ++n) {
+    // K = X * W_K
+    for (int m = 0; m < M; ++m) {
+      for (int n = 0; n < N; ++n) {
         Tacc sum = 0;
+        for (int k = 0; k < K; ++k) {
+          if (!b_col_maj) {
+            sum += Tacc(X[m * K + k] * W_K[k * N + n]);
+          } else {
+            sum += Tacc(X[m * K + k] * W_K[k + n * K]);
+          }
+        }
+        K_proj[m * N + n] = Tout(sum);
+      }
+    }
+
+    // V = X * W_V
+    for (int m = 0; m < M; ++m) {
+      for (int n = 0; n < N; ++n) {
+        Tacc sum = 0;
+        for (int k = 0; k < K; ++k) {
+          if (!b_col_maj) {
+            sum += Tacc(X[m * K + k] * W_V[k * N + n]);
+          } else {
+            sum += Tacc(X[m * K + k] * W_V[k + n * K]);
+          }
+        }
+        V_proj[m * N + n] = Tout(sum);
+      }
+    }
+  }
+  if (!compute_proj || full_design) {
+    // 2. Compute attention score per head: for each head, Q_h * K_h^T
+    // Output C is [M * M * num_heads], row-major: for each head, [M x M]
+    std::vector<Tout> attn_score = std::vector<Tout>(num_heads * M * M, 0);
+    for (int h = 0; h < num_heads; ++h) {
+      for (int i = 0; i < M; ++i) {
         for (int j = 0; j < M; ++j) {
-          // attn_score is [M x M] per head, V_proj is [M x N]
-          int attn_idx = i * M + j;
-          int v_idx = j * N + h * head_dim + n;
-          sum += attn_score[attn_idx] * V_proj[v_idx];
+          Tacc sum = 0;
+          for (int n = 0; n < head_dim; ++n) {
+            int q_idx = i * N + h * head_dim + n;
+            int k_idx = j * N + h * head_dim + n;
+            sum += Q_proj[q_idx] * K_proj[k_idx];
+            if (h == 0 && i == 0 && j == 0 && n < 10) {
+              std::cout << "Q_proj[" << q_idx << "] * K_proj[" << k_idx
+                        << "] = " << Q_proj[q_idx] << " * " << K_proj[k_idx]
+                        << "\n";
+            }
+          }
+          // Scalar divide by head_dim (not embed_dim) for per-head scaling
+          attn_score[h * M * M + i * M + j] = Tout(sum / head_dim);
         }
-        // Store result in attn_score_v: [M x N] per head
-        attn_score_v[i * N + h * head_dim + n] = Tout(sum);
       }
     }
-  }
 
-  // 5. Calculate output = attn_score_v * W_O
-  for (int m = 0; m < M; ++m) {
-    for (int n = 0; n < N; ++n) {
-      Tacc sum = 0;
-      for (int k = 0; k < K; ++k) {
-        int attn_idx = m * N + k;
-        int w_idx = k * N + n;
-        sum += attn_score_v[attn_idx] * W_O[w_idx];
+    // 3. Apply softmax to attention scores per head
+    // For each head, for each row i, softmax over j (columns)
+    for (int h = 0; h < num_heads; ++h) {
+      for (int i = 0; i < M; ++i) {
+        // Find max for numerical stability
+        Tacc max_score = attn_score[h * M * M + i * M];
+        for (int j = 1; j < M; ++j) {
+          Tacc val = attn_score[h * M * M + i * M + j];
+          if (val > max_score)
+            max_score = val;
+        }
+        // Compute exp and sum
+        Tacc sum_exp = 0;
+        for (int j = 0; j < M; ++j) {
+          if (h == 0 && i == 0 && j < 10) {
+            std::cout << "attn_score[" << h << "][" << i << "][" << j
+                      << "] before softmax: "
+                      << attn_score[h * M * M + i * M + j] << "\n";
+          }
+          Tacc exp_val =
+              std::exp(attn_score[h * M * M + i * M + j] - max_score);
+          attn_score[h * M * M + i * M + j] = Tout(exp_val);
+          if (h == 0 && i == 0 && j < 10) {
+            std::cout << "attn_score[" << h << "][" << i << "][" << j
+                      << "] after exp: " << attn_score[h * M * M + i * M + j]
+                      << "\n";
+          }
+          sum_exp += exp_val;
+        }
+        // Normalize
+        for (int j = 0; j < M; ++j) {
+          attn_score[h * M * M + i * M + j] =
+              Tout(attn_score[h * M * M + i * M + j] / sum_exp);
+          if (h == 0 && i == 0 && j < 10) {
+            std::cout << "attn_score[" << h << "][" << i << "][" << j
+                      << "] after softmax: "
+                      << attn_score[h * M * M + i * M + j] << "\n";
+          }
+        }
       }
-      out[m * N + n] = Tout(sum);
+    }
+
+    // 4. For each head, calculate attn_score * V_proj and save to attn_score_v
+    std::vector<Tout> attn_score_v = std::vector<Tout>(M * N, 0);
+    for (int h = 0; h < num_heads; ++h) {
+      for (int i = 0; i < M; ++i) {
+        for (int n = 0; n < head_dim; ++n) {
+          Tacc sum = 0;
+          for (int j = 0; j < M; ++j) {
+            // attn_score is [M x M] per head, V_proj is [M x N]
+            int attn_idx = i * M + j;
+            int v_idx = j * N + h * head_dim + n;
+            sum += attn_score[attn_idx] * V_proj[v_idx];
+          }
+          // Store result in attn_score_v: [M x N] per head
+          attn_score_v[i * N + h * head_dim + n] = Tout(sum);
+        }
+      }
+    }
+
+    // 5. Calculate output = attn_score_v * W_O
+    for (int m = 0; m < M; ++m) {
+      for (int n = 0; n < N; ++n) {
+        Tacc sum = 0;
+        for (int k = 0; k < K; ++k) {
+          int attn_idx = m * N + k;
+          int w_idx = k * N + n;
+          sum += attn_score_v[attn_idx] * W_O[w_idx];
+        }
+        out[m * N + n] = Tout(sum);
+      }
     }
   }
 }
@@ -272,7 +286,7 @@ void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
 template <typename Tin, typename Tout, typename Tacc>
 float matmul_timed(int M, int N, int K, int H, const std::vector<Tin> A,
                    const std::vector<Tin> B, std::vector<Tout> &C,
-                   int b_col_maj) {
+                   int b_col_maj, bool compute_proj, bool full_design) {
   auto start = std::chrono::high_resolution_clock::now();
   const int num_heads = H;
   const int head_dim = N / num_heads;
@@ -288,139 +302,148 @@ float matmul_timed(int M, int N, int K, int H, const std::vector<Tin> A,
   const Tin *W_V = &B[0];
   const Tin *W_O = &B[K * N];
 
-  // 1. Compute Q = X * W_Q, K = X * W_K, and V = X * W_V
-  // Q = X * W_Q
-  for (int m = 0; m < M; ++m) {
-    for (int n = 0; n < N; ++n) {
-      Tacc sum = 0;
-      for (int k = 0; k < K; ++k) {
-        if (!b_col_maj) {
-          sum += Tacc(X[m * K + k] * W_Q[k * N + n]);
-        } else {
-          sum += Tacc(X[m * K + k] * W_Q[k + n * K]);
-        }
-      }
-      Q_proj[m * N + n] = Tout(sum);
-    }
-  }
-
-  // K = X * W_K
-  for (int m = 0; m < M; ++m) {
-    for (int n = 0; n < N; ++n) {
-      Tacc sum = 0;
-      for (int k = 0; k < K; ++k) {
-        if (!b_col_maj) {
-          sum += Tacc(X[m * K + k] * W_K[k * N + n]);
-        } else {
-          sum += Tacc(X[m * K + k] * W_K[k + n * K]);
-        }
-      }
-      K_proj[m * N + n] = Tout(sum);
-    }
-  }
-
-  // V = X * W_V
-  for (int m = 0; m < M; ++m) {
-    for (int n = 0; n < N; ++n) {
-      Tacc sum = 0;
-      for (int k = 0; k < K; ++k) {
-        if (!b_col_maj) {
-          sum += Tacc(X[m * K + k] * W_V[k * N + n]);
-        } else {
-          sum += Tacc(X[m * K + k] * W_V[k + n * K]);
-        }
-      }
-      V_proj[m * N + n] = Tout(sum);
-    }
-  }
-
-  // 2. Compute attention score per head: for each head, Q_h * K_h^T
-  // Output C is [M * M * num_heads], row-major: for each head, [M x M]
-  std::vector<Tout> attn_score = std::vector<Tout>(num_heads * M * M, 0);
-  for (int h = 0; h < num_heads; ++h) {
-    for (int i = 0; i < M; ++i) {
-      for (int j = 0; j < M; ++j) {
+  if (compute_proj || full_design) {
+    // 1. Compute Q = X * W_Q, K = X * W_K, and V = X * W_V
+    // Q = X * W_Q
+    for (int m = 0; m < M; ++m) {
+      for (int n = 0; n < N; ++n) {
         Tacc sum = 0;
-        for (int n = 0; n < head_dim; ++n) {
-          int q_idx = i * N + h * head_dim + n;
-          int k_idx = j * N + h * head_dim + n;
-          sum += Q_proj[q_idx] * K_proj[k_idx];
+        for (int k = 0; k < K; ++k) {
+          if (!b_col_maj) {
+            sum += Tacc(X[m * K + k] * W_Q[k * N + n]);
+          } else {
+            sum += Tacc(X[m * K + k] * W_Q[k + n * K]);
+          }
         }
-        // Scalar divide by head_dim (not embed_dim) for per-head scaling
-        attn_score[h * M * M + i * M + j] = Tout(sum / head_dim);
+        Q_proj[m * N + n] = Tout(sum);
       }
     }
-  }
 
-  // 3. Apply softmax to attention scores per head
-  // For each head, for each row i, softmax over j (columns)
-  for (int h = 0; h < num_heads; ++h) {
-    for (int i = 0; i < M; ++i) {
-      // Find max for numerical stability
-      Tacc max_score = attn_score[h * M * M + i * M];
-      for (int j = 1; j < M; ++j) {
-        Tacc val = attn_score[h * M * M + i * M + j];
-        if (val > max_score)
-          max_score = val;
-      }
-      // Compute exp and sum
-      Tacc sum_exp = 0;
-      for (int j = 0; j < M; ++j) {
-        if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_score[" << h << "][" << i << "][" << j
-                    << "] before softmax: " << attn_score[h * M * M + i * M + j]
-                    << "\n";
-        }
-        Tacc exp_val = std::exp(attn_score[h * M * M + i * M + j] - max_score);
-        attn_score[h * M * M + i * M + j] = exp_val;
-        if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_score[" << h << "][" << i << "][" << j
-                    << "] after exp: " << attn_score[h * M * M + i * M + j]
-                    << "\n";
-        }
-        sum_exp += exp_val;
-      }
-      // Normalize
-      for (int j = 0; j < M; ++j) {
-        attn_score[h * M * M + i * M + j] =
-            Tout(attn_score[h * M * M + i * M + j] / sum_exp);
-        if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_score[" << h << "][" << i << "][" << j
-                    << "] after softmax: " << attn_score[h * M * M + i * M + j]
-                    << "\n";
-        }
-      }
-    }
-  }
-
-  // 4. For each head, calculate attn_score * V_proj and save to attn_score_v
-  std::vector<Tout> attn_score_v = std::vector<Tout>(M * N, 0);
-  for (int h = 0; h < num_heads; ++h) {
-    for (int i = 0; i < M; ++i) {
-      for (int n = 0; n < head_dim; ++n) {
+    // K = X * W_K
+    for (int m = 0; m < M; ++m) {
+      for (int n = 0; n < N; ++n) {
         Tacc sum = 0;
+        for (int k = 0; k < K; ++k) {
+          if (!b_col_maj) {
+            sum += Tacc(X[m * K + k] * W_K[k * N + n]);
+          } else {
+            sum += Tacc(X[m * K + k] * W_K[k + n * K]);
+          }
+        }
+        K_proj[m * N + n] = Tout(sum);
+      }
+    }
+
+    // V = X * W_V
+    for (int m = 0; m < M; ++m) {
+      for (int n = 0; n < N; ++n) {
+        Tacc sum = 0;
+        for (int k = 0; k < K; ++k) {
+          if (!b_col_maj) {
+            sum += Tacc(X[m * K + k] * W_V[k * N + n]);
+          } else {
+            sum += Tacc(X[m * K + k] * W_V[k + n * K]);
+          }
+        }
+        V_proj[m * N + n] = Tout(sum);
+      }
+    }
+  }
+  if (!compute_proj || full_design) {
+    // 2. Compute attention score per head: for each head, Q_h * K_h^T
+    // Output C is [M * M * num_heads], row-major: for each head, [M x M]
+    std::vector<Tout> attn_score = std::vector<Tout>(num_heads * M * M, 0);
+    for (int h = 0; h < num_heads; ++h) {
+      for (int i = 0; i < M; ++i) {
         for (int j = 0; j < M; ++j) {
-          // attn_score is [M x M] per head, V_proj is [M x N]
-          int attn_idx = i * M + j;
-          int v_idx = j * N + h * head_dim + n;
-          sum += attn_score[attn_idx] * V_proj[v_idx];
+          Tacc sum = 0;
+          for (int n = 0; n < head_dim; ++n) {
+            int q_idx = i * N + h * head_dim + n;
+            int k_idx = j * N + h * head_dim + n;
+            sum += Q_proj[q_idx] * K_proj[k_idx];
+            if (h == 0 && i == 0 && j < 10) {
+              std::cout << "Q_proj[" << q_idx << "] * K_proj[" << k_idx
+                        << "] = " << Q_proj[q_idx] << " * " << K_proj[k_idx]
+                        << "\n";
+            }
+          }
+          // Scalar divide by head_dim (not embed_dim) for per-head scaling
+          attn_score[h * M * M + i * M + j] = Tout(sum / head_dim);
         }
-        // Store result in attn_score_v: [M x N] per head
-        attn_score_v[i * N + h * head_dim + n] = Tout(sum);
       }
     }
-  }
 
-  // 5. Calculate output = attn_score_v * W_O
-  for (int m = 0; m < M; ++m) {
-    for (int n = 0; n < N; ++n) {
-      Tacc sum = 0;
-      for (int k = 0; k < K; ++k) {
-        int attn_idx = m * N + k;
-        int w_idx = k * N + n;
-        sum += attn_score_v[attn_idx] * W_O[w_idx];
+    // 3. Apply softmax to attention scores per head
+    // For each head, for each row i, softmax over j (columns)
+    for (int h = 0; h < num_heads; ++h) {
+      for (int i = 0; i < M; ++i) {
+        // Find max for numerical stability
+        Tacc max_score = attn_score[h * M * M + i * M];
+        for (int j = 1; j < M; ++j) {
+          Tacc val = attn_score[h * M * M + i * M + j];
+          if (val > max_score)
+            max_score = val;
+        }
+        // Compute exp and sum
+        Tacc sum_exp = 0;
+        for (int j = 0; j < M; ++j) {
+          if (h == 0 && i == 0 && j < 10) {
+            std::cout << "attn_score[" << h << "][" << i << "][" << j
+                      << "] before softmax: "
+                      << attn_score[h * M * M + i * M + j] << "\n";
+          }
+          Tacc exp_val =
+              std::exp(attn_score[h * M * M + i * M + j] - max_score);
+          attn_score[h * M * M + i * M + j] = exp_val;
+          if (h == 0 && i == 0 && j < 10) {
+            std::cout << "attn_score[" << h << "][" << i << "][" << j
+                      << "] after exp: " << attn_score[h * M * M + i * M + j]
+                      << "\n";
+          }
+          sum_exp += exp_val;
+        }
+        // Normalize
+        for (int j = 0; j < M; ++j) {
+          attn_score[h * M * M + i * M + j] =
+              Tout(attn_score[h * M * M + i * M + j] / sum_exp);
+          if (h == 0 && i == 0 && j < 10) {
+            std::cout << "attn_score[" << h << "][" << i << "][" << j
+                      << "] after softmax: "
+                      << attn_score[h * M * M + i * M + j] << "\n";
+          }
+        }
       }
-      out[m * N + n] = Tout(sum);
+    }
+
+    // 4. For each head, calculate attn_score * V_proj and save to attn_score_v
+    std::vector<Tout> attn_score_v = std::vector<Tout>(M * N, 0);
+    for (int h = 0; h < num_heads; ++h) {
+      for (int i = 0; i < M; ++i) {
+        for (int n = 0; n < head_dim; ++n) {
+          Tacc sum = 0;
+          for (int j = 0; j < M; ++j) {
+            // attn_score is [M x M] per head, V_proj is [M x N]
+            int attn_idx = i * M + j;
+            int v_idx = j * N + h * head_dim + n;
+            sum += attn_score[attn_idx] * V_proj[v_idx];
+          }
+          // Store result in attn_score_v: [M x N] per head
+          attn_score_v[i * N + h * head_dim + n] = Tout(sum);
+        }
+      }
+    }
+
+    // 5. Calculate output = attn_score_v * W_O
+    for (int m = 0; m < M; ++m) {
+      for (int n = 0; n < N; ++n) {
+        Tacc sum = 0;
+        for (int k = 0; k < K; ++k) {
+          int attn_idx = m * N + k;
+          int w_idx = k * N + n;
+          sum += attn_score_v[attn_idx] * W_O[w_idx];
+        }
+        out[m * N + n] = Tout(sum);
+      }
     }
   }
   return std::chrono::duration_cast<std::chrono::microseconds>(
@@ -627,7 +650,8 @@ void print_matrix(const std::vector<T> matrix, int n_cols,
 }
 
 // int8_t aka char will not print as a number but as a character; specialize
-// print_matrix<int8_t> to cast to int16_t first so everything prints as numbers
+// print_matrix<int8_t> to cast to int16_t first so everything prints as
+// numbers
 template <>
 void print_matrix(const std::vector<int8_t> matrix, int n_cols,
                   int n_printable_rows, int n_printable_cols,
@@ -641,7 +665,7 @@ void print_matrix(const std::vector<int8_t> matrix, int n_cols,
                col_sep, elide_sym, w);
 }
 
-constexpr int max_printable_errors = 4096;
+constexpr int max_printable_errors = 128;
 
 template <typename Tout>
 struct error {
@@ -702,14 +726,21 @@ void print_progress_bar(std::ostream &os, double progress, int len = 75) {
 
 template <typename Tin, typename Tout, typename Tacc>
 int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
-           std::vector<Tout> C, int verbosity = 0, float abs_tol = 0.5,
-           float rel_tol = 0.05, int b_col_maj = 0) {
+           std::vector<Tout> C, bool compute_proj, bool full_design,
+           int verbosity = 0, float abs_tol = 0.5, float rel_tol = 0.05,
+           int b_col_maj = 0) {
   int n_errors = 0;
   std::vector<struct error<Tout>> errors;
   Tout max_rel_error = (Tout)0.0f;
 
   std::vector<Tout> CRef(4 * M * N);
-  matmul<Tin, Tout, Tacc>(M, N, K, H, A, B, CRef, b_col_maj);
+  // Get the Q, K, V projection values since they're skipped in this
+  // implementation
+  if (!compute_proj && !full_design) {
+    memcpy(CRef.data(), C.data(), (3 * M * N) * sizeof(Tout));
+  }
+  matmul<Tin, Tout, Tacc>(M, N, K, H, A, B, CRef, b_col_maj, compute_proj,
+                          full_design);
 
   for (int row = 0; row < M; row++) {
     for (int col = 0; col < N; col++) {

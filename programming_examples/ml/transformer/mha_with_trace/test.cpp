@@ -75,6 +75,8 @@ int main(int argc, const char *argv[]) {
   int K = vm["K"].as<int>();
   int N = vm["N"].as<int>();
   int H = vm["H"].as<int>();
+  std::string trace_tile_str = vm["trace_tile"].as<std::string>();
+  int full_design = vm["full_design"].as<int>();
 
   if (verbosity >= 1) {
     std::cout << "Matrix size " << M << "x" << K << "x" << N << std::endl;
@@ -206,17 +208,33 @@ int main(int argc, const char *argv[]) {
   std::vector<C_DATATYPE> CVec(C_VOLUME);
   memset(bufOut, 0, C_SIZE);
 
-  //   for (int i = 0; i < M * N; ++i) {
-  //     int col = i % N;
-  //     CVec[i] =
-  //         (col == 0) ? static_cast<C_DATATYPE>(1) :
-  //         static_cast<C_DATATYPE>(0);
-  //   }
-  //   for (int i = M * N; i < 2 * M * N; ++i) {
-  //     int row = (i - M * N) / N;
-  //     CVec[i] = static_cast<C_DATATYPE>(row);
-  //   }
-  //   memcpy(bufOut, CVec.data(), (CVec.size() * sizeof(C_DATATYPE)));
+  bool compute_proj = false;
+  if (trace_tile_str == "(0,0)" || trace_tile_str == "(1,0)" ||
+      trace_tile_str == "(2,0)" || trace_tile_str == "(3,0)" ||
+      trace_tile_str == "(0,2)" || trace_tile_str == "(1,2)") {
+    compute_proj = true;
+    std::cout << "Computing projection matrices.\n";
+  } else if (trace_tile_str == "(0,1)" || trace_tile_str == "(1,1)" ||
+             trace_tile_str == "(2,1)" || trace_tile_str == "(3,1)" ||
+             trace_tile_str == "(0,3)" || trace_tile_str == "(1,3)" ||
+             trace_tile_str == "(2,3)" || trace_tile_str == "(3,3)" ||
+             trace_tile_str == "(3,2)") {
+    compute_proj = false;
+    std::cout << "Not computing projection matrices.\n";
+  }
+
+  if (!compute_proj && !full_design) {
+    for (int i = 0; i < M * N; ++i) {
+      CVec[i] = matmul_common::get_random<C_DATATYPE>();
+    }
+    for (int i = M * N; i < 2 * M * N; ++i) {
+      CVec[i] = matmul_common::get_random<C_DATATYPE>();
+    }
+    for (int i = 2 * M * N; i < 3 * M * N; ++i) {
+      CVec[i] = matmul_common::get_random<C_DATATYPE>();
+    }
+    memcpy(bufOut, CVec.data(), (CVec.size() * sizeof(C_DATATYPE)));
+  }
 
   char *bufTrace = bo_trace.map<char *>();
   if (trace_size > 0)
@@ -285,7 +303,8 @@ int main(int argc, const char *argv[]) {
       }
       auto vstart = std::chrono::system_clock::now();
       errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
-          M, N, K, H, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, b_col_maj);
+          M, N, K, H, AVec, BVec, CVec, compute_proj, full_design, verbosity,
+          abs_tol, rel_tol, b_col_maj);
       auto vstop = std::chrono::system_clock::now();
       float vtime =
           std::chrono::duration_cast<std::chrono::seconds>(vstop - vstart)

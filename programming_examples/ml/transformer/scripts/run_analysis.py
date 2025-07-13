@@ -496,6 +496,93 @@ def analyse_loop_iterations(input_file, output_dir):
     logger.info(f"Saved L3 tiling plot to {l3_tiling_file}")
     plt.close()
 
+    workload_at_tile = {
+        # row,col
+        "0,0": {"type": "GEMM", "size": 64*64*64},
+        "0,1": {"type": "GEMM", "size": 16*32*256},
+        "0,2": {"type": "GEMM", "size": 64*64*64},
+        "0,3": {"type": "GEMM", "size": 16*32*256},
+        "1,0": {"type": "GEMM", "size": 64*64*64},
+        "1,1": {"type": "Softmax", "size": 16*256, "num_exps": 6*(256/16)*(768/256)}, # 6 heads, (256/16) = 16 iters in sequence dim, 768/256 = 3 iters in hidden dim
+        "1,2": {"type": "GEMM", "size": 64*64*64},
+        "1,3": {"type": "Softmax", "size": 16*256, "num_exps": 6*(256/16)*(768/256)}, # 6 heads, (256/16) = 16 iters in sequence dim, 768/256 = 3 iters in hidden dim
+        "2,0": {"type": "GEMM", "size": 64*64*64},
+        "2,1": {"type": "GEMM", "size": 16*256*16},
+        "2,2": 0,
+        "2,3": {"type": "GEMM", "size": 16*256*16},
+        "3,0": {"type": "GEMM", "size": 64*64*64},
+        "3,1": {"type": "GEMM", "size": 16*16*256},
+        "3,2": {"type": "Add", "size": 16*256, "num_adds": (256/16)*(768/256)}, # (256/16) = 16 iters in sequence dim, 768/256 = 3 iters in hidden dim
+        "3,3": {"type": "GEMM", "size": 16*16*256},
+    }
+    l3_symbol_to_workload = {
+        "Wq_L3L2": ["0,0", "1,0"],
+        "Wk_L3L2": ["2,0", "3,0"],
+        "Wv_L3L2": ["0,2", "1,2"],
+        "q_L3L2": ["0,1", "0,3"],
+        "v_L3L2": ["2,1", "2,3"],
+        "Wo_L3L2": ["3,1", "3,3"],
+    }
+    # Calculate total MACs, Exps, and Adds per tile for each L3 symbol
+    total_macs_per_tile = {}
+    total_exps_per_tile = {}
+    total_adds_per_tile = {}
+
+    # Use metadata_json to get num_tiles for each meta_symbol and assign workloads to tiles
+    for meta_symbol, tile_names in l3_symbol_to_workload.items():
+        if meta_symbol in metadata_json:
+            num_tiles = metadata_json[meta_symbol]["num_tiles"]
+            for tile_name in tile_names:
+                workload = workload_at_tile.get(tile_name)
+                if not workload:
+                    continue
+                # MACs
+                if workload.get("type") == "GEMM":
+                    total_macs_per_tile[tile_name] = total_macs_per_tile.get(tile_name, 0) + workload["size"] * num_tiles
+                    logger.info(f"Tile {tile_name} workload: {workload['type']} with size {workload['size']} and num_tiles {num_tiles}, total MACs: {total_macs_per_tile[tile_name]}")
+    # Basically the softmax and add workloads don't have L3 to L2 data movement, so the number of tiles was manually calculated
+    for tile_name, workload in workload_at_tile.items():
+        if isinstance(workload, dict) and workload["type"] in ["Softmax", "Add"]:
+            # Exps
+            if workload.get("type") == "Softmax":
+                num_tiles = workload.get("num_exps", 0)
+                total_exps_per_tile[tile_name] = total_exps_per_tile.get(tile_name, 0) + workload["size"] * num_tiles
+                logger.info(f"Tile {tile_name} workload: {workload['type']} with size {workload['size']} and num_exps {num_tiles}, total Exps: {total_exps_per_tile[tile_name]}")
+            # Adds
+            if workload.get("type") == "Add":
+                num_tiles = workload.get("num_adds", 0)
+                total_adds_per_tile[tile_name] = total_adds_per_tile.get(tile_name, 0) + workload["size"] * num_tiles
+                logger.info(f"Tile {tile_name} workload: {workload['type']} with size {workload['size']} and num_adds {num_tiles}, total Adds: {total_adds_per_tile[tile_name]}")
+
+    # Prepare data for plotting
+    all_tiles = sorted(set(list(total_macs_per_tile.keys()) +
+                           list(total_exps_per_tile.keys()) +
+                           list(total_adds_per_tile.keys())))
+    macs_vals = [total_macs_per_tile.get(tile, 0) for tile in all_tiles]
+    exps_vals = [total_exps_per_tile.get(tile, 0) for tile in all_tiles]
+    adds_vals = [total_adds_per_tile.get(tile, 0) for tile in all_tiles]
+
+    # Plot bar chart
+    fig, ax = plt.subplots(figsize=(max(8, len(all_tiles) * 1.2), 5))
+    width = 0.25
+    x = range(len(all_tiles))
+    ax.bar([i - width for i in x], macs_vals, width=width, label='Total MACs')
+    ax.bar(x, exps_vals, width=width, label='Total Exps')
+    ax.bar([i + width for i in x], adds_vals, width=width, label='Total Adds')
+    ax.set_xticks(x)
+    ax.set_xticklabels(all_tiles, rotation=45, ha='right')
+    ax.set_ylabel('Total Operations')
+    ax.set_xlabel('Tile (col,row)')
+    ax.set_title('Total MACs, Exps, and Adds per Tile')
+    ax.set_yscale('log')
+    ax.legend()
+    plt.tight_layout()
+    op_plot_file = os.path.join(output_dir, "tile_workload_ops.png")
+    plt.savefig(op_plot_file)
+    logger.info(f"Saved tile workload operations plot to {op_plot_file}")
+    plt.close()
+
+
 def analyse_execution_times(csv_file, output_dir):
     """
     Analyse execution times from a CSV file.
