@@ -29,19 +29,18 @@ endif
 b_col_maj?=0
 
 # Unless the full_design flag is set, the python code will remove a part of the tiles used in the design based on the tile to be traced
-# This was added to work around compiler error popping up when trying to compile the full design with trace or empty trace data
 # For some reason trace with (0,0) doesn't compile, so using (0,1) by default for tracing
-trace_tile?=(0,1)
+# Some tiles also don't generate traces, which needs investigation
+trace_tile?=(0,0)
 aieargs=--dev ${devicename} -M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj} --trace-tile '${trace_tile}'
 
-# The flag below will lead to a compiler error when compiling the full design with trace
-full_design?=1
+full_design?=0
 ifeq (${full_design}, 1)
   aieargs+=--full-design
 endif
 
-runargs_verif=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 5 --verify 1
-runargs_no_verif=--b_col_maj ${b_col_maj} -v 2 --warmup 10 --iters 1000 --verify 0
+runargs_verif=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1 --verify 1 --trace_tile '${trace_tile}' --full_design ${full_design}
+runargs_no_verif=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1 --verify 0 --trace_tile '${trace_tile}' --full_design ${full_design}
 target_suffix=mha
 
 # set this flag to 1 for linear buffer allocation
