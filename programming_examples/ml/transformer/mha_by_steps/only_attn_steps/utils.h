@@ -708,8 +708,9 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
   std::vector<struct error<Tout>> errors;
   Tout max_rel_error = (Tout)0.0f;
 
-  std::vector<Tout> CRef(3 * M * N + H * M * M);
-  memcpy(CRef.data(), C.data(), (3 * M * N + H * M * M) * sizeof(Tout));
+  std::vector<Tout> CRef(4 * M * N);
+ // Get the Q, K, V projection values since they're skipped in this implementation
+  memcpy(CRef.data(), C.data(), (3 * M * N) * sizeof(Tout));
   matmul<Tin, Tout, Tacc>(M, N, K, H, A, B, CRef, b_col_maj);
 
   for (int row = 0; row < M; row++) {
@@ -870,7 +871,7 @@ float time_matmul(int M, int N, int K, int H, std::vector<Tin> A,
                   std::vector<Tin> B, std::vector<Tout> C, int n_samples,
                   int verbosity = 0, float abs_tol = 0.5, float rel_tol = 0.05,
                   int b_col_maj = 0) {
-  std::vector<Tout> CRef(M * M);
+  std::vector<Tout> CRef(4 * M * N);
   return matmul_timed<Tin, Tout, Tacc>(M, N, K, H, A, B, CRef, b_col_maj);
 }
 
