@@ -349,20 +349,40 @@ def my_mha(
         # AIE-array data movement for Q, K, V projections
         # L3 to L2 data movement
         X_l3l2_fifos = object_fifo(
-            f"X_L3L2", shim_tiles[left_mtx_in[X_STR][L3_POS_STR]], mem_tiles[left_mtx_in[X_STR][L2_POS_STR]], fifo_depth, X_l2_ty
+            f"X_L3L2", 
+            shim_tiles[left_mtx_in[X_STR][L3_POS_STR]], 
+            mem_tiles[left_mtx_in[X_STR][L2_POS_STR]], 
+            fifo_depth,
+            X_l2_ty
         )
         Wq_l3l2_fifos = object_fifo(
-            f"Wq_L3L2", shim_tiles[right_mtx_in[WQ_STR][L3_POS_STR]], mem_tiles[right_mtx_in[WQ_STR][L2_POS_STR]], fifo_depth, Wq_l2_ty
+            f"Wq_L3L2", 
+            shim_tiles[right_mtx_in[WQ_STR][L3_POS_STR]], 
+            mem_tiles[right_mtx_in[WQ_STR][L2_POS_STR]], 
+            fifo_depth,
+            Wq_l2_ty
         )
         Wk_l3l2_fifos = object_fifo(
-            f"Wk_L3L2", shim_tiles[right_mtx_in[WK_STR][L3_POS_STR]], mem_tiles[right_mtx_in[WK_STR][L2_POS_STR]], fifo_depth, Wk_l2_ty
+            f"Wk_L3L2", 
+            shim_tiles[right_mtx_in[WK_STR][L3_POS_STR]], 
+            mem_tiles[right_mtx_in[WK_STR][L2_POS_STR]], 
+            fifo_depth,
+            Wk_l2_ty
         )
         Wv_l3l2_fifos = object_fifo(
-            f"Wv_L3L2", shim_tiles[right_mtx_in[WV_STR][L3_POS_STR]], mem_tiles[right_mtx_in[WV_STR][L2_POS_STR]], fifo_depth, Wv_l2_ty
+            f"Wv_L3L2", 
+            shim_tiles[right_mtx_in[WV_STR][L3_POS_STR]], 
+            mem_tiles[right_mtx_in[WV_STR][L2_POS_STR]], 
+            fifo_depth,
+            Wv_l2_ty
         )
         # L2 to L1 data movement
         X_l2l1_fifos = object_fifo(
-            f"X_L2L1", mem_tiles[left_mtx_in[X_STR][L2_POS_STR]], [core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]] for l1_pos in left_mtx_in[X_STR][L1_POS_STR]], fifo_depth, X_l1_ty,
+            f"X_L2L1", 
+            mem_tiles[left_mtx_in[X_STR][L2_POS_STR]], 
+            [core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]] for l1_pos in left_mtx_in[X_STR][L1_POS_STR]], 
+            fifo_depth,
+            X_l1_ty,
             [
                 (q_proj_dims[0] // r, r * q_proj_dims[1]),
                 (q_proj_dims[1] // s, s),
@@ -371,7 +391,11 @@ def my_mha(
             ],
         )
         Wq_l2l1_fifos = [object_fifo(
-            f"Wq_L2L1_{l1_pos[ROW_IDX]}_{l1_pos[COL_IDX]}", mem_tiles[right_mtx_in[WQ_STR][L2_POS_STR]], core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], fifo_depth, Wq_l1_ty,
+            f"Wq_L2L1_{l1_pos[ROW_IDX]}_{l1_pos[COL_IDX]}", 
+            mem_tiles[right_mtx_in[WQ_STR][L2_POS_STR]], 
+            core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], 
+            fifo_depth,
+            Wq_l1_ty,
             [
                 (q_proj_dims[1] // s, s * q_proj_dims[2]),
                 (q_proj_dims[2] // t, t),
@@ -380,7 +404,11 @@ def my_mha(
             ],
         ) for l1_pos in right_mtx_in[WQ_STR][L1_POS_STR]]
         Wk_l2l1_fifos = [object_fifo(
-            f"Wk_L2L1_{l1_pos[ROW_IDX]}_{l1_pos[COL_IDX]}", mem_tiles[right_mtx_in[WK_STR][L2_POS_STR]], core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], fifo_depth, Wk_l1_ty,
+            f"Wk_L2L1_{l1_pos[ROW_IDX]}_{l1_pos[COL_IDX]}", 
+            mem_tiles[right_mtx_in[WK_STR][L2_POS_STR]], 
+            core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], 
+            fifo_depth,
+            Wk_l1_ty,
             [
                 (k_proj_dims[1] // s, s * k_proj_dims[2]),
                 (k_proj_dims[2] // t, t),
@@ -389,7 +417,11 @@ def my_mha(
             ],
         ) for l1_pos in right_mtx_in[WK_STR][L1_POS_STR]]
         Wv_l2l1_fifos = [object_fifo(
-            f"Wv_L2L1_{l1_pos[ROW_IDX]}_{l1_pos[COL_IDX]}", mem_tiles[right_mtx_in[WV_STR][L2_POS_STR]], core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], fifo_depth, Wv_l1_ty,
+            f"Wv_L2L1_{l1_pos[ROW_IDX]}_{l1_pos[COL_IDX]}", 
+            mem_tiles[right_mtx_in[WV_STR][L2_POS_STR]], 
+            core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], 
+            fifo_depth,
+            Wv_l1_ty,
             [
                 (v_proj_dims[1] // s, s * v_proj_dims[2]),
                 (v_proj_dims[2] // t, t),
