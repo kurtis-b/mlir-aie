@@ -62,7 +62,7 @@ int main(int argc, const char *argv[]) {
 
   matmul_common::parse_options(argc, argv, options, vm);
   int verbosity = vm["verbosity"].as<int>();
-  int do_verify = vm["verify"].as<bool>();
+  int do_verify = vm["verify"].as<int>();
   int n_iterations = vm["iters"].as<int>();
   int n_warmup_iterations = vm["warmup"].as<int>();
   int trace_size = vm["trace_sz"].as<int>();
@@ -74,8 +74,7 @@ int main(int argc, const char *argv[]) {
   int M = vm["M"].as<int>();
   int K = vm["K"].as<int>();
   int N = vm["N"].as<int>();
-  bool do_verify_stochastic =
-      (long long)M * N * K > verify_stochastic_threshold;
+  int H = vm["H"].as<int>();
 
   if (verbosity >= 1) {
     std::cout << "Matrix size " << M << "x" << K << "x" << N << std::endl;
@@ -241,24 +240,11 @@ int main(int argc, const char *argv[]) {
     if (do_verify) {
       memcpy(CVec.data(), bufOut, (CVec.size() * sizeof(C_DATATYPE)));
       if (verbosity >= 1) {
-        if (do_verify_stochastic) {
-          std::cout << "Verifying " << verify_stochastic_n_samples
-                    << " random samples against reference matmul ..."
-                    << std::endl;
-        } else {
-          std::cout << "Verifying against reference matmul ..." << std::endl;
-        }
+        std::cout << "Verifying against reference matmul ..." << std::endl;
       }
       auto vstart = std::chrono::system_clock::now();
-      if (do_verify_stochastic) {
-        errors = matmul_common::verify_stochastic<A_DATATYPE, C_DATATYPE,
-                                                  ACC_DATATYPE>(
-            M, N, K, AVec, BVec, CVec, verify_stochastic_n_samples, verbosity,
-            abs_tol, rel_tol, b_col_maj);
-      } else {
-        errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
-            M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, b_col_maj);
-      }
+      errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
+          M, N, K, H, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, b_col_maj);
       auto vstop = std::chrono::system_clock::now();
       float vtime =
           std::chrono::duration_cast<std::chrono::seconds>(vstop - vstart)
@@ -278,10 +264,14 @@ int main(int argc, const char *argv[]) {
     // if (iter % 10 == 0) {
     //   cpu_time_total +=
     //       matmul_common::time_matmul<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
-    //           M, N, K, AVec, BVec, CVec, verbosity, abs_tol, rel_tol,
+    //           M, M, K, H, AVec, BVec, CVec, verbosity, abs_tol, rel_tol,
     //           b_col_maj);
     // }
 
+    if (n_iterations <= 5) {
+      std::cout << "NPU matmul time: " << npu_time << "us." << std::endl;
+      std::cout << "NPU gflops: " << macs / (1000 * npu_time) << std::endl;
+    }
     npu_time_total += npu_time;
     npu_time_min = (npu_time < npu_time_min) ? npu_time : npu_time_min;
     npu_time_max = (npu_time > npu_time_max) ? npu_time : npu_time_max;
@@ -316,10 +306,6 @@ int main(int argc, const char *argv[]) {
     return 0;
   } else {
     std::cout << "\nError count: " << errors;
-    if (do_verify_stochastic) {
-      std::cout << " (out of " << verify_stochastic_n_samples
-                << " random samples)";
-    }
     std::cout << "\n\n";
 
     std::cout << "\nFailed.\n\n";

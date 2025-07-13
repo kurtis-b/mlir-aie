@@ -62,7 +62,7 @@ int main(int argc, const char *argv[]) {
 
   matmul_common::parse_options(argc, argv, options, vm);
   int verbosity = vm["verbosity"].as<int>();
-  int do_verify = vm["verify"].as<bool>();
+  int do_verify = vm["verify"].as<int>();
   int n_iterations = vm["iters"].as<int>();
   int n_warmup_iterations = vm["warmup"].as<int>();
   int trace_size = vm["trace_sz"].as<int>();
@@ -306,6 +306,10 @@ int main(int argc, const char *argv[]) {
     //           b_col_maj);
     // }
 
+    if (n_iterations <= 5) {
+      std::cout << "NPU matmul time: " << npu_time << "us." << std::endl;
+      std::cout << "NPU gflops: " << macs / (1000 * npu_time) << std::endl;
+    }
     npu_time_total += npu_time;
     npu_time_min = (npu_time < npu_time_min) ? npu_time : npu_time_min;
     npu_time_max = (npu_time > npu_time_max) ? npu_time : npu_time_max;
