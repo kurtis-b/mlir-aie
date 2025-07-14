@@ -586,7 +586,7 @@ def analyse_loop_iterations(input_file, output_dir):
     if any(adds_vals):
         handles.append(bar_adds)
         labels.append('Total Adds')
-    ax.legend(handles, labels, loc='upper right')
+    ax.legend(handles, labels)
     plt.tight_layout()
     op_plot_file = os.path.join(output_dir, "tile_workload_ops.png")
     plt.savefig(op_plot_file)
