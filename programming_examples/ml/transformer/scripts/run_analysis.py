@@ -7,6 +7,7 @@ import argparse
 import logging
 import csv
 import matplotlib.pyplot as plt
+import numpy as np
 
 def analyse_memory_utilization(dev, input_file, output_dir):
     """
@@ -562,20 +563,30 @@ def analyse_loop_iterations(input_file, output_dir):
     exps_vals = [total_exps_per_tile.get(tile, 0) for tile in all_tiles]
     adds_vals = [total_adds_per_tile.get(tile, 0) for tile in all_tiles]
 
-    # Plot bar chart
     fig, ax = plt.subplots(figsize=(max(8, len(all_tiles) * 1.2), 5))
-    width = 0.25
-    x = range(len(all_tiles))
-    ax.bar([i - width for i in x], macs_vals, width=width, label='Total MACs')
-    ax.bar(x, exps_vals, width=width, label='Total Exps')
-    ax.bar([i + width for i in x], adds_vals, width=width, label='Total Adds')
+    x = np.arange(len(all_tiles))
+    bar_macs = ax.bar(x, macs_vals, color='tab:blue', label='Total MACs')
+    bar_exps = ax.bar(x, exps_vals, color='tab:orange', label='Total Exps')
+    bar_adds = ax.bar(x, adds_vals, color='tab:green', label='Total Adds')
     ax.set_xticks(x)
-    ax.set_xticklabels(all_tiles, rotation=45, ha='right')
+    ax.set_xticklabels(all_tiles, ha='center')
     ax.set_ylabel('Total Operations')
-    ax.set_xlabel('Tile (col,row)')
+    ax.set_xlabel('Tile (row,col)')
     ax.set_title('Total MACs, Exps, and Adds per Tile')
     ax.set_yscale('log')
-    ax.legend()
+    # Only show legend for bars that have nonzero values
+    handles = []
+    labels = []
+    if any(macs_vals):
+        handles.append(bar_macs)
+        labels.append('Total MACs')
+    if any(exps_vals):
+        handles.append(bar_exps)
+        labels.append('Total Exps')
+    if any(adds_vals):
+        handles.append(bar_adds)
+        labels.append('Total Adds')
+    ax.legend(handles, labels, loc='upper right')
     plt.tight_layout()
     op_plot_file = os.path.join(output_dir, "tile_workload_ops.png")
     plt.savefig(op_plot_file)
