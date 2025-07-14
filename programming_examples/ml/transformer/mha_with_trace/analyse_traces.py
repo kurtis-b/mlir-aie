@@ -8,22 +8,22 @@ import matplotlib.pyplot as plt
 # First number is row, second number is column
 THEORETICAL_PEAK_BF16_BF16 = {"npu2": 256, "npu": 128} # MACs per cycle
 WORKLOAD_AT_TILE = {
-    "tile2,1": {"type": "GEMM", "size": 64*64*64*2},
-    "tile2,2": {"type": "GEMM", "size": 16*32*256*2},
-    "tile2,3": {"type": "GEMM", "size": 64*64*64*2},
-    "tile2,4": {"type": "GEMM", "size": 16*32*256*2},
-    "tile3,1": {"type": "GEMM", "size": 64*64*64*2},
+    "tile2,1": {"type": "GEMM", "size": 64*64*64},
+    "tile2,2": {"type": "GEMM", "size": 16*32*256},
+    "tile2,3": {"type": "GEMM", "size": 64*64*64},
+    "tile2,4": {"type": "GEMM", "size": 16*32*256},
+    "tile3,1": {"type": "GEMM", "size": 64*64*64},
     "tile3,2": {"type": "Softmax", "size": 16*256},
-    "tile3,3": {"type": "GEMM", "size": 64*64*64*2},
+    "tile3,3": {"type": "GEMM", "size": 64*64*64},
     "tile3,4": {"type": "Softmax", "size": 16*256},
-    "tile4,1": {"type": "GEMM", "size": 64*64*64*2},
-    "tile4,2": {"type": "GEMM", "size": 16*256*16*2},
+    "tile4,1": {"type": "GEMM", "size": 64*64*64},
+    "tile4,2": {"type": "GEMM", "size": 16*256*16},
     "tile4,3": 0,
-    "tile4,4": {"type": "GEMM", "size": 16*256*16*2},
-    "tile5,1": {"type": "GEMM", "size": 64*64*64*2},
-    "tile5,2": {"type": "GEMM", "size": 16*16*256*2},
+    "tile4,4": {"type": "GEMM", "size": 16*256*16},
+    "tile5,1": {"type": "GEMM", "size": 64*64*64},
+    "tile5,2": {"type": "GEMM", "size": 16*16*256},
     "tile5,3": {"type": "Add", "size": 16*256},
-    "tile5,4": {"type": "GEMM", "size": 16*16*256*2},
+    "tile5,4": {"type": "GEMM", "size": 16*16*256},
 }
 
 CLOCK_FREQ = 10**9  # 1 GHz
@@ -118,15 +118,15 @@ def analyse_json_file(filepath, dev):
             logging.info(f"Max kernel time (s): {kernel_time_s_max}")
             logging.info(f"Min kernel time (s): {kernel_time_s_min}")
             # Calculate GFLOPs/sec: (workload size in FLOPs) / (kernel time in seconds) / (10^9 FLOPs per GFLOPs)
-            gflops_per_s_avg = (workload['size'] / kernel_time_s_avg / 1e9) if workload and kernel_time_s_avg > 0 else 0
-            gflops_per_s_max = (workload['size'] / kernel_time_s_min / 1e9) if workload and kernel_time_s_min > 0 else 0
-            gflops_per_s_min = (workload['size'] / kernel_time_s_max / 1e9) if workload and kernel_time_s_max > 0 else 0
+            gflops_per_s_avg = (workload['size'] * 2 / kernel_time_s_avg / 1e9) if workload and kernel_time_s_avg > 0 else 0
+            gflops_per_s_max = (workload['size'] * 2 / kernel_time_s_min / 1e9) if workload and kernel_time_s_min > 0 else 0
+            gflops_per_s_min = (workload['size'] * 2 / kernel_time_s_max / 1e9) if workload and kernel_time_s_max > 0 else 0
             logging.info(f"Average GFLOPs/sec: {gflops_per_s_avg}")
             logging.info(f"Max GFLOPs/sec: {gflops_per_s_max}")
             logging.info(f"Min GFLOPs/sec: {gflops_per_s_min}")
             if workload and workload['type'] == "GEMM":
-                # Compute utilization: (workload size in FLOPs) / (2 FLOPs per MAC) / (kernel time in seconds * CLOCK_FREQ in cycles per second) / (THEORETICAL_PEAK_BF16_BF16 in MACs per cycle)
-                compute_utilization = ((workload['size'] / 2) / (kernel_time_s_avg * CLOCK_FREQ)) / THEORETICAL_PEAK_BF16_BF16[dev] # Fraction of theoretical peak
+                # Compute utilization: (workload size in MACs) / (kernel time in seconds * CLOCK_FREQ in cycles per second) / (THEORETICAL_PEAK_BF16_BF16 in MACs per cycle)
+                compute_utilization = ((workload['size']) / (kernel_time_s_avg * CLOCK_FREQ)) / THEORETICAL_PEAK_BF16_BF16[dev] # Fraction of theoretical peak
                 logging.info(f"Compute Utilization for {tile_str}: {compute_utilization:.2%}")
             else:
                 compute_utilization = None
@@ -204,9 +204,11 @@ def main():
             if match:
                 row, col = int(match.group(1)), int(match.group(2))
                 if args.dev == "npu":
-                    col -= 1
-                tile_str = f"(Row {row-2},Col {col})"
-                tiles.append(tile_str)
+                    tile_str = f"(Row {row-2},Col {col-1})"
+                    tiles.append(tile_str)
+                else:
+                    # Need to check traces generated for Strix. Haven't done so yet.
+                    raise ValueError(f"Need to add support for device type: {args.dev}")
             else:
                 tiles.append(tile)
             avg_ops.append(data["gflops_per_s_avg"])
@@ -282,8 +284,10 @@ def main():
                 if match:
                     row, col = int(match.group(1)), int(match.group(2))
                     if args.dev == "npu":
-                        col -= 1
-                    tile_str = f"(Row {row-2},Col {col})"
+                        tile_str = f"(Row {row-2},Col {col-1})"
+                    else:
+                        # Need to check traces generated for Strix. Haven't done so yet.
+                        raise ValueError(f"Need to add support for device type: {args.dev}")
                 else:
                     tile_str = tile
                 util_tiles.append(tile_str)
@@ -330,8 +334,10 @@ def main():
             if match:
                 row, col = int(match.group(1)), int(match.group(2))
                 if args.dev == "npu":
-                    col -= 1
-                tile_str = f"(Row {row-2},Col {col})"
+                    tile_str = f"(Row {row-2},Col {col-1})"
+                else:
+                    # Need to check traces generated for Strix. Haven't done so yet.
+                    raise ValueError(f"Need to add support for device type: {args.dev}")
             else:
                 tile_str = tile
             kernel_tiles.append(tile_str)
