@@ -6,7 +6,7 @@ import re
 import matplotlib.pyplot as plt
 
 # First number is row, second number is column
-THEORETICAL_PEAK_BF16_BF16 = 256 # MACs per cycle
+THEORETICAL_PEAK_BF16_BF16 = {"npu2": 256, "npu": 128} # MACs per cycle
 WORKLOAD_AT_TILE = {
     "tile2,1": {"type": "GEMM", "size": 64*64*64*2},
     "tile2,2": {"type": "GEMM", "size": 16*32*256*2},
@@ -27,7 +27,7 @@ WORKLOAD_AT_TILE = {
 }
 
 CLOCK_FREQ = 10**9  # 1 GHz
-def analyse_json_file(filepath):
+def analyse_json_file(filepath, dev):
     """
     Analyse the JSON file for performance data.
     Args:
@@ -82,6 +82,7 @@ def analyse_json_file(filepath):
                     start_ts = trace_data.get("ts")
                     # Search for the next INSTR_EVENT_1 with "E"
                     end_ts = None
+                    num_instr_vectors = 0
                     for j in range(i + 1, len(data)):
                         next_item = data[j]
                         if (
@@ -96,16 +97,21 @@ def analyse_json_file(filepath):
                         if next_item.get("name") == "INSTR_EVENT_0" and next_item.get("ph") == "B":
                             logging.info(f"Replacing start_ts with next INSTR_EVENT_0 ts: {next_item.get('ts')}")
                             start_ts = next_item.get("ts")
+                        if next_item.get("name") == "INSTR_VECTOR":
+                            num_instr_vectors += 1
                     # 1us is 1 cycle in perfetto
                     kernel_cycles = end_ts - start_ts if start_ts is not None and end_ts is not None else 0
                     if kernel_cycles <= 0:
                         logging.warning(f"Invalid kernel cycles instance found for tile {tile_str} at {filepath}")
                     kernel_time_s = kernel_cycles / CLOCK_FREQ if kernel_cycles > 0 else 0
-                    if kernel_time_s > 0:
-                        kernel_time_s_avg += kernel_time_s
-                        kernel_time_s_max = max(kernel_time_s_max, kernel_time_s) if num_kernel_traces > 0 else kernel_time_s
-                        kernel_time_s_min = min(kernel_time_s_min, kernel_time_s) if num_kernel_traces > 0 else kernel_time_s
-                        num_kernel_traces += 1
+                    if num_instr_vectors != 0:
+                        if kernel_time_s > 0:
+                            kernel_time_s_avg += kernel_time_s
+                            kernel_time_s_max = max(kernel_time_s_max, kernel_time_s) if num_kernel_traces > 0 else kernel_time_s
+                            kernel_time_s_min = min(kernel_time_s_min, kernel_time_s) if num_kernel_traces > 0 else kernel_time_s
+                            num_kernel_traces += 1
+                    else:
+                        logging.info(f"Skipping kernel trace with {num_instr_vectors} INSTR_VECTOR events for tile {tile_str} at {filepath}")
                 i += 1
             kernel_time_s_avg /= num_kernel_traces if num_kernel_traces > 0 else 1
             logging.info(f"Average kernel time (s): {kernel_time_s_avg}")
@@ -120,7 +126,7 @@ def analyse_json_file(filepath):
             logging.info(f"Min GFLOPs/sec: {gflops_per_s_min}")
             if workload and workload['type'] == "GEMM":
                 # Compute utilization: (workload size in FLOPs) / (2 FLOPs per MAC) / (kernel time in seconds * CLOCK_FREQ in cycles per second) / (THEORETICAL_PEAK_BF16_BF16 in MACs per cycle)
-                compute_utilization = (workload['size'] / 2 / (kernel_time_s_avg * CLOCK_FREQ)) / THEORETICAL_PEAK_BF16_BF16 # Fraction of theoretical peak
+                compute_utilization = ((workload['size'] / 2) / (kernel_time_s_avg * CLOCK_FREQ)) / THEORETICAL_PEAK_BF16_BF16[dev] # Fraction of theoretical peak
                 logging.info(f"Compute Utilization for {tile_str}: {compute_utilization:.2%}")
             else:
                 compute_utilization = None
@@ -177,7 +183,7 @@ def main():
     for filename in os.listdir(args.directory):
         if filename.endswith('.json'):
             filepath = os.path.join(args.directory, filename)
-            result = analyse_json_file(filepath)
+            result = analyse_json_file(filepath, args.dev)
             if result:
                 performance_results.append(result)
 
