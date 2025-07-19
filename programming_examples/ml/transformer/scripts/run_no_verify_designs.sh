@@ -1,6 +1,16 @@
 #!/usr/bin/bash
 
-output_file="run_no_verify_exec_times.csv"
+output_dir="."
+if [ $# -ge 1 ]; then
+    output_dir="$1"
+    mkdir -p "$output_dir"
+fi
+
+output_file="$output_dir/run_no_verify_exec_times.csv"
+if [ -f "$output_file" ]; then
+    rm "$output_file"
+fi
+touch "$output_file"
 echo "design,avg_us,min_us,max_us,M,K,N" > "$output_file"
 
 for dir in mha mha_by_steps/only_attn_steps mha_by_steps/only_proj_steps add_and_norm ffn-1 ffn-2; do
@@ -46,7 +56,7 @@ for dir in mha mha_by_steps/only_attn_steps mha_by_steps/only_proj_steps add_and
             K=""
             N=""
         fi
-        echo "$dir,$avg_value,$min_value,$max_value,$M,$K,$N" >> "$orig_dir/$output_file"
+        echo "$dir,$avg_value,$min_value,$max_value,$M,$K,$N" >> "$output_file"
         cd "$orig_dir" || exit
     fi
 done

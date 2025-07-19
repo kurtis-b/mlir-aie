@@ -1,7 +1,16 @@
 #!/usr/bin/bash
 
-output_file="run_verify_results.txt"
-> "$output_file"
+if [ "${NPU2}" = "1" ]; then
+    devicename="npu2"
+else
+    devicename="npu"
+fi
+
+output_file="${devicename}_run_verify_results.txt"
+if [ -f "$output_file" ]; then
+    rm "$output_file"
+fi
+touch "$output_file"
 
 for dir in q_proj k_proj v_proj attn_score softmax attn_score_v; do
     if [ -d "$dir" ]; then
