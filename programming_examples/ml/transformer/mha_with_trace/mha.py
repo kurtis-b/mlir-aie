@@ -34,7 +34,7 @@ microkernel_mac_dim_map = {
         "bf16": {
             # emulate_bf16_mmul_with_bfp16
             True: (8, 8, 8),
-            False: (4, 8, 4),
+            False: (4, 8, 8),
         },
         "i8": (8, 8, 8),
         "i16": (4, 4, 8),
@@ -329,7 +329,7 @@ def my_mha(
 
     if dev == "npu":
         if n_aie_cols == 4:
-            dev_ty = AIEDevice.npu1_4col
+            dev_ty = AIEDevice.npu1
     else:
         if n_aie_cols == 4:
             dev_ty = AIEDevice.npu2
