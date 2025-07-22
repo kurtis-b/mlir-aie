@@ -121,7 +121,7 @@ def my_addandnorm(
 
     if dev == "npu":
         if n_aie_cols == 1:
-            dev_ty = AIEDevice.npu1_4col
+            dev_ty = AIEDevice.npu1
     else:
         if n_aie_cols == 1:
             dev_ty = AIEDevice.npu2
