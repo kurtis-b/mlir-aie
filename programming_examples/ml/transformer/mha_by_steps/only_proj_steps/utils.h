@@ -643,7 +643,7 @@ void print_matrix(const std::vector<int8_t> matrix, int n_cols,
                col_sep, elide_sym, w);
 }
 
-constexpr int max_printable_errors = 4096;
+constexpr int max_printable_errors = 32;
 
 template <typename Tout>
 struct error {
@@ -797,16 +797,6 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
   //   matmul_common::print_matrix(CRef, M);
   //   std::cout << std::endl << "Output:" << std::endl;
   //   matmul_common::print_matrix(C, M);
-  //   }
-
-  // Check the first head result
-  //   for (int row = 0; row < 1; row++) {
-  //     for (int col = 0; col < 10; col++) {
-  //       std::cout << "C[" << row << ", " << col
-  //                 << "] = " << C[3 * M * N + row * N + col]
-  //                 << " (expected: " << CRef[3 * M * N + row * N + col] << ")"
-  //                 << std::endl;
-  //     }
   //   }
 
   return n_errors;

@@ -829,12 +829,12 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
   //   }
 
   // Check the first head result
-  for (int row = 0; row < 1; row++) {
-    for (int col = 0; col < 10; col++) {
-      std::cout << "C[" << row << ", " << col
-                << "] = " << C[3 * M * N + row * N + col]
-                << " (expected: " << CRef[3 * M * N + row * N + col] << ")"
-                << std::endl;
+  for (int row = 0; row < 3; row++) {
+    for (int col = 0; col < 5; col++) {
+      std::cout << "C[" << row << ", " << col << "] = " << std::setw(8)
+                << std::setprecision(6) << C[3 * M * N + row * N + col]
+                << " (expected: " << std::setw(8) << std::setprecision(6)
+                << CRef[3 * M * N + row * N + col] << ")" << std::endl;
     }
   }
 

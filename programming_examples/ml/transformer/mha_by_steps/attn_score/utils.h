@@ -485,7 +485,7 @@ void print_matrix(const std::vector<int8_t> matrix, int n_cols,
                col_sep, elide_sym, w);
 }
 
-constexpr int max_printable_errors = 4096;
+constexpr int max_printable_errors = 32;
 
 template <typename Tout>
 struct error {
@@ -645,12 +645,12 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
   //   }
 
   // Check the first head result
-  for (int row = 0; row < 1; row++) {
-    for (int col = 0; col < 10; col++) {
-      std::cout << "C[" << row << ", " << col
-                << "] = " << C[3 * M * N + row * M + col]
-                << " (expected: " << CRef[3 * M * N + row * M + col] << ")"
-                << std::endl;
+  for (int row = 0; row < 3; row++) {
+    for (int col = 0; col < 5; col++) {
+      std::cout << "C[" << row << ", " << col << "] = " << std::setw(8)
+                << std::setprecision(6) << C[3 * M * N + row * M + col]
+                << " (expected: " << std::setw(8) << std::setprecision(6)
+                << CRef[3 * M * N + row * M + col] << ")" << std::endl;
     }
   }
 
