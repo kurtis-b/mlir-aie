@@ -232,7 +232,7 @@ static inline void matmul_vectorized_4x4x8_i16_i32(const int16 *__restrict pA,
                                     s, t, is_b_row_maj>(pA, pB, pC);
 }
 
-//TODO: Unlike the others, this shape has not yet been tested for optimality
+// TODO: Unlike the others, this shape has not yet been tested for optimality
 template <unsigned m, unsigned k, unsigned n>
 static inline void
 matmul_vectorized_4x8x4_bf16_bf16(const bfloat16 *__restrict pA,
@@ -374,61 +374,61 @@ extern "C" {
 #if defined(DIM_M) && defined(DIM_K) && defined(DIM_N)
 #if B_COL_MAJ
 #if (DIM_M == 64) && (DIM_K == 64) && (DIM_N == 64)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 64, 64, 64, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 64, 64, 64, 0)
 #endif
 #if (DIM_M == 16) && (DIM_K == 32) && (DIM_N == 256)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 16, 32, 256, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 32, 256, 0)
 #endif
 #if (DIM_M == 16) && (DIM_K == 256) && (DIM_N == 16)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 16, 256, 16, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 256, 16, 0)
 #endif
 #if (DIM_M == 16) && (DIM_K == 16) && (DIM_N == 128)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 16, 16, 128, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 16, 128, 0)
 #endif
 // Added workloads
 #if (DIM_M == 32) && (DIM_K == 128) && (DIM_N == 64)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 128, 64, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 32, 128, 64, 0)
 #endif
 #if (DIM_M == 32) && (DIM_K == 32) && (DIM_N == 256)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 32, 256, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 32, 32, 256, 0)
 #endif
 #if (DIM_M == 32) && (DIM_K == 256) && (DIM_N == 16)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 256, 16, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 32, 256, 16, 0)
 #endif
 #if (DIM_M == 32) && (DIM_K == 16) && (DIM_N == 256)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 16, 256, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 32, 16, 256, 0)
 #endif
 #if (DIM_M == 16) && (DIM_K == 16) && (DIM_N == 256)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 16, 16, 256, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 16, 256, 0)
 #endif
 #else
 #if (DIM_M == 64) && (DIM_K == 64) && (DIM_N == 64)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 64, 64, 64, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 64, 64, 64, 1)
 #endif
 #if (DIM_M == 16) && (DIM_K == 32) && (DIM_N == 256)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 16, 32, 256, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 32, 256, 1)
 #endif
 #if (DIM_M == 16) && (DIM_K == 256) && (DIM_N == 16)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 16, 256, 16, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 256, 16, 1)
 #endif
 #if (DIM_M == 16) && (DIM_K == 16) && (DIM_N == 128)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 16, 16, 128, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 16, 128, 1)
 #endif
 // Added workloads
 #if (DIM_M == 32) && (DIM_K == 128) && (DIM_N == 64)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 128, 64, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 32, 128, 64, 1)
 #endif
 #if (DIM_M == 32) && (DIM_K == 32) && (DIM_N == 256)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 32, 256, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 32, 32, 256, 1)
 #endif
 #if (DIM_M == 32) && (DIM_K == 256) && (DIM_N == 16)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 256, 16, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 32, 256, 16, 1)
 #endif
 #if (DIM_M == 32) && (DIM_K == 16) && (DIM_N == 256)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 32, 16, 256, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 32, 16, 256, 1)
 #endif
 #if (DIM_M == 16) && (DIM_K == 16) && (DIM_N == 256)
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 4, 16, 16, 256, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 16, 256, 1)
 #endif
 #endif
 #endif
@@ -443,12 +443,12 @@ extern "C" {
         a_in, b_in, c_out);                                                    \
   }
 
-#define matmul_scalar_c_func(ctype_in, mlir_type_in, ctype_out, mlir_type_out,     \
-                             r, s, t, m, k, n, rowmaj)                             \
-  void                                                                             \
-      matmul_scalar_##mlir_type_in##_##mlir_type_out##_##m##_##k##_##n##_##rowmaj( \
-          ctype_in *a_in, ctype_in *b_in, ctype_out *c_out) {                      \
-    matmul_scalar<ctype_in, ctype_out, m, k, n>(a_in, b_in, c_out);                \
+#define matmul_scalar_c_func(ctype_in, mlir_type_in, ctype_out, mlir_type_out, \
+                             r, s, t, m, k, n, rowmaj)                         \
+  void                                                                         \
+  matmul_scalar_##mlir_type_in##_##mlir_type_out##_##m##_##k##_##n##_##rowmaj( \
+      ctype_in *a_in, ctype_in *b_in, ctype_out *c_out) {                      \
+    matmul_scalar<ctype_in, ctype_out, m, k, n>(a_in, b_in, c_out);            \
   }
 
 #define zero_vectorized_c_func(ctype_in, mlir_type_in, ctype_out,              \
