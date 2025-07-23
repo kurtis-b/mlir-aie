@@ -13,7 +13,9 @@ fi
 touch "$output_file"
 echo "design,avg_us,min_us,max_us,M,K,N" > "$output_file"
 
-for dir in mha mha_by_steps/only_attn_steps mha_by_steps/only_proj_steps add_and_norm ffn-1 ffn-2; do
+# Skipping add_and_norm for now because it fails with the Strix
+# for dir in mha mha_by_steps/only_attn_steps mha_by_steps/only_proj_steps add_and_norm ffn-1 ffn-2; do
+for dir in mha mha_by_steps/only_attn_steps mha_by_steps/only_proj_steps ffn-1 ffn-2; do
     if [ -d "$dir" ]; then
         echo "Processing $dir"
         orig_dir=$(pwd)
