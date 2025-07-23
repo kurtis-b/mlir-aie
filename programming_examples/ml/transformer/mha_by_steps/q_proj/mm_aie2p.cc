@@ -235,12 +235,12 @@ static inline void matmul_vectorized_4x4x8_i16_i32(const int16 *__restrict pA,
 // TODO: Unlike the others, this shape has not yet been tested for optimality
 template <unsigned m, unsigned k, unsigned n>
 static inline void
-matmul_vectorized_4x8x4_bf16_bf16(const bfloat16 *__restrict pA,
+matmul_vectorized_4x8x8_bf16_bf16(const bfloat16 *__restrict pA,
                                   const bfloat16 *__restrict pB,
                                   bfloat16 *__restrict pC) {
   constexpr int r = 4;
   constexpr int s = 8;
-  constexpr int t = 4;
+  constexpr int t = 8;
 
   static_assert(m % (2 * r) == 0);
   static_assert(k % s == 0);
@@ -276,7 +276,7 @@ matmul_vectorized_4x8x4_bf16_f32(const bfloat16 *__restrict pA,
                                  float *__restrict pC) {
   constexpr int r = 4;
   constexpr int s = 8;
-  constexpr int t = 4;
+  constexpr int t = 8;
 
   static_assert(m % (2 * r) == 0);
   static_assert(k % s == 0);
