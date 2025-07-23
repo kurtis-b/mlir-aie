@@ -8,22 +8,42 @@ import matplotlib.pyplot as plt
 # First number is row, second number is column
 THEORETICAL_PEAK_BF16_BF16 = {"npu2": 256, "npu": 128} # MACs per cycle
 WORKLOAD_AT_TILE = {
-    "tile2,1": {"type": "GEMM", "size": 64*64*64},
-    "tile2,2": {"type": "GEMM", "size": 16*32*256},
-    "tile2,3": {"type": "GEMM", "size": 64*64*64},
-    "tile2,4": {"type": "GEMM", "size": 16*32*256},
-    "tile3,1": {"type": "GEMM", "size": 64*64*64},
-    "tile3,2": {"type": "Softmax", "size": 16*256},
-    "tile3,3": {"type": "GEMM", "size": 64*64*64},
-    "tile3,4": {"type": "Softmax", "size": 16*256},
-    "tile4,1": {"type": "GEMM", "size": 64*64*64},
-    "tile4,2": {"type": "GEMM", "size": 16*256*16},
-    "tile4,3": 0,
-    "tile4,4": {"type": "GEMM", "size": 16*256*16},
-    "tile5,1": {"type": "GEMM", "size": 64*64*64},
-    "tile5,2": {"type": "GEMM", "size": 16*16*256},
-    "tile5,3": {"type": "Add", "size": 16*256},
-    "tile5,4": {"type": "GEMM", "size": 16*16*256},
+    "npu": {
+        "tile2,1": {"type": "GEMM", "size": 64*64*64},
+        "tile2,2": {"type": "GEMM", "size": 16*32*256},
+        "tile2,3": {"type": "GEMM", "size": 64*64*64},
+        "tile2,4": {"type": "GEMM", "size": 16*32*256},
+        "tile3,1": {"type": "GEMM", "size": 64*64*64},
+        "tile3,2": {"type": "Softmax", "size": 16*256},
+        "tile3,3": {"type": "GEMM", "size": 64*64*64},
+        "tile3,4": {"type": "Softmax", "size": 16*256},
+        "tile4,1": {"type": "GEMM", "size": 64*64*64},
+        "tile4,2": {"type": "GEMM", "size": 16*256*16},
+        "tile4,3": 0,
+        "tile4,4": {"type": "GEMM", "size": 16*256*16},
+        "tile5,1": {"type": "GEMM", "size": 64*64*64},
+        "tile5,2": {"type": "GEMM", "size": 16*16*256},
+        "tile5,3": {"type": "Add", "size": 16*256},
+        "tile5,4": {"type": "GEMM", "size": 16*16*256},
+    },
+    "npu2": {
+        "tile2,0": {"type": "GEMM", "size": 64*64*64},
+        "tile2,1": {"type": "GEMM", "size": 16*32*256},
+        "tile2,2": {"type": "GEMM", "size": 64*64*64},
+        "tile2,3": {"type": "GEMM", "size": 16*32*256},
+        "tile3,0": {"type": "GEMM", "size": 64*64*64},
+        "tile3,1": {"type": "Softmax", "size": 16*256},
+        "tile3,2": {"type": "GEMM", "size": 64*64*64},
+        "tile3,3": {"type": "Softmax", "size": 16*256},
+        "tile4,0": {"type": "GEMM", "size": 64*64*64},
+        "tile4,1": {"type": "GEMM", "size": 16*256*16},
+        "tile4,2": 0,
+        "tile4,3": {"type": "GEMM", "size": 16*256*16},
+        "tile5,0": {"type": "GEMM", "size": 64*64*64},
+        "tile5,1": {"type": "GEMM", "size": 16*16*256},
+        "tile5,2": {"type": "Add", "size": 16*256},
+        "tile5,3": {"type": "GEMM", "size": 16*16*256},
+    }
 }
 
 CLOCK_FREQ = 10**9  # 1 GHz
@@ -65,7 +85,7 @@ def analyse_json_file(filepath, dev):
                             return {}
                     break  # Only need the first process_name
 
-            workload = WORKLOAD_AT_TILE.get(tile_str)
+            workload = WORKLOAD_AT_TILE.get(dev).get(tile_str)
             if workload:
                 logging.info(f"Workload type: {workload['type']}, size: {workload['size']}")
             else:
@@ -133,9 +153,9 @@ def analyse_json_file(filepath, dev):
                 logging.info(f"No compute utilization for {tile_str} as it is not a GEMM workload.")
 
             # Consistency check: max should not be less than avg, min should not be greater than avg
-            if gflops_per_s_max < gflops_per_s_avg:
+            if (gflops_per_s_max - gflops_per_s_avg) < -1e-2:
                 raise ValueError(f"GFLOPs/sec max ({gflops_per_s_max}) is less than avg ({gflops_per_s_avg}) for tile {tile_str} in {filepath}")
-            if gflops_per_s_min > gflops_per_s_avg:
+            if (gflops_per_s_min - gflops_per_s_avg) > 1e-2:
                 raise ValueError(f"GFLOPs/sec min ({gflops_per_s_min}) is greater than avg ({gflops_per_s_avg}) for tile {tile_str} in {filepath}")
 
             performance_data[tile_str] = {
@@ -208,8 +228,8 @@ def main():
                     tile_str = f"(Row {row-2},Col {col-1})"
                     tiles.append(tile_str)
                 else:
-                    # Need to check traces generated for Strix. Haven't done so yet.
-                    raise ValueError(f"Need to add support for device type: {args.dev}")
+                    tile_str = f"(Row {row-2},Col {col})"
+                    tiles.append(tile_str)
             else:
                 tiles.append(tile)
             avg_ops.append(data["gflops_per_s_avg"])
@@ -236,20 +256,20 @@ def main():
     ax.errorbar(
         x, avg_ops,
         yerr=[
-            [avg - minv for avg, minv in zip(avg_ops, min_ops)],
-            [maxv - avg for avg, maxv in zip(avg_ops, max_ops)]
+            [avg - minv if abs(avg - minv) > 1e-8 else 0 for avg, minv in zip(avg_ops, min_ops)],
+            [maxv - avg if abs(maxv - avg) > 1e-8 else 0 for avg, maxv in zip(avg_ops, max_ops)]
         ],
         fmt='o', color='black', label='Min/Max GFLOPs/sec'
     )
 
     # Add workload size/type info to x-tick labels
     new_xticklabels = []
-    for i, (tile, type, size) in enumerate(zip(tiles, types, sizes)):
-        if type == "GEMM":
+    for i, (tile, typ, size) in enumerate(zip(tiles, types, sizes)):
+        if typ == "GEMM":
             text = f"({size / 1e3:.1f}×10$^3$ MACs)"
-        elif type == "Softmax":
+        elif typ == "Softmax":
             text = f"({size:.1f} Exps)"
-        elif type == "Add":
+        elif typ == "Add":
             text = f"({size:.1f} Adds)"
         new_xticklabels.append(f"{tile}\n{text}")
 
@@ -286,8 +306,7 @@ def main():
                     if args.dev == "npu":
                         tile_str = f"(Row {row-2},Col {col-1})"
                     else:
-                        # Need to check traces generated for Strix. Haven't done so yet.
-                        raise ValueError(f"Need to add support for device type: {args.dev}")
+                        tile_str = f"(Row {row-2},Col {col})"
                 else:
                     tile_str = tile
                 util_tiles.append(tile_str)
@@ -336,8 +355,7 @@ def main():
                 if args.dev == "npu":
                     tile_str = f"(Row {row-2},Col {col-1})"
                 else:
-                    # Need to check traces generated for Strix. Haven't done so yet.
-                    raise ValueError(f"Need to add support for device type: {args.dev}")
+                    tile_str = f"(Row {row-2},Col {col})"
             else:
                 tile_str = tile
             kernel_tiles.append(tile_str)
@@ -371,8 +389,8 @@ def main():
     ax.errorbar(
         x, kernel_avg,
         yerr=[
-            [avg - minv for avg, minv in zip(kernel_avg, kernel_min)],
-            [maxv - avg for avg, maxv in zip(kernel_avg, kernel_max)]
+            [avg - minv if abs(avg - minv) > 1e-8 else 0 for avg, minv in zip(kernel_avg, kernel_min)],
+            [maxv - avg if abs(maxv - avg) > 1e-8 else 0 for avg, maxv in zip(kernel_avg, kernel_max)]
         ],
         fmt='o', color='black', label='Min/Max Kernel Time (us)'
     )
