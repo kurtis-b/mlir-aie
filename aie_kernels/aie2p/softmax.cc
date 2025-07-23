@@ -106,10 +106,14 @@ void softmax_2d_bf16(bfloat16 *restrict input_vector,
   for (int i = 0; i < M; i++)
     chess_prepare_for_pipelining chess_loop_range(1, ) {
         float accum_exp_val;
-        auto it_exp_in = aie::cbegin_vector<16>((bfloat16 *)input_vector);
-        auto it_exp_out = aie::begin_vector<16>((bfloat16 *)output_vector);
-        auto it_scale = aie::cbegin_restrict_vector<16>((bfloat16 *)output_vector);
-        auto it_soft_out = aie::begin_restrict_vector<16>((bfloat16 *)output_vector);
+        auto it_exp_in = aie::cbegin_vector<16>((bfloat16 *)input_vector +
+                                              i * row_vector_size);
+        auto it_exp_out = aie::begin_vector<16>((bfloat16 *)output_vector +
+                                              i * row_vector_size);
+        auto it_scale = aie::cbegin_restrict_vector<16>((bfloat16 *)output_vector +
+                                              i * row_vector_size);
+        auto it_soft_out = aie::begin_restrict_vector<16>((bfloat16 *)output_vector +
+                                              i * row_vector_size);
 
         bfloat16 col_sum_inv;
         aie::vector<bfloat16, 16> in_elems, va;
