@@ -310,7 +310,7 @@ def main():
                 else:
                     tile_str = tile
                 util_tiles.append(tile_str)
-                util_values.append(data["compute_utilization"])
+                util_values.append(data["compute_utilization"] * 100)
                 util_colors.append("tab:blue")
                 util_labels.append("GEMM")
                 # Add workload size/type info
@@ -331,7 +331,7 @@ def main():
     ax.set_ylabel("Compute Utilization (/% peak throughput)")
     ax.set_xlabel("Core Location\n(Workload Size and Type)")
     ax.set_title("Compute Utilization Across Tiles for Tiles Running GEMM")
-    ax.set_ylim(0, 1.05)
+    ax.set_ylim(0, 105)
     ax.set_xticks(x)
     ax.set_xticklabels(util_xticklabels, ha='center', fontsize=10.5)
     plt.tight_layout()
