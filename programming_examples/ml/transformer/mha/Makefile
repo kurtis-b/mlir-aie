@@ -58,7 +58,7 @@ endif
 aie2_runtime_dir = ${AIEOPT_DIR}/aie_runtime_lib/AIE2
 
 SKIP_KERNELS=true
-KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -I${kernels_dir} -I${srcdir}/../../../../aie_kernels 
+KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -I${kernels_dir} -I${srcdir}/../../../../aie_kernels 
 
 # Define matmul and softmax dimension lists
 # If these values are changed, make sure to update the corresponding kernel code's
