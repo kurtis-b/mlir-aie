@@ -8,8 +8,9 @@
 # 
 ##===----------------------------------------------------------------------===##
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
-subdir=mha_by_steps/attn_score
-targetname=mha
+subdir=mha
+step?=1
+targetname=mha_${step}
 
 
 # M, K, N, H: final GEMM dimensions
@@ -48,22 +49,24 @@ dtype_in?=bf16
 dtype_out?=bf16
 trace_size?=0
 
-include ${srcdir}/../../makefile-common
+include ${srcdir}/../makefile-common
 
 ifeq ($(devicename),npu2)
-kernels_dir=${srcdir}/../../../../../aie_kernels/aie2p
+kernels_dir=${srcdir}/../../../../aie_kernels/aie2p
 else 
-kernels_dir=${srcdir}/../../../../../aie_kernels/aie2
+kernels_dir=${srcdir}/../../../../aie_kernels/aie2
 endif
 aie2_runtime_dir = ${AIEOPT_DIR}/aie_runtime_lib/AIE2
 
 SKIP_KERNELS=true
-KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -I${kernels_dir} -I${srcdir}/../../../../../aie_kernels 
+KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -I${kernels_dir} -I${srcdir}/../../../../aie_kernels 
 
 # Define matmul and softmax dimension lists
 # If these values are changed, make sure to update the corresponding kernel code's
 # combos(X) and "#if" macros. 
-matmul_dims := 64x64x64 16x32x256
+# matmul_dims := 64x64x64 16x32x256 16x256x16 16x16x256
+# No need for the first kernel since it's for the projection step
+matmul_dims := 16x32x256 16x256x16 16x16x256
 softmax_dims := 16x256
 add_dims := 16x256
 
@@ -85,13 +88,46 @@ $(eval n := $(word 2,${dims}))
 endef
 
 # Have to use Phx div kernel for Strix since there's no source for it in the Strix directory
-div_src := ${srcdir}/../../../../../aie_kernels/aie2/div.cc
-add_src := ${srcdir}/../../../../../aie_kernels/aie2/add.cc
+div_src := ${srcdir}/../../../../aie_kernels/aie2/div.cc
+add_src := ${srcdir}/../../../../aie_kernels/aie2/add.cc
 ifeq ($(devicename),npu2)
 mm_src := ${srcdir}/mm_aie2p.cc
+zero_src := ${srcdir}/zero_aie2p.cc
 else
 mm_src := ${srcdir}/mm_aie2.cc
+zero_src := ${srcdir}/zero_aie2.cc
 endif
+
+build/zero_3d_%.o: ${zero_src}
+	$(call extract_dims_3d)
+	mkdir -p $(@D)
+	@if [ "${step}" -ge "0" ] && [ "$(m)" = "16" ] && [ "$(k)" = "32" ] && [ "$(n)" = "256" ]; then \
+		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
+	elif [ "${step}" -ge "2" ] && [ "$(m)" = "16" ] && [ "$(k)" = "256" ] && [ "$(n)" = "16" ]; then \
+		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
+	elif [ "${step}" -ge "3" ] && [ "$(m)" = "16" ] && [ "$(k)" = "16" ] && [ "$(n)" = "256" ]; then \
+		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
+	else \
+		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=16 -DDIM_N=1 -c $< -o $(@F); \
+	fi
+
+build/zero_2d_softmax_%.o: ${zero_src}
+	$(call extract_dims_2d)
+	mkdir -p $(@D)
+	@if [ "${step}" -ge "1" ] && [ "$(m)" = "16" ] && [ "$(n)" = "256" ]; then \
+		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
+	else \
+		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=16 -DDIM_N=1 -c $< -o $(@F); \
+	fi
+
+build/zero_2d_add_%.o: ${zero_src}
+	$(call extract_dims_2d)
+	mkdir -p $(@D)
+	@if [ "${step}" -ge "4" ] && [ "$(m)" = "16" ] && [ "$(n)" = "256" ]; then \
+		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
+	else \
+		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=16 -DDIM_N=1 -c $< -o $(@F); \
+	fi
 
 build/div_%.o: ${div_src}
 	$(call extract_dims_3d)
@@ -103,31 +139,33 @@ build/mm_%_row_major.o: ${mm_src}
 	mkdir -p $(@D)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
 
-build/mha_mm_%_row_major.o: build/mm_%_row_major.o build/div_%.o
+build/mha_mm_%_row_major.o: build/mm_%_row_major.o build/div_%.o build/zero_3d_%.o
 	mkdir -p $(@D)
 	ar rvs $@ $^
+	nm ${@D}/${@F}
 
 build/mm_%_col_major.o: ${mm_src}
 	$(call extract_dims_3d)
 	mkdir -p $(@D)
-	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DB_COL_MAJ ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DB_COL_MAJ -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n} -c $< -o $(@F)
 
-build/mha_mm_%_col_major.o: build/mm_%_col_major.o build/div_%.o
+build/mha_mm_%_col_major.o: build/mm_%_col_major.o build/div_%.o build/zero_3d_%.o
 	mkdir -p $(@D)
 	ar rvs $@ $^
+	nm ${@D}/${@F}
 
 # Bundle rule for matmul kernels
 matmul_objs_row_m := $(addprefix build/mha_mm_,$(addsuffix _row_major.o,$(matmul_dims)))
 matmul_objs_col_m := $(addprefix build/mha_mm_,$(addsuffix _col_major.o,$(matmul_dims)))
 
 ifeq ($(devicename),npu)
-build/mha_lut_based_ops.o: ${aie2_runtime_dir}/lut_based_ops.cpp
+build/lut_based_ops.o: ${aie2_runtime_dir}/lut_based_ops.cpp
 	mkdir -p ${@D}
 	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} -I. -c $< -o ${@F}
 endif
 
 # Pattern rule for softmax kernels
-build/mha_softmax_%.o: ${kernels_dir}/softmax.cc
+build/softmax_%.o: ${kernels_dir}/softmax.cc
 	$(call extract_dims_2d)
 	@mkdir -p $(@D)
 ifeq ($(devicename),npu)
@@ -138,24 +176,33 @@ endif
 
 # Bundle rule for softmax kernel and lut_based_ops.o if npu
 ifeq ($(devicename),npu)
-build/mha_softmax.o: $(addprefix build/mha_softmax_,$(addsuffix .o,$(softmax_dims))) build/mha_lut_based_ops.o
+build/mha_softmax_%.o: build/softmax_%.o build/lut_based_ops.o build/zero_2d_softmax_%.o
 	ar rvs $@ $+
+	nm ${@D}/${@F}
 else ifeq ($(devicename),npu2)
-build/mha_softmax.o: $(addprefix build/mha_softmax_,$(addsuffix .o,$(softmax_dims)))
+build/mha_softmax_%.o: build/softmax_%.o build/zero_2d_softmax_%.o
 	ar rvs $@ $+
+	nm ${@D}/${@F}
 endif
 
-build/mha_add_%.o: ${add_src}
+# Bundle rule for softmax kernels
+softmax_objs := $(addprefix build/mha_softmax_,$(addsuffix .o,$(softmax_dims)))
+
+build/add_%.o: ${add_src}
 	$(call extract_dims_2d)
 	@mkdir -p $(@D)
 	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F)
+
+build/mha_add_%.o: build/add_%.o build/zero_2d_add_%.o
+	ar rvs $@ $^
+	nm ${@D}/${@F}
 
 # Bundle rule for add kernel
 add_objs := $(addprefix build/mha_add_,$(addsuffix .o,$(add_dims)))
 
 # Convenience targets to build all kernels
 .PHONY: build_kernels
-build_kernels: $(matmul_objs_row_m) $(matmul_objs_col_m)
+build_kernels: $(softmax_objs) $(add_objs) $(matmul_objs_row_m) $(matmul_objs_col_m)
 
 .PHONY: run_verif
 run_verif: ${targetname}.exe ${xclbin_target}
@@ -170,4 +217,4 @@ run_no_verif: ${targetname}.exe ${xclbin_target}
 trace_no_verif: ${targetname}.exe ${trace_xclbin_target} ${insts_target}
 	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
 	${powershell} ./$< -x ${trace_xclbin_target} -i ${insts_target} -k MLIR_AIE -M $M -K $K -N $N -H $H ${runargs_no_verif} -t ${trace_size}
-	${srcdir}/../../../../utils/parse_trace.py --input trace.txt --mlir ${trace_mlir_target} --output trace_${target_suffix}.json
+	${srcdir}/../../../utils/parse_trace.py --input trace.txt --mlir ${trace_mlir_target} --output trace_${target_suffix}.json
