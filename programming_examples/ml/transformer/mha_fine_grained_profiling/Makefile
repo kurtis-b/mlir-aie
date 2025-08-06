@@ -9,7 +9,7 @@
 ##===----------------------------------------------------------------------===##
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 subdir=mha
-step?=1
+step?=0
 targetname=mha_${step}
 
 
@@ -101,45 +101,17 @@ endif
 build/zero_3d_%.o: ${zero_src}
 	$(call extract_dims_3d)
 	mkdir -p $(@D)
-	@if [ "${step}" -ge "0" ] && [ "$(m)" = "16" ] && [ "$(k)" = "32" ] && [ "$(n)" = "256" ]; then \
-		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
-	elif [ "${step}" -ge "2" ] && [ "$(m)" = "16" ] && [ "$(k)" = "256" ] && [ "$(n)" = "16" ]; then \
-		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
-	elif [ "${step}" -ge "3" ] && [ "$(m)" = "16" ] && [ "$(k)" = "16" ] && [ "$(n)" = "256" ]; then \
-		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
-	else \
-		if [ "$(devicename)" = "npu" ]; then \
-			cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=16 -DDIM_N=1 -c $< -o $(@F); \
-		else \
-			cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=32 -DDIM_N=1 -c $< -o $(@F); \
-		fi; \
-	fi
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F)
 
 build/zero_2d_softmax_%.o: ${zero_src}
 	$(call extract_dims_2d)
 	mkdir -p $(@D)
-	@if [ "${step}" -ge "1" ] && [ "$(m)" = "16" ] && [ "$(n)" = "256" ]; then \
-		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
-	else \
-		if [ "$(devicename)" = "npu" ]; then \
-			cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=16 -DDIM_N=1 -c $< -o $(@F); \
-		else \
-			cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=32 -DDIM_N=1 -c $< -o $(@F); \
-		fi; \
-	fi
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F)
 
 build/zero_2d_add_%.o: ${zero_src}
 	$(call extract_dims_2d)
 	mkdir -p $(@D)
-	@if [ "${step}" -ge "4" ] && [ "$(m)" = "16" ] && [ "$(n)" = "256" ]; then \
-		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
-	else \
-		if [ "$(devicename)" = "npu" ]; then \
-			cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=16 -DDIM_N=1 -c $< -o $(@F); \
-		else \
-			cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=32 -DDIM_N=1 -c $< -o $(@F); \
-		fi; \
-	fi
+	cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F)
 
 build/div_%.o: ${div_src}
 	$(call extract_dims_3d)
