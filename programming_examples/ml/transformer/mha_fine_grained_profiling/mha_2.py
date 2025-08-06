@@ -115,14 +115,7 @@ def my_mha(
     needed in this design, 4 columns of the AIE array are required. This means
     a full encoder can't be run on the Phoenix, i.e. the FFN and layer norm
     layers can't be run on the array. 
-    This design isolates a step in the Attention part of MHA. This is done by
-    only running the zero function on subsequent steps, which 
-    means most of the run time will be the load, compute, and store at the 
-    relevant tile. The step isolated here will be the QK^T step. The subsequent
-    steps will have objectfifos of size =
-    16 (256 bits for 1 store per cycle / 16 bits per element),
-    which when double buffered means the run time of the isolated step will 
-    make up most of the run time.
+    This design isolates a step in the Attention part of MHA.
     """
     head_dim = N // H
 
@@ -249,12 +242,6 @@ def my_mha(
     attn_score_v_mm_dims = (softmax_dims[0], softmax_dims[1], 16)
     output_mm_dims = (attn_score_v_mm_dims[0], attn_score_v_mm_dims[2], 256)
     mha_dims = [attn_score_mm_dims, attn_score_v_mm_dims, output_mm_dims]
-    if dev == "npu2" and dtype_in_str == "bf16":
-        min_elems = 32
-    elif dev == "npu" and dtype_in_str == "bf16":
-        min_elems = 16
-    else:
-        raise AssertionError("Unsupported device and dtype combination for minimum elements")
 
     # r, s, t are the dimensions required by the microkernel MAC instructions.
     mac_dims = microkernel_mac_dim_map[dev][dtype_in_str]
@@ -352,7 +339,6 @@ def my_mha(
         softmax_l1_ty = np.ndarray[(softmax_dims[0] * softmax_dims[1],), np.dtype[dtype_out]]
         attn_score_v_l1_ty = np.ndarray[(attn_score_v_mm_dims[0] * attn_score_v_mm_dims[2],), np.dtype[dtype_out]]
         output_l1_ty = np.ndarray[(output_mm_dims[0] * output_mm_dims[2],), np.dtype[dtype_out]]
-        min_l1_ty = np.ndarray[(min_elems,), np.dtype[dtype_out]] # Used for the subsequent steps to minimize time added from irrelevant tiles
 
         # AIE Core Function declarations
         # Last part of the name is whether the right matrix is row major
@@ -379,10 +365,6 @@ def my_mha(
         #     f"div_2d_bf16", 
         #     inputs=[attn_score_l1_ty, attn_score_l1_ty]
         # )
-        # zero_softmax_attn = external_func(
-        #     f"zero_{dtype_out_str}_{softmax_dims[0]}_{softmax_dims[1]}",
-        #     inputs=[softmax_l1_ty]
-        # )
         # softmax_attn_score = external_func(
         #     f"softmax_{dtype_in_str}",
         #     inputs=[softmax_l1_ty, softmax_l1_ty],
@@ -395,26 +377,14 @@ def my_mha(
             matmul_vectorized_func_name + f"_{attn_score_v_mm_dims[0]}_{attn_score_v_mm_dims[1]}_{attn_score_v_mm_dims[2]}_{row_major}",
             inputs=[softmax_l1_ty, v_l1_ty_in, attn_score_v_l1_ty],
         )
-        # zero_output = external_func(
-        #     f"zero_{dtype_out_str}_{output_mm_dims[0]}_{output_mm_dims[2]}",
-        #     inputs=[output_l1_ty]
-        # )
         # matmul_output = external_func(
         #     matmul_vectorized_func_name + f"_{output_mm_dims[0]}_{output_mm_dims[1]}_{output_mm_dims[2]}_{row_major}",
         #     inputs=[attn_score_v_l1_ty, Wo_l1_ty_in, output_l1_ty],
-        # )
-        # zero_at_add = external_func(
-        #     f"zero_{dtype_out_str}_{output_mm_dims[0]}_{output_mm_dims[2]}",
-        #     inputs=[output_l1_ty]
         # )
         # add_output = external_func(
         #     f"eltwise_add_{dtype_out_str}_vector",
         #     inputs=[output_l1_ty, output_l1_ty, output_l1_ty],
         # )
-        zero_min = external_func(
-            f"zero_{dtype_out_str}_{min_elems}_1",
-            inputs=[min_l1_ty]
-        )
 
         if dev == "npu":
             tiles = [[tile(col + 0, row) for col in range(0, n_aie_cols)] for row in range(0, 6)] # 1st to 4th columns
@@ -726,7 +696,7 @@ def my_mha(
             core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], 
             core_tiles[l1_fuse_mtx_in[ACCUM_STR][L1_POS_STR][0][ROW_IDX]][l1_fuse_mtx_in[ACCUM_STR][L1_POS_STR][0][COL_IDX]], 
             fifo_depth, 
-            min_l1_ty,
+            output_l1_ty,
         ) for l1_pos in l1_fuse_mtx_in[ATTN_SCORE_V_STR][L1_POS_STR]]
         # L1 to L2 data movement
         output_l1l2_fifos = object_fifo(
@@ -734,7 +704,7 @@ def my_mha(
             core_tiles[l1_fuse_mtx_in[ACCUM_STR][L1_POS_STR][0][ROW_IDX]][l1_fuse_mtx_in[ACCUM_STR][L1_POS_STR][0][COL_IDX]],
             mem_tiles[l3_fuse_mtx_out[OUTPUT_STR][L2_POS_STR]],
             fifo_depth,
-            min_l1_ty,
+            output_l1_ty,
         )
         # L2 to L3 data movement
         output_l2l3_fifos = object_fifo(
@@ -742,13 +712,13 @@ def my_mha(
             mem_tiles[l3_fuse_mtx_out[OUTPUT_STR][L2_POS_STR]], 
             shim_tiles[l3_fuse_mtx_out[OUTPUT_STR][L3_POS_STR]], 
             fifo_depth, 
-            min_l1_ty,
-            # [
-            #     (output_mm_dims[0] // r, r * output_mm_dims[2]),
-            #     (r, t),
-            #     (output_mm_dims[2] // t, r * t),
-            #     (t, 1),
-            # ],
+            output_l1_ty,
+            [
+                (output_mm_dims[0] // r, r * output_mm_dims[2]),
+                (r, t),
+                (output_mm_dims[2] // t, r * t),
+                (t, 1),
+            ],
         )
         # L1 to L3 links
         object_fifo_link(output_l1l2_fifos, output_l2l3_fifos)
@@ -815,14 +785,9 @@ def my_mha(
         for head, l1_pos in enumerate(left_mtx_in[Q_STR][L1_POS_STR]):
             @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_mm_dims[0]}x{attn_score_mm_dims[1]}x{attn_score_mm_dims[2]}_col_major.o", stack_size=0xD00)
             def core_body():
-                # Produce the data right away since we don't want the execution here to affect the run time
-                # Doing it this way since we still need to consume the data from shim
                 for _ in range_(0xFFFFFFFF):
-                    elem_attn_score = attn_score_l1l2_fifos[head].acquire(ObjectFifoPort.Produce, 1)
-                    zero_attn_score(elem_attn_score)
-                    attn_score_l1l2_fifos[head].release(ObjectFifoPort.Produce, 1)
                     for _ in range_(H // len(left_mtx_in[Q_STR][L1_POS_STR])):
-                        # elem_attn_score = attn_score_l1l2_fifos[head].acquire(ObjectFifoPort.Produce, 1)
+                        elem_attn_score = attn_score_l1l2_fifos[head].acquire(ObjectFifoPort.Produce, 1)
                         # zero_attn_score(elem_attn_score)
                         for _ in range_(head_dim // attn_score_mm_dims[1]):
                             elem_in_q = q_l2l1_fifos[head].acquire(ObjectFifoPort.Consume, 1)
@@ -831,18 +796,15 @@ def my_mha(
                             q_l2l1_fifos[head].release(ObjectFifoPort.Consume, 1)
                             k_l2l1_fifos[head].release(ObjectFifoPort.Consume, 1)
                         # div_projs(elem_attn_score, elem_attn_score)
-                        # attn_score_l1l2_fifos[head].release(ObjectFifoPort.Produce, 1)
+                        attn_score_l1l2_fifos[head].release(ObjectFifoPort.Produce, 1)
 
         # Apply softmax to attention scores
         for head, l1_pos in enumerate(l1_fuse_mtx_in[ATTN_SCORE_STR][L1_POS_STR]):
             @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_softmax_{softmax_dims[0]}x{softmax_dims[1]}.o", stack_size=0xD00) # Make sure to use the bundled obj file, not the softmax-only obj file
             def core_body():
-                # Produce the data right away since we don't want the execution here to affect the run time
                 for _ in range_(0xFFFFFFFF):
-                    # for _ in range_(H // len(l1_fuse_mtx_in[ATTN_SCORE_STR][L1_POS_STR])):
-                    for _ in range_(1):
+                    for _ in range_(H // len(l1_fuse_mtx_in[ATTN_SCORE_STR][L1_POS_STR])):
                         elem_attn_score = softmax_l1l2_fifos[head].acquire(ObjectFifoPort.Produce, 1)
-                        zero_attn_score(elem_attn_score)
                         elem_o1 = attn_score_l2l1_fifos[head].acquire(ObjectFifoPort.Consume, 1)
                         # softmax_attn_score(elem_o1, elem_attn_score)
                         attn_score_l2l1_fifos[head].release(ObjectFifoPort.Consume, 1)
@@ -852,12 +814,10 @@ def my_mha(
         for head, l1_pos in enumerate(l1_fuse_mtx_in[SOFTMAX_STR][L1_POS_STR]):
             @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_v_mm_dims[0]}x{attn_score_v_mm_dims[1]}x{attn_score_v_mm_dims[2]}_row_major.o", stack_size=0xD00)
             def core_body():
-                # This core is what we're measuring the runtime of. We consume the previous step's output only once
-                # so that the data movement within the previous core doesn't affect the measured runtime.
+                # This core is what we're measuring the runtime of
                 for _ in range_(0xFFFFFFFF):
-                    elem_in_softmax = softmax_l2l1_fifos[head].acquire(ObjectFifoPort.Consume, 1) 
                     for _ in range_(H // len(l1_fuse_mtx_in[SOFTMAX_STR][L1_POS_STR])):
-                        # elem_in_softmax = softmax_l2l1_fifos[head].acquire(ObjectFifoPort.Consume, 1)
+                        elem_in_softmax = softmax_l2l1_fifos[head].acquire(ObjectFifoPort.Consume, 1)
                         for _ in range_(head_dim // attn_score_v_mm_dims[2]):
                             elem_attn_score_v = attn_score_v_l1l1_fifos[head].acquire(ObjectFifoPort.Produce, 1)
                             zero_attn_score_v(elem_attn_score_v)
@@ -865,23 +825,19 @@ def my_mha(
                             matmul_attn_score_v(elem_in_softmax, elem_in_v, elem_attn_score_v)
                             v_l2l1_fifos[head].release(ObjectFifoPort.Consume, 1)
                             attn_score_v_l1l1_fifos[head].release(ObjectFifoPort.Produce, 1)
-                        # softmax_l2l1_fifos[head].release(ObjectFifoPort.Consume, 1)
-                    softmax_l2l1_fifos[head].release(ObjectFifoPort.Consume, 1)
+                        softmax_l2l1_fifos[head].release(ObjectFifoPort.Consume, 1)
 
         for head, l1_pos in enumerate(l1_fuse_mtx_in[ATTN_SCORE_V_STR][L1_POS_STR]):
             @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{output_mm_dims[0]}x{output_mm_dims[1]}x{output_mm_dims[2]}_row_major.o", stack_size=0xD00)
             def core_body():
-                # We want this core to wait for each tile to be ready so that the measured runtime reflects
-                # the time it takes for the previous step to finish
-                # Since there's no compute done here, it shouldn't affect the runtime
                 for _ in range_(0xFFFFFFFF):
                     elem_output = output_l1l1_fifos[head].acquire(ObjectFifoPort.Produce, 1)
-                    zero_min(elem_output)
+                    # zero_attn_score(elem_output)
                     for _ in range_(K // output_mm_dims[1] // len(l1_fuse_mtx_in[ATTN_SCORE_V_STR][L1_POS_STR])):
                         elem_in_o3 = attn_score_v_l1l1_fifos[head].acquire(ObjectFifoPort.Consume, 1)
-                    #     elem_in_wo = Wo_l2l1_fifos[head].acquire(ObjectFifoPort.Consume, 1)
-                    #     matmul_output(elem_in_o3, elem_in_wo, elem_output)
-                    #     Wo_l2l1_fifos[head].release(ObjectFifoPort.Consume, 1)
+                        # elem_in_wo = Wo_l2l1_fifos[head].acquire(ObjectFifoPort.Consume, 1)
+                        # matmul_output(elem_in_o3, elem_in_wo, elem_output)
+                        # Wo_l2l1_fifos[head].release(ObjectFifoPort.Consume, 1)
                         attn_score_v_l1l1_fifos[head].release(ObjectFifoPort.Consume, 1)
                     output_l1l1_fifos[head].release(ObjectFifoPort.Produce, 1)
 
@@ -889,7 +845,6 @@ def my_mha(
         def core_body():
             for _ in range_(0xFFFFFFFF):
                 elem_output = output_l1l2_fifos.acquire(ObjectFifoPort.Produce, 1)
-                zero_min(elem_output)
                 elem_in_1 = output_l1l1_fifos[0].acquire(ObjectFifoPort.Consume, 1)
                 elem_in_2 = output_l1l1_fifos[1].acquire(ObjectFifoPort.Consume, 1)
                 # add_output(elem_in_1, elem_in_2, elem_output)
@@ -1025,21 +980,13 @@ def my_mha(
                         # dma_wait(q_l3l2_fifos, k_l3l2_fifos, v_l3l2_fifos, Wo_l3l2_fifos)
                         dma_wait(q_l3l2_fifos, k_l3l2_fifos, v_l3l2_fifos)
 
-                    # npu_dma_memcpy_nd(
-                    #     metadata=output_l2l3_fifos,
-                    #     bd_id=4,
-                    #     mem=C,
-                    #     offsets=[0, 0, 0, 3 * M * N + row_offset * N + col_offset],
-                    #     sizes=[1, 1, output_mm_dims[0], output_mm_dims[2]],
-                    #     strides=[0, 0, N, 1],
-                    # )
                     npu_dma_memcpy_nd(
                         metadata=output_l2l3_fifos,
                         bd_id=4,
                         mem=C,
                         offsets=[0, 0, 0, 3 * M * N + row_offset * N + col_offset],
-                        sizes=[1, 1, 1, min_elems],
-                        strides=[0, 0, 0, 1],
+                        sizes=[1, 1, output_mm_dims[0], output_mm_dims[2]],
+                        strides=[0, 0, N, 1],
                     )
                     dma_wait(output_l2l3_fifos)
 
