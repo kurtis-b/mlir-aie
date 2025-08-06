@@ -27,6 +27,7 @@ else
     echo "All designs passed verification."
     echo "Running designs without verification to gather execution times..."
     "$BASEDIR/scripts/run_no_verify_designs.sh" "$BASEDIR/$results_dir"
+    "$BASEDIR/scripts/run_fine_grained_profiling.sh" "$BASEDIR/$results_dir"
     # Skipping add_and_norm for now because it fails with the Strix
     # for dir in "$BASEDIR/mha" "$BASEDIR/mha_by_steps/only_attn_steps" "$BASEDIR/mha_by_steps/only_proj_steps" "$BASEDIR/add_and_norm" "$BASEDIR/ffn-1" "$BASEDIR/ffn-2"; do
     for dir in "$BASEDIR/mha" "$BASEDIR/mha_by_steps/only_attn_steps" "$BASEDIR/mha_by_steps/only_proj_steps" "$BASEDIR/ffn-1" "$BASEDIR/ffn-2"; do
@@ -48,6 +49,7 @@ else
     done
     echo "Generating plot for execution times..."
     python3 "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "$BASEDIR/$results_dir/run_no_verify_exec_times.csv" --task exec-times --output_dir "$BASEDIR/$results_dir" >> "$BASEDIR/$results_dir/run_analysis.txt" 2>&1
+    python3 "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "$BASEDIR/$results_dir/fine_grained_profiling_times.csv" --task fine-grained --output_dir "$BASEDIR/$results_dir" >> "$BASEDIR/$results_dir/run_analysis.txt" 2>&1
 fi
 
 echo "Generating trace analysis..."

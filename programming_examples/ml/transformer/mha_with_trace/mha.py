@@ -963,7 +963,6 @@ def my_mha(
                                 offsets=[0, 0, 0, row_offset * N + head_offset],
                                 sizes=[head_dim // attn_score_mm_dims[1], len(left_mtx_in[Q_STR][L1_POS_STR]), attn_score_mm_dims[0], attn_score_mm_dims[1]],
                                 strides=[attn_score_mm_dims[1], head_dim, N, 1],
-                                issue_token=True,
                             )
 
                             npu_dma_memcpy_nd(
@@ -973,7 +972,6 @@ def my_mha(
                                 offsets=[0, 0, 0, M * N + head_offset],
                                 sizes=[head_dim // attn_score_mm_dims[1], len(right_mtx_in[K_STR][L1_POS_STR]), attn_score_mm_dims[2], attn_score_mm_dims[1]],
                                 strides=[attn_score_mm_dims[1], head_dim, N, 1],
-                                issue_token=True,
                             )
 
                             # Since the full row of the attention score is calculated, we don't need to tile the rows for V
@@ -984,7 +982,6 @@ def my_mha(
                                 offsets=[0, 0, 0, 2 * M * N + head_offset],
                                 sizes=[head_dim // attn_score_v_mm_dims[2], len(right_mtx_in[V_STR][L1_POS_STR]), attn_score_v_mm_dims[1], attn_score_v_mm_dims[2]],
                                 strides=[attn_score_v_mm_dims[2], head_dim, N, 1],
-                                issue_token=True,
                             )
 
                             npu_dma_memcpy_nd(
@@ -996,7 +993,7 @@ def my_mha(
                                 strides=[output_mm_dims[1] * N, head_dim * N, N, 1],
                                 issue_token=True,
                             )
-                            dma_wait(q_l3l2_fifos, k_l3l2_fifos, v_l3l2_fifos, Wo_l3l2_fifos)
+                            dma_wait(Wo_l3l2_fifos)
 
                         npu_dma_memcpy_nd(
                             metadata=output_l2l3_fifos,
