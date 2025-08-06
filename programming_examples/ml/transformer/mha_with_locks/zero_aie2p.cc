@@ -71,6 +71,9 @@ extern "C" {
 #if (DIM_M == 16) && (DIM_N == 1)
 #define combos(X) X(bfloat16, bf16, 16, 1)
 #endif
+#if (DIM_M == 32) && (DIM_N == 1)
+#define combos(X) X(bfloat16, bf16, 32, 1)
+#endif
 #endif
 #endif
 
