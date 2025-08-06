@@ -249,6 +249,12 @@ def my_mha(
     attn_score_v_mm_dims = (softmax_dims[0], softmax_dims[1], 16)
     output_mm_dims = (attn_score_v_mm_dims[0], attn_score_v_mm_dims[2], 256)
     mha_dims = [attn_score_mm_dims, attn_score_v_mm_dims, output_mm_dims]
+    if dev == "npu2" and dtype_in_str == "bf16":
+        min_elems = 32
+    elif dev == "npu" and dtype_in_str == "bf16":
+        min_elems = 16
+    else:
+        raise AssertionError("Unsupported device and dtype combination for minimum elements")
 
     # r, s, t are the dimensions required by the microkernel MAC instructions.
     mac_dims = microkernel_mac_dim_map[dev][dtype_in_str]
@@ -346,7 +352,7 @@ def my_mha(
         softmax_l1_ty = np.ndarray[(softmax_dims[0] * softmax_dims[1],), np.dtype[dtype_out]]
         attn_score_v_l1_ty = np.ndarray[(attn_score_v_mm_dims[0] * attn_score_v_mm_dims[2],), np.dtype[dtype_out]]
         output_l1_ty = np.ndarray[(output_mm_dims[0] * output_mm_dims[2],), np.dtype[dtype_out]]
-        min_l1_ty = np.ndarray[(16,), np.dtype[dtype_out]] # Used for the subsequent steps to minimize time added from irrelevant tiles
+        min_l1_ty = np.ndarray[(min_elems,), np.dtype[dtype_out]] # Used for the subsequent steps to minimize time added from irrelevant tiles
 
         # AIE Core Function declarations
         # Last part of the name is whether the right matrix is row major
@@ -406,7 +412,7 @@ def my_mha(
         #     inputs=[output_l1_ty, output_l1_ty, output_l1_ty],
         # )
         zero_min = external_func(
-            f"zero_{dtype_out_str}_16_1",
+            f"zero_{dtype_out_str}_{min_elems}_1",
             inputs=[min_l1_ty]
         )
 
@@ -1035,7 +1041,7 @@ def my_mha(
                         bd_id=4,
                         mem=C,
                         offsets=[0, 0, 0, 3 * M * N + row_offset * N + col_offset],
-                        sizes=[1, 1, 1, 16],
+                        sizes=[1, 1, 1, min_elems],
                         strides=[0, 0, 0, 1],
                     )
                     dma_wait(output_l2l3_fifos)
