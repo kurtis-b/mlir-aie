@@ -760,11 +760,65 @@ def analyse_execution_times(csv_file, output_dir):
     plt.close()
 
 
+def analyse_fine_grained_times(csv_file, output_dir):
+    """
+    Analyse execution times from a CSV file.
+    This function reads the CSV file containing avg, min, and max execution times,
+    and generates plots of avg, min, and max execution times for each design.
+    Args:
+        csv_file (str): Path to the CSV file containing execution times.
+        output_dir (str): Directory to save the plots.
+    Returns:
+        None
+    Raises:
+        FileNotFoundError: If the CSV file does not exist.
+        Exception: For any other unexpected errors.
+    """
+    if not os.path.isfile(csv_file):
+        raise FileNotFoundError(f"CSV file {csv_file} does not exist.")
+
+    step = []
+    avg_times = []
+    min_times = []
+    max_times = []
+
+    with open(csv_file, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            step.append(int(row['step']))
+            avg_times.append(float(row['avg_us']))
+            min_times.append(float(row['min_us']))
+            max_times.append(float(row['max_us']))
+
+    # Sort the data by avg_times (lowest to highest)
+    sorted_data = sorted(zip(avg_times, min_times, max_times, step))
+    avg_times, min_times, max_times, step = map(list, zip(*sorted_data))
+    fig, ax = plt.subplots(figsize=(max(8, len(step) * 1.2), 5))
+    x = range(len(step))
+    ax.bar(x, avg_times, color='skyblue', label='Avg (us)')
+    ax.errorbar(x, avg_times, yerr=[ [avg - min for avg, min in zip(avg_times, min_times)],
+                                        [max - avg for avg, max in zip(avg_times, max_times)] ],
+                fmt='o', color='orange', label='Min/Max (us)')
+    ax.set_xticks(x)
+    # ax.set_xticklabels(step, rotation=45, ha='right')
+    ax.set_xticklabels(step, ha='center')
+    ax.set_ylabel('Execution Time (us)')
+    ax.set_xlabel('Step')
+    ax.set_title('Execution Times Across Steps')
+    ax.legend(loc='upper left')
+
+    plt.tight_layout()
+    plot_file = os.path.join(output_dir, "fine_grained_times.png")
+    plt.savefig(plot_file)
+    logging.getLogger("analyse_tiling").info(f"Saved execution times plot to {plot_file}")
+    plt.close()
+    
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyse tiling and memory usage for MHA.")
     parser.add_argument("--dev", type=str, choices=["npu", "npu2"], required=True, help="Type of device: 'npu' or 'npu2'.")
     parser.add_argument("--input_file", type=str, required=True, help="Path to the input file to parse.")
-    parser.add_argument("--task", type=str, choices=["mem-util", "comp-dist", "comp-util", "loop-iters", "exec-times"], required=True, help="Task to perform: 'mem-util', 'comp-dist', 'comp-util', 'loop-iters', or 'exec-times'.")
+    parser.add_argument("--task", type=str, choices=["mem-util", "comp-dist", "comp-util", "loop-iters", "exec-times", "fine-grained"], required=True, help="Task to perform: 'mem-util', 'comp-dist', 'comp-util', 'loop-iters', 'exec-times', or 'fine-grained'.")
     parser.add_argument("--output_dir", type=str, default="results", help="Directory to write output files to.")
     args = parser.parse_args()
 
@@ -777,3 +831,5 @@ if __name__ == "__main__":
         analyse_loop_iterations(args.input_file, args.output_dir)
     elif task == "exec-times":
         analyse_execution_times(args.input_file, args.output_dir)
+    elif task == "fine-grained":
+        analyse_fine_grained_times(args.input_file, args.output_dir)

@@ -9,7 +9,7 @@
 ##===----------------------------------------------------------------------===##
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 subdir=mha
-step?=0
+step?=3
 targetname=mha_${step}
 
 
