@@ -108,7 +108,11 @@ build/zero_3d_%.o: ${zero_src}
 	elif [ "${step}" -ge "3" ] && [ "$(m)" = "16" ] && [ "$(k)" = "16" ] && [ "$(n)" = "256" ]; then \
 		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
 	else \
-		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=16 -DDIM_N=1 -c $< -o $(@F); \
+		if [ "$(devicename)" = "npu" ]; then \
+			cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=16 -DDIM_N=1 -c $< -o $(@F); \
+		else \
+			cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=32 -DDIM_N=1 -c $< -o $(@F); \
+		fi; \
 	fi
 
 build/zero_2d_softmax_%.o: ${zero_src}
@@ -117,7 +121,11 @@ build/zero_2d_softmax_%.o: ${zero_src}
 	@if [ "${step}" -ge "1" ] && [ "$(m)" = "16" ] && [ "$(n)" = "256" ]; then \
 		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
 	else \
-		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=16 -DDIM_N=1 -c $< -o $(@F); \
+		if [ "$(devicename)" = "npu" ]; then \
+			cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=16 -DDIM_N=1 -c $< -o $(@F); \
+		else \
+			cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=32 -DDIM_N=1 -c $< -o $(@F); \
+		fi; \
 	fi
 
 build/zero_2d_add_%.o: ${zero_src}
@@ -126,7 +134,11 @@ build/zero_2d_add_%.o: ${zero_src}
 	@if [ "${step}" -ge "4" ] && [ "$(m)" = "16" ] && [ "$(n)" = "256" ]; then \
 		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=${m} -DDIM_N=${n} -c $< -o $(@F); \
 	else \
-		cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=16 -DDIM_N=1 -c $< -o $(@F); \
+		if [ "$(devicename)" = "npu" ]; then \
+			cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=16 -DDIM_N=1 -c $< -o $(@F); \
+		else \
+			cd $(@D) && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -DDIM_M=32 -DDIM_N=1 -c $< -o $(@F); \
+		fi; \
 	fi
 
 build/div_%.o: ${div_src}
