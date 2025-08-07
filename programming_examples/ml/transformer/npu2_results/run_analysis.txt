@@ -1,0 +1,880 @@
+INFO: Tile memory usage excluding stack (in bytes and kB):
+INFO: Tile (0, 1): 114688 bytes (112.00 kB)
+INFO:   Buffer: k_L2L3_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: k_L2L3_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: q_L2L3_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: q_L2L3_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wq_L3L2_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wq_L3L2_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: X_L3L2_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L3L2_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (0, 2): 49152 bytes (48.00 kB)
+INFO:   Buffer: q_L1L2_0_0_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: q_L1L2_0_0_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wq_L2L1_0_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wq_L2L1_0_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (0, 3): 49152 bytes (48.00 kB)
+INFO:   Buffer: q_L1L2_1_0_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: q_L1L2_1_0_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wq_L2L1_1_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wq_L2L1_1_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (0, 4): 49152 bytes (48.00 kB)
+INFO:   Buffer: k_L1L2_2_0_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: k_L1L2_2_0_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wk_L2L1_2_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wk_L2L1_2_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_2_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_2_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (0, 5): 49152 bytes (48.00 kB)
+INFO:   Buffer: k_L1L2_3_0_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: k_L1L2_3_0_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wk_L2L1_3_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wk_L2L1_3_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_3_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_3_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (1, 1): 69632 bytes (68.00 kB)
+INFO:   Buffer: softmax_L1L2_1_3_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L1L2_1_3_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L1L2_1_1_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L1L2_1_1_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L1L2_0_3_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L1L2_0_3_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L1L2_0_1_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L1L2_0_1_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: q_L3L2_cons_buff_0, 1024 x bf16 = 2048 bytes
+INFO:   Buffer: q_L3L2_cons_buff_1, 1024 x bf16 = 2048 bytes
+INFO: Tile (1, 2): 51200 bytes (50.00 kB)
+INFO:   Buffer: attn_score_L1L2_0_1_1_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L1L2_0_1_1_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: k_L2L1_0_1_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: k_L2L1_0_1_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: q_L2L1_0_1_cons_buff_0, 512 x bf16 = 1024 bytes
+INFO:   Buffer: q_L2L1_0_1_cons_buff_1, 512 x bf16 = 1024 bytes
+INFO: Tile (1, 3): 32768 bytes (32.00 kB)
+INFO:   Buffer: softmax_L1L2_1_1_1_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L1L2_1_1_1_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L2L1_1_1_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L2L1_1_1_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (1, 4): 33792 bytes (33.00 kB)
+INFO:   Buffer: attn_score_v_L1L1_2_1_3_1_buff_0, 256 x bf16 = 512 bytes
+INFO:   Buffer: attn_score_v_L1L1_2_1_3_1_buff_1, 256 x bf16 = 512 bytes
+INFO:   Buffer: softmax_L2L1_1_2_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L2L1_1_2_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L2L1_2_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L2L1_2_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (1, 5): 32768 bytes (32.00 kB)
+INFO:   Buffer: output_L1L1_3_1_3_2_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: output_L1L1_3_1_3_2_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wo_L2L1_3_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wo_L2L1_3_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (2, 1): 98304 bytes (96.00 kB)
+INFO:   Buffer: Wo_L3L2_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wo_L3L2_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wv_L3L2_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wv_L3L2_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wk_L3L2_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wk_L3L2_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO: Tile (2, 2): 49152 bytes (48.00 kB)
+INFO:   Buffer: v_L1L2_0_2_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L1L2_0_2_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wv_L2L1_0_2_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wv_L2L1_0_2_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_4_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_4_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (2, 3): 49152 bytes (48.00 kB)
+INFO:   Buffer: v_L1L2_1_2_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L1L2_1_2_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wv_L2L1_1_2_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wv_L2L1_1_2_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_5_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_5_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (2, 5): 32768 bytes (32.00 kB)
+INFO:   Buffer: output_L1L2_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: output_L1L2_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: output_L1L1_3_3_3_2_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: output_L1L1_3_3_3_2_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (3, 1): 147456 bytes (144.00 kB)
+INFO:   Buffer: output_L1L2_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: output_L1L2_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L3L2_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: v_L3L2_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: k_L3L2_cons_buff_0, 16384 x bf16 = 32768 bytes
+INFO:   Buffer: k_L3L2_cons_buff_1, 16384 x bf16 = 32768 bytes
+INFO:   Buffer: v_L2L3_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: v_L2L3_buff_1, 8192 x bf16 = 16384 bytes
+INFO: Tile (3, 2): 51200 bytes (50.00 kB)
+INFO:   Buffer: attn_score_L1L2_0_3_1_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L1L2_0_3_1_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: k_L2L1_0_3_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: k_L2L1_0_3_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: q_L2L1_0_3_cons_buff_0, 512 x bf16 = 1024 bytes
+INFO:   Buffer: q_L2L1_0_3_cons_buff_1, 512 x bf16 = 1024 bytes
+INFO: Tile (3, 3): 32768 bytes (32.00 kB)
+INFO:   Buffer: softmax_L1L2_1_3_1_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L1L2_1_3_1_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L2L1_1_1_3_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L2L1_1_1_3_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (3, 4): 33792 bytes (33.00 kB)
+INFO:   Buffer: attn_score_v_L1L1_2_3_3_3_buff_0, 256 x bf16 = 512 bytes
+INFO:   Buffer: attn_score_v_L1L1_2_3_3_3_buff_1, 256 x bf16 = 512 bytes
+INFO:   Buffer: softmax_L2L1_1_2_3_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L2L1_1_2_3_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L2L1_2_3_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L2L1_2_3_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (3, 5): 16384 bytes (16.00 kB)
+INFO:   Buffer: Wo_L2L1_3_3_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wo_L2L1_3_3_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Saved L2 memory utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/mha/l2_mem_utilization.png
+INFO: Saved L1 memory utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/mha/l1_mem_utilization.png
+INFO: 
+Tile loop upper bounds and matmul info:
+INFO: Tile (0, 2): 72 iterations of 64x64x64, matmul dtype=bf16, MACs=18874368
+INFO: Tile (0, 3): 72 iterations of 64x64x64, matmul dtype=bf16, MACs=18874368
+INFO: Tile (0, 4): 72 iterations of 64x64x64, matmul dtype=bf16, MACs=18874368
+INFO: Tile (0, 5): 72 iterations of 64x64x64, matmul dtype=bf16, MACs=18874368
+INFO: Tile (1, 2): 12 iterations of 16x32x256, matmul dtype=bf16, MACs=1572864
+INFO: Tile (1, 3): 6 iterations
+INFO: Tile (1, 4): 24 iterations of 16x256x16, matmul dtype=bf16, MACs=1572864
+INFO: Tile (1, 5): 24 iterations of 16x16x256, matmul dtype=bf16, MACs=1572864
+INFO: Tile (2, 2): 72 iterations of 64x64x64, matmul dtype=bf16, MACs=18874368
+INFO: Tile (2, 3): 72 iterations of 64x64x64, matmul dtype=bf16, MACs=18874368
+INFO: Tile (2, 5): 1 iterations
+INFO: Tile (3, 2): 12 iterations of 16x32x256, matmul dtype=bf16, MACs=1572864
+INFO: Tile (3, 3): 6 iterations
+INFO: Tile (3, 4): 24 iterations of 16x256x16, matmul dtype=bf16, MACs=1572864
+INFO: Tile (3, 5): 24 iterations of 16x16x256, matmul dtype=bf16, MACs=1572864
+INFO: Tiles with 'matmul' and 'macs_one_iter': ['(0, 2)', '(0, 3)', '(0, 4)', '(0, 5)', '(2, 2)', '(2, 3)', '(1, 2)', '(3, 2)', '(1, 4)', '(3, 4)', '(1, 5)', '(3, 5)']
+INFO: Tiles without 'matmul' and/or 'macs_one_iter': ['(1, 3)', '(3, 3)', '(2, 5)']
+INFO: Tile (0, 2): normalized macs_one_iter = 1.000
+INFO: Tile (0, 3): normalized macs_one_iter = 1.000
+INFO: Tile (0, 4): normalized macs_one_iter = 1.000
+INFO: Tile (0, 5): normalized macs_one_iter = 1.000
+INFO: Tile (1, 2): normalized macs_one_iter = 0.500
+INFO: Tile (1, 4): normalized macs_one_iter = 0.250
+INFO: Tile (1, 5): normalized macs_one_iter = 0.250
+INFO: Tile (2, 2): normalized macs_one_iter = 1.000
+INFO: Tile (2, 3): normalized macs_one_iter = 1.000
+INFO: Tile (3, 2): normalized macs_one_iter = 0.500
+INFO: Tile (3, 4): normalized macs_one_iter = 0.250
+INFO: Tile (3, 5): normalized macs_one_iter = 0.250
+INFO: Saved computation utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/mha/comp_distribution.png
+INFO: Found objectfifo X_L3L2: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wq_L3L2: num_elem=8192, dtype=bf16
+INFO: Found objectfifo Wk_L3L2: num_elem=8192, dtype=bf16
+INFO: Found objectfifo Wv_L3L2: num_elem=8192, dtype=bf16
+INFO: Found objectfifo X_L2L1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wq_L2L1_0_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wq_L2L1_1_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wk_L2L1_2_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wk_L2L1_3_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wv_L2L1_0_2: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wv_L2L1_1_2: num_elem=4096, dtype=bf16
+INFO: Found objectfifo q_L1L2_0_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo q_L1L2_1_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo k_L1L2_2_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo k_L1L2_3_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo v_L1L2_0_2: num_elem=4096, dtype=bf16
+INFO: Found objectfifo v_L1L2_1_2: num_elem=4096, dtype=bf16
+INFO: Found objectfifo q_L2L3: num_elem=8192, dtype=bf16
+INFO: Found objectfifo k_L2L3: num_elem=8192, dtype=bf16
+INFO: Found objectfifo v_L2L3: num_elem=8192, dtype=bf16
+INFO: Found objectfifo q_L3L2: num_elem=1024, dtype=bf16
+INFO: Found objectfifo k_L3L2: num_elem=16384, dtype=bf16
+INFO: Found objectfifo v_L3L2: num_elem=8192, dtype=bf16
+INFO: Found objectfifo Wo_L3L2: num_elem=8192, dtype=bf16
+INFO: Found objectfifo q_L2L1_0_1: num_elem=512, dtype=bf16
+INFO: Found objectfifo q_L2L1_0_3: num_elem=512, dtype=bf16
+INFO: Found objectfifo k_L2L1_0_1: num_elem=8192, dtype=bf16
+INFO: Found objectfifo k_L2L1_0_3: num_elem=8192, dtype=bf16
+INFO: Found objectfifo v_L2L1_2_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo v_L2L1_2_3: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wo_L2L1_3_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wo_L2L1_3_3: num_elem=4096, dtype=bf16
+INFO: Found objectfifo attn_score_L1L2_0_1_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo attn_score_L1L2_0_3_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo attn_score_L2L1_1_1_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo attn_score_L2L1_1_1_3: num_elem=4096, dtype=bf16
+INFO: Found objectfifo softmax_L1L2_1_1_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo softmax_L1L2_1_3_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo softmax_L2L1_1_2_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo softmax_L2L1_1_2_3: num_elem=4096, dtype=bf16
+INFO: Found objectfifo output_L1L2: num_elem=4096, dtype=bf16
+INFO: Found objectfifo output_L2L3: num_elem=4096, dtype=bf16
+INFO: 
+Metadata counts and shapes:
+INFO: 
+Metadata symbol: X_L3L2
+INFO:   Total tiles passed: 288
+INFO:   Unique shapes and counts:
+INFO:     Shape: (6, 12, 64, 64), Count: 4
+INFO: 
+Metadata symbol: Wq_L3L2
+INFO:   Total tiles passed: 288
+INFO:   Unique shapes and counts:
+INFO:     Shape: (12, 2, 64, 64), Count: 24
+INFO: 
+Metadata symbol: Wk_L3L2
+INFO:   Total tiles passed: 288
+INFO:   Unique shapes and counts:
+INFO:     Shape: (12, 2, 64, 64), Count: 24
+INFO: 
+Metadata symbol: Wv_L3L2
+INFO:   Total tiles passed: 288
+INFO:   Unique shapes and counts:
+INFO:     Shape: (12, 2, 64, 64), Count: 24
+INFO: 
+Metadata symbol: q_L2L3
+INFO:   Total tiles passed: 24
+INFO:   Unique shapes and counts:
+INFO:     Shape: (1, 2, 64, 64), Count: 24
+INFO: 
+Metadata symbol: k_L2L3
+INFO:   Total tiles passed: 24
+INFO:   Unique shapes and counts:
+INFO:     Shape: (1, 2, 64, 64), Count: 24
+INFO: 
+Metadata symbol: v_L2L3
+INFO:   Total tiles passed: 24
+INFO:   Unique shapes and counts:
+INFO:     Shape: (1, 2, 64, 64), Count: 24
+INFO: 
+Metadata symbol: q_L3L2
+INFO:   Total tiles passed: 576
+INFO:   Unique shapes and counts:
+INFO:     Shape: (2, 2, 16, 32), Count: 288
+INFO: 
+Metadata symbol: k_L3L2
+INFO:   Total tiles passed: 576
+INFO:   Unique shapes and counts:
+INFO:     Shape: (2, 2, 256, 32), Count: 288
+INFO: 
+Metadata symbol: v_L3L2
+INFO:   Total tiles passed: 1152
+INFO:   Unique shapes and counts:
+INFO:     Shape: (4, 2, 256, 16), Count: 288
+INFO: 
+Metadata symbol: Wo_L3L2
+INFO:   Total tiles passed: 1152
+INFO:   Unique shapes and counts:
+INFO:     Shape: (4, 2, 16, 256), Count: 288
+INFO: 
+Metadata symbol: output_L2L3
+INFO:   Total tiles passed: 48
+INFO:   Unique shapes and counts:
+INFO:     Shape: (1, 1, 16, 256), Count: 48
+/scratch/cubansil/mlir-aie/programming_examples/ml/transformer/scripts/run_analysis.py:494: UserWarning: set_ticklabels() should only be used with a fixed number of ticks, i.e. after set_ticks() or using a FixedLocator.
+  ax1.set_xticklabels(symbol_names, rotation=45, ha='right')
+INFO: Saved L3 tiling plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/mha/l3_tiling.png
+INFO: Found MHA output directory, analyzing workloads...
+INFO: Tile 0,0 workload: GEMM with size 262144 and num_tiles 288, total MACs: 75497472
+INFO: Tile 1,0 workload: GEMM with size 262144 and num_tiles 288, total MACs: 75497472
+INFO: Tile 2,0 workload: GEMM with size 262144 and num_tiles 288, total MACs: 75497472
+INFO: Tile 3,0 workload: GEMM with size 262144 and num_tiles 288, total MACs: 75497472
+INFO: Tile 0,2 workload: GEMM with size 262144 and num_tiles 288, total MACs: 75497472
+INFO: Tile 1,2 workload: GEMM with size 262144 and num_tiles 288, total MACs: 75497472
+INFO: Tile 0,1 workload: GEMM with size 131072 and num_tiles 576, total MACs: 75497472
+INFO: Tile 0,3 workload: GEMM with size 131072 and num_tiles 576, total MACs: 75497472
+INFO: Tile 2,1 workload: GEMM with size 65536 and num_tiles 1152, total MACs: 75497472
+INFO: Tile 2,3 workload: GEMM with size 65536 and num_tiles 1152, total MACs: 75497472
+INFO: Tile 3,1 workload: GEMM with size 65536 and num_tiles 1152, total MACs: 75497472
+INFO: Tile 3,3 workload: GEMM with size 65536 and num_tiles 1152, total MACs: 75497472
+INFO: Tile 1,1 workload: Softmax with size 4096 and num_exps 288.0, total Exps: 1179648.0
+INFO: Tile 1,3 workload: Softmax with size 4096 and num_exps 288.0, total Exps: 1179648.0
+INFO: Tile 3,2 workload: Add with size 4096 and num_adds 48.0, total Adds: 196608.0
+INFO: Saved tile workload operations plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/mha/tile_workload_ops.png
+INFO: Tile memory usage excluding stack (in bytes and kB):
+INFO: Tile (1, 1): 69632 bytes (68.00 kB)
+INFO:   Buffer: softmax_L1L2_1_3_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L1L2_1_3_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L1L2_1_1_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L1L2_1_1_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L1L2_0_3_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L1L2_0_3_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L1L2_0_1_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L1L2_0_1_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: q_L3L2_cons_buff_0, 1024 x bf16 = 2048 bytes
+INFO:   Buffer: q_L3L2_cons_buff_1, 1024 x bf16 = 2048 bytes
+INFO: Tile (1, 2): 51200 bytes (50.00 kB)
+INFO:   Buffer: attn_score_L1L2_0_1_1_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L1L2_0_1_1_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: k_L2L1_0_1_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: k_L2L1_0_1_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: q_L2L1_0_1_cons_buff_0, 512 x bf16 = 1024 bytes
+INFO:   Buffer: q_L2L1_0_1_cons_buff_1, 512 x bf16 = 1024 bytes
+INFO: Tile (1, 3): 32768 bytes (32.00 kB)
+INFO:   Buffer: softmax_L1L2_1_1_1_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L1L2_1_1_1_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L2L1_1_1_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L2L1_1_1_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (1, 4): 33792 bytes (33.00 kB)
+INFO:   Buffer: attn_score_v_L1L1_2_1_3_1_buff_0, 256 x bf16 = 512 bytes
+INFO:   Buffer: attn_score_v_L1L1_2_1_3_1_buff_1, 256 x bf16 = 512 bytes
+INFO:   Buffer: softmax_L2L1_1_2_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L2L1_1_2_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L2L1_2_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L2L1_2_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (1, 5): 32768 bytes (32.00 kB)
+INFO:   Buffer: output_L1L1_3_1_3_2_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: output_L1L1_3_1_3_2_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wo_L2L1_3_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wo_L2L1_3_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (2, 1): 32768 bytes (32.00 kB)
+INFO:   Buffer: Wo_L3L2_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wo_L3L2_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO: Tile (2, 5): 32768 bytes (32.00 kB)
+INFO:   Buffer: output_L1L2_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: output_L1L2_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: output_L1L1_3_3_3_2_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: output_L1L1_3_3_3_2_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (3, 1): 114688 bytes (112.00 kB)
+INFO:   Buffer: output_L1L2_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: output_L1L2_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L3L2_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: v_L3L2_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: k_L3L2_cons_buff_0, 16384 x bf16 = 32768 bytes
+INFO:   Buffer: k_L3L2_cons_buff_1, 16384 x bf16 = 32768 bytes
+INFO: Tile (3, 2): 51200 bytes (50.00 kB)
+INFO:   Buffer: attn_score_L1L2_0_3_1_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L1L2_0_3_1_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: k_L2L1_0_3_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: k_L2L1_0_3_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: q_L2L1_0_3_cons_buff_0, 512 x bf16 = 1024 bytes
+INFO:   Buffer: q_L2L1_0_3_cons_buff_1, 512 x bf16 = 1024 bytes
+INFO: Tile (3, 3): 32768 bytes (32.00 kB)
+INFO:   Buffer: softmax_L1L2_1_3_1_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L1L2_1_3_1_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L2L1_1_1_3_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: attn_score_L2L1_1_1_3_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (3, 4): 33792 bytes (33.00 kB)
+INFO:   Buffer: attn_score_v_L1L1_2_3_3_3_buff_0, 256 x bf16 = 512 bytes
+INFO:   Buffer: attn_score_v_L1L1_2_3_3_3_buff_1, 256 x bf16 = 512 bytes
+INFO:   Buffer: softmax_L2L1_1_2_3_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: softmax_L2L1_1_2_3_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L2L1_2_3_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L2L1_2_3_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (3, 5): 16384 bytes (16.00 kB)
+INFO:   Buffer: Wo_L2L1_3_3_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wo_L2L1_3_3_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Saved L2 memory utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/only_attn_steps/l2_mem_utilization.png
+INFO: Saved L1 memory utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/only_attn_steps/l1_mem_utilization.png
+INFO: 
+Tile loop upper bounds and matmul info:
+INFO: Tile (1, 2): 12 iterations of 16x32x256, matmul dtype=bf16, MACs=1572864
+INFO: Tile (1, 3): 6 iterations
+INFO: Tile (1, 4): 24 iterations of 16x256x16, matmul dtype=bf16, MACs=1572864
+INFO: Tile (1, 5): 24 iterations of 16x16x256, matmul dtype=bf16, MACs=1572864
+INFO: Tile (2, 5): 1 iterations
+INFO: Tile (3, 2): 12 iterations of 16x32x256, matmul dtype=bf16, MACs=1572864
+INFO: Tile (3, 3): 6 iterations
+INFO: Tile (3, 4): 24 iterations of 16x256x16, matmul dtype=bf16, MACs=1572864
+INFO: Tile (3, 5): 24 iterations of 16x16x256, matmul dtype=bf16, MACs=1572864
+INFO: Tiles with 'matmul' and 'macs_one_iter': ['(1, 2)', '(3, 2)', '(1, 4)', '(3, 4)', '(1, 5)', '(3, 5)']
+INFO: Tiles without 'matmul' and/or 'macs_one_iter': ['(1, 3)', '(3, 3)', '(2, 5)']
+INFO: Tile (1, 2): normalized macs_one_iter = 1.000
+INFO: Tile (1, 4): normalized macs_one_iter = 0.500
+INFO: Tile (1, 5): normalized macs_one_iter = 0.500
+INFO: Tile (3, 2): normalized macs_one_iter = 1.000
+INFO: Tile (3, 4): normalized macs_one_iter = 0.500
+INFO: Tile (3, 5): normalized macs_one_iter = 0.500
+INFO: Saved computation utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/only_attn_steps/comp_distribution.png
+INFO: Found objectfifo q_L3L2: num_elem=1024, dtype=bf16
+INFO: Found objectfifo k_L3L2: num_elem=16384, dtype=bf16
+INFO: Found objectfifo v_L3L2: num_elem=8192, dtype=bf16
+INFO: Found objectfifo Wo_L3L2: num_elem=8192, dtype=bf16
+INFO: Found objectfifo q_L2L1_0_1: num_elem=512, dtype=bf16
+INFO: Found objectfifo q_L2L1_0_3: num_elem=512, dtype=bf16
+INFO: Found objectfifo k_L2L1_0_1: num_elem=8192, dtype=bf16
+INFO: Found objectfifo k_L2L1_0_3: num_elem=8192, dtype=bf16
+INFO: Found objectfifo v_L2L1_2_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo v_L2L1_2_3: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wo_L2L1_3_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wo_L2L1_3_3: num_elem=4096, dtype=bf16
+INFO: Found objectfifo attn_score_L1L2_0_1_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo attn_score_L1L2_0_3_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo attn_score_L2L1_1_1_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo attn_score_L2L1_1_1_3: num_elem=4096, dtype=bf16
+INFO: Found objectfifo softmax_L1L2_1_1_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo softmax_L1L2_1_3_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo softmax_L2L1_1_2_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo softmax_L2L1_1_2_3: num_elem=4096, dtype=bf16
+INFO: Found objectfifo output_L1L2: num_elem=4096, dtype=bf16
+INFO: Found objectfifo output_L2L3: num_elem=4096, dtype=bf16
+INFO: 
+Metadata counts and shapes:
+INFO: 
+Metadata symbol: q_L3L2
+INFO:   Total tiles passed: 576
+INFO:   Unique shapes and counts:
+INFO:     Shape: (2, 2, 16, 32), Count: 288
+INFO: 
+Metadata symbol: k_L3L2
+INFO:   Total tiles passed: 576
+INFO:   Unique shapes and counts:
+INFO:     Shape: (2, 2, 256, 32), Count: 288
+INFO: 
+Metadata symbol: v_L3L2
+INFO:   Total tiles passed: 1152
+INFO:   Unique shapes and counts:
+INFO:     Shape: (4, 2, 256, 16), Count: 288
+INFO: 
+Metadata symbol: Wo_L3L2
+INFO:   Total tiles passed: 1152
+INFO:   Unique shapes and counts:
+INFO:     Shape: (4, 2, 16, 256), Count: 288
+INFO: 
+Metadata symbol: output_L2L3
+INFO:   Total tiles passed: 48
+INFO:   Unique shapes and counts:
+INFO:     Shape: (1, 1, 16, 256), Count: 48
+/scratch/cubansil/mlir-aie/programming_examples/ml/transformer/scripts/run_analysis.py:494: UserWarning: set_ticklabels() should only be used with a fixed number of ticks, i.e. after set_ticks() or using a FixedLocator.
+  ax1.set_xticklabels(symbol_names, rotation=45, ha='right')
+INFO: Saved L3 tiling plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/only_attn_steps/l3_tiling.png
+INFO: Not in MHA output directory, skipping workload analysis.
+INFO: Tile memory usage excluding stack (in bytes and kB):
+INFO: Tile (0, 1): 114688 bytes (112.00 kB)
+INFO:   Buffer: k_L2L3_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: k_L2L3_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: q_L2L3_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: q_L2L3_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wq_L3L2_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wq_L3L2_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: X_L3L2_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L3L2_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (0, 2): 49152 bytes (48.00 kB)
+INFO:   Buffer: q_L1L2_0_0_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: q_L1L2_0_0_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wq_L2L1_0_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wq_L2L1_0_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (0, 3): 49152 bytes (48.00 kB)
+INFO:   Buffer: q_L1L2_1_0_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: q_L1L2_1_0_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wq_L2L1_1_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wq_L2L1_1_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (0, 4): 49152 bytes (48.00 kB)
+INFO:   Buffer: k_L1L2_2_0_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: k_L1L2_2_0_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wk_L2L1_2_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wk_L2L1_2_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_2_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_2_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (0, 5): 49152 bytes (48.00 kB)
+INFO:   Buffer: k_L1L2_3_0_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: k_L1L2_3_0_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wk_L2L1_3_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wk_L2L1_3_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_3_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_3_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (2, 1): 65536 bytes (64.00 kB)
+INFO:   Buffer: Wv_L3L2_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wv_L3L2_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wk_L3L2_cons_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: Wk_L3L2_cons_buff_1, 8192 x bf16 = 16384 bytes
+INFO: Tile (2, 2): 49152 bytes (48.00 kB)
+INFO:   Buffer: v_L1L2_0_2_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L1L2_0_2_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wv_L2L1_0_2_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wv_L2L1_0_2_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_4_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_4_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (2, 3): 49152 bytes (48.00 kB)
+INFO:   Buffer: v_L1L2_1_2_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: v_L1L2_1_2_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wv_L2L1_1_2_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: Wv_L2L1_1_2_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_5_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: X_L2L1_5_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (3, 1): 32768 bytes (32.00 kB)
+INFO:   Buffer: v_L2L3_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: v_L2L3_buff_1, 8192 x bf16 = 16384 bytes
+INFO: Saved L2 memory utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/only_proj_steps/l2_mem_utilization.png
+INFO: Saved L1 memory utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/only_proj_steps/l1_mem_utilization.png
+INFO: 
+Tile loop upper bounds and matmul info:
+INFO: Tile (0, 2): 72 iterations of 64x64x64, matmul dtype=bf16, MACs=18874368
+INFO: Tile (0, 3): 72 iterations of 64x64x64, matmul dtype=bf16, MACs=18874368
+INFO: Tile (0, 4): 72 iterations of 64x64x64, matmul dtype=bf16, MACs=18874368
+INFO: Tile (0, 5): 72 iterations of 64x64x64, matmul dtype=bf16, MACs=18874368
+INFO: Tile (2, 2): 72 iterations of 64x64x64, matmul dtype=bf16, MACs=18874368
+INFO: Tile (2, 3): 72 iterations of 64x64x64, matmul dtype=bf16, MACs=18874368
+INFO: Tiles with 'matmul' and 'macs_one_iter': ['(0, 2)', '(0, 3)', '(0, 4)', '(0, 5)', '(2, 2)', '(2, 3)']
+INFO: Tiles without 'matmul' and/or 'macs_one_iter': []
+INFO: Tile (0, 2): normalized macs_one_iter = 1.000
+INFO: Tile (0, 3): normalized macs_one_iter = 1.000
+INFO: Tile (0, 4): normalized macs_one_iter = 1.000
+INFO: Tile (0, 5): normalized macs_one_iter = 1.000
+INFO: Tile (2, 2): normalized macs_one_iter = 1.000
+INFO: Tile (2, 3): normalized macs_one_iter = 1.000
+INFO: Saved computation utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/only_proj_steps/comp_distribution.png
+INFO: Found objectfifo X_L3L2: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wq_L3L2: num_elem=8192, dtype=bf16
+INFO: Found objectfifo Wk_L3L2: num_elem=8192, dtype=bf16
+INFO: Found objectfifo Wv_L3L2: num_elem=8192, dtype=bf16
+INFO: Found objectfifo X_L2L1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wq_L2L1_0_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wq_L2L1_1_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wk_L2L1_2_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wk_L2L1_3_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wv_L2L1_0_2: num_elem=4096, dtype=bf16
+INFO: Found objectfifo Wv_L2L1_1_2: num_elem=4096, dtype=bf16
+INFO: Found objectfifo q_L1L2_0_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo q_L1L2_1_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo k_L1L2_2_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo k_L1L2_3_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo v_L1L2_0_2: num_elem=4096, dtype=bf16
+INFO: Found objectfifo v_L1L2_1_2: num_elem=4096, dtype=bf16
+INFO: Found objectfifo q_L2L3: num_elem=8192, dtype=bf16
+INFO: Found objectfifo k_L2L3: num_elem=8192, dtype=bf16
+INFO: Found objectfifo v_L2L3: num_elem=8192, dtype=bf16
+INFO: 
+Metadata counts and shapes:
+INFO: 
+Metadata symbol: X_L3L2
+INFO:   Total tiles passed: 288
+INFO:   Unique shapes and counts:
+INFO:     Shape: (6, 12, 64, 64), Count: 4
+INFO: 
+Metadata symbol: Wq_L3L2
+INFO:   Total tiles passed: 288
+INFO:   Unique shapes and counts:
+INFO:     Shape: (12, 2, 64, 64), Count: 24
+INFO: 
+Metadata symbol: Wk_L3L2
+INFO:   Total tiles passed: 288
+INFO:   Unique shapes and counts:
+INFO:     Shape: (12, 2, 64, 64), Count: 24
+INFO: 
+Metadata symbol: Wv_L3L2
+INFO:   Total tiles passed: 288
+INFO:   Unique shapes and counts:
+INFO:     Shape: (12, 2, 64, 64), Count: 24
+INFO: 
+Metadata symbol: q_L2L3
+INFO:   Total tiles passed: 24
+INFO:   Unique shapes and counts:
+INFO:     Shape: (1, 2, 64, 64), Count: 24
+INFO: 
+Metadata symbol: k_L2L3
+INFO:   Total tiles passed: 24
+INFO:   Unique shapes and counts:
+INFO:     Shape: (1, 2, 64, 64), Count: 24
+INFO: 
+Metadata symbol: v_L2L3
+INFO:   Total tiles passed: 24
+INFO:   Unique shapes and counts:
+INFO:     Shape: (1, 2, 64, 64), Count: 24
+/scratch/cubansil/mlir-aie/programming_examples/ml/transformer/scripts/run_analysis.py:494: UserWarning: set_ticklabels() should only be used with a fixed number of ticks, i.e. after set_ticks() or using a FixedLocator.
+  ax1.set_xticklabels(symbol_names, rotation=45, ha='right')
+INFO: Saved L3 tiling plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/only_proj_steps/l3_tiling.png
+INFO: Not in MHA output directory, skipping workload analysis.
+INFO: Tile memory usage excluding stack (in bytes and kB):
+INFO: Tile (3, 1): 65536 bytes (64.00 kB)
+INFO:   Buffer: C_L2L3_0_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: C_L2L3_0_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: B_L3L2_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: B_L3L2_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: A_L3L2_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: A_L3L2_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (3, 2): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_0_0_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_0_0_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_0_0_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_0_0_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_0_0_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_0_0_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (3, 3): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_0_1_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_0_1_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_0_1_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_0_1_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_1_0_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_1_0_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (3, 4): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_0_2_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_0_2_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_0_2_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_0_2_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_2_0_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_2_0_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (3, 5): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_0_3_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_0_3_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_0_3_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_0_3_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_3_0_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_3_0_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (4, 1): 65536 bytes (64.00 kB)
+INFO:   Buffer: C_L2L3_1_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: C_L2L3_1_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: B_L3L2_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: B_L3L2_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: A_L3L2_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: A_L3L2_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (4, 2): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_1_0_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_1_0_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_1_0_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_1_0_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_0_1_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_0_1_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (4, 3): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_1_1_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_1_1_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_1_1_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_1_1_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_1_1_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_1_1_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (4, 4): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_1_2_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_1_2_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_1_2_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_1_2_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_2_1_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_2_1_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (4, 5): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_1_3_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_1_3_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_1_3_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_1_3_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_3_1_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_3_1_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Saved L2 memory utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/ffn-1/l2_mem_utilization.png
+INFO: Saved L1 memory utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/ffn-1/l1_mem_utilization.png
+INFO: 
+Tile loop upper bounds and matmul info:
+INFO: Tile (3, 2): 576 iterations
+INFO: Tile (3, 3): 576 iterations
+INFO: Tile (3, 4): 576 iterations
+INFO: Tile (3, 5): 576 iterations
+INFO: Tile (4, 2): 576 iterations
+INFO: Tile (4, 3): 576 iterations
+INFO: Tile (4, 4): 576 iterations
+INFO: Tile (4, 5): 576 iterations
+INFO: Tiles with 'matmul' and 'macs_one_iter': []
+INFO: Tiles without 'matmul' and/or 'macs_one_iter': ['(3, 2)', '(4, 2)', '(3, 3)', '(4, 3)', '(3, 4)', '(4, 4)', '(3, 5)', '(4, 5)']
+INFO: No tiles with matmul found for computation utilization plot.
+INFO: Found objectfifo A_L3L2_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo A_L3L2_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo A_L2L1_0: num_elem=2048, dtype=bf16
+INFO: Found objectfifo A_L2L1_1: num_elem=2048, dtype=bf16
+INFO: Found objectfifo A_L2L1_2: num_elem=2048, dtype=bf16
+INFO: Found objectfifo A_L2L1_3: num_elem=2048, dtype=bf16
+INFO: Found objectfifo B_L3L2_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo B_L2L1_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo B_L3L2_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo B_L2L1_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo C_L1L2_0_0: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L1L2_0_1: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L1L2_0_2: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L1L2_0_3: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L2L3_0: num_elem=8192, dtype=bf16
+INFO: Found objectfifo C_L1L2_1_0: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L1L2_1_1: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L1L2_1_2: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L1L2_1_3: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L2L3_1: num_elem=8192, dtype=bf16
+INFO: Found metadata symbol: C_L2L3_0
+INFO: Found sizes: <size = 2, stride = 393216>, <size = 24, stride = 128>, <size = 128, stride = 3072>, <size = 64, stride = 1> for metadata symbol: C_L2L3_0
+INFO: Found metadata symbol: A_L3L2_0
+INFO: Found sizes: <size = 24, stride = 0>, <size = 12, stride = 64>, <size = 64, stride = 768>, <size = 64, stride = 1> for metadata symbol: A_L3L2_0
+INFO: Found metadata symbol: B_L3L2_0
+INFO: Found sizes: <size = 1, stride = 0>, <size = 24, stride = 128>, <size = 768, stride = 3072>, <size = 64, stride = 1> for metadata symbol: B_L3L2_0
+INFO: Found metadata symbol: A_L3L2_0
+INFO: Found sizes: <size = 24, stride = 0>, <size = 12, stride = 64>, <size = 64, stride = 768>, <size = 64, stride = 1> for metadata symbol: A_L3L2_0
+INFO: Found metadata symbol: B_L3L2_0
+INFO: Found sizes: <size = 1, stride = 0>, <size = 24, stride = 128>, <size = 768, stride = 3072>, <size = 64, stride = 1> for metadata symbol: B_L3L2_0
+INFO: Found metadata symbol: C_L2L3_1
+INFO: Found sizes: <size = 2, stride = 393216>, <size = 24, stride = 128>, <size = 128, stride = 3072>, <size = 64, stride = 1> for metadata symbol: C_L2L3_1
+INFO: Found metadata symbol: A_L3L2_1
+INFO: Found sizes: <size = 24, stride = 0>, <size = 12, stride = 64>, <size = 64, stride = 768>, <size = 64, stride = 1> for metadata symbol: A_L3L2_1
+INFO: Found metadata symbol: B_L3L2_1
+INFO: Found sizes: <size = 1, stride = 0>, <size = 24, stride = 128>, <size = 768, stride = 3072>, <size = 64, stride = 1> for metadata symbol: B_L3L2_1
+INFO: Found metadata symbol: A_L3L2_1
+INFO: Found sizes: <size = 24, stride = 0>, <size = 12, stride = 64>, <size = 64, stride = 768>, <size = 64, stride = 1> for metadata symbol: A_L3L2_1
+INFO: Found metadata symbol: B_L3L2_1
+INFO: Found sizes: <size = 1, stride = 0>, <size = 24, stride = 128>, <size = 768, stride = 3072>, <size = 64, stride = 1> for metadata symbol: B_L3L2_1
+INFO: 
+Metadata counts and shapes:
+INFO: 
+Metadata symbol: C_L2L3_0
+INFO:   Total tiles passed: 48
+INFO:   Unique shapes and counts:
+INFO:     Shape: (2, 24, 128, 64), Count: 1
+INFO: 
+Metadata symbol: A_L3L2_0
+INFO:   Total tiles passed: 576
+INFO:   Unique shapes and counts:
+INFO:     Shape: (24, 12, 64, 64), Count: 2
+INFO: 
+Metadata symbol: B_L3L2_0
+INFO:   Total tiles passed: 576
+INFO:   Unique shapes and counts:
+INFO:     Shape: (1, 24, 768, 64), Count: 2
+INFO: 
+Metadata symbol: C_L2L3_1
+INFO:   Total tiles passed: 48
+INFO:   Unique shapes and counts:
+INFO:     Shape: (2, 24, 128, 64), Count: 1
+INFO: 
+Metadata symbol: A_L3L2_1
+INFO:   Total tiles passed: 576
+INFO:   Unique shapes and counts:
+INFO:     Shape: (24, 12, 64, 64), Count: 2
+INFO: 
+Metadata symbol: B_L3L2_1
+INFO:   Total tiles passed: 576
+INFO:   Unique shapes and counts:
+INFO:     Shape: (1, 24, 768, 64), Count: 2
+/scratch/cubansil/mlir-aie/programming_examples/ml/transformer/scripts/run_analysis.py:494: UserWarning: set_ticklabels() should only be used with a fixed number of ticks, i.e. after set_ticks() or using a FixedLocator.
+  ax1.set_xticklabels(symbol_names, rotation=45, ha='right')
+INFO: Saved L3 tiling plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/ffn-1/l3_tiling.png
+INFO: Not in MHA output directory, skipping workload analysis.
+INFO: Tile memory usage excluding stack (in bytes and kB):
+INFO: Tile (5, 1): 65536 bytes (64.00 kB)
+INFO:   Buffer: C_L2L3_0_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: C_L2L3_0_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: B_L3L2_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: B_L3L2_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: A_L3L2_0_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: A_L3L2_0_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (5, 2): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_0_0_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_0_0_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_0_0_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_0_0_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_0_0_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_0_0_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (5, 3): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_0_1_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_0_1_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_0_1_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_0_1_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_1_0_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_1_0_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (5, 4): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_0_2_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_0_2_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_0_2_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_0_2_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_2_0_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_2_0_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (5, 5): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_0_3_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_0_3_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_0_3_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_0_3_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_3_0_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_3_0_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (6, 1): 65536 bytes (64.00 kB)
+INFO:   Buffer: C_L2L3_1_buff_0, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: C_L2L3_1_buff_1, 8192 x bf16 = 16384 bytes
+INFO:   Buffer: B_L3L2_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: B_L3L2_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: A_L3L2_1_cons_buff_0, 4096 x bf16 = 8192 bytes
+INFO:   Buffer: A_L3L2_1_cons_buff_1, 4096 x bf16 = 8192 bytes
+INFO: Tile (6, 2): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_1_0_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_1_0_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_1_0_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_1_0_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_0_1_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_0_1_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (6, 3): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_1_1_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_1_1_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_1_1_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_1_1_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_1_1_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_1_1_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (6, 4): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_1_2_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_1_2_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_1_2_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_1_2_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_2_1_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_2_1_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Tile (6, 5): 512 bytes (0.50 kB)
+INFO:   Buffer: C_L1L2_1_3_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: C_L1L2_1_3_buff_1, 32 x bf16 = 64 bytes
+INFO:   Buffer: B_L2L1_1_3_cons_buff_0, 64 x bf16 = 128 bytes
+INFO:   Buffer: B_L2L1_1_3_cons_buff_1, 64 x bf16 = 128 bytes
+INFO:   Buffer: A_L2L1_3_1_cons_buff_0, 32 x bf16 = 64 bytes
+INFO:   Buffer: A_L2L1_3_1_cons_buff_1, 32 x bf16 = 64 bytes
+INFO: Saved L2 memory utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/ffn-2/l2_mem_utilization.png
+INFO: Saved L1 memory utilization plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/ffn-2/l1_mem_utilization.png
+INFO: 
+Tile loop upper bounds and matmul info:
+INFO: Tile (5, 2): 576 iterations
+INFO: Tile (5, 3): 576 iterations
+INFO: Tile (5, 4): 576 iterations
+INFO: Tile (5, 5): 576 iterations
+INFO: Tile (6, 2): 576 iterations
+INFO: Tile (6, 3): 576 iterations
+INFO: Tile (6, 4): 576 iterations
+INFO: Tile (6, 5): 576 iterations
+INFO: Tiles with 'matmul' and 'macs_one_iter': []
+INFO: Tiles without 'matmul' and/or 'macs_one_iter': ['(5, 2)', '(6, 2)', '(5, 3)', '(6, 3)', '(5, 4)', '(6, 4)', '(5, 5)', '(6, 5)']
+INFO: No tiles with matmul found for computation utilization plot.
+INFO: Found objectfifo A_L3L2_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo A_L3L2_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo A_L2L1_0: num_elem=2048, dtype=bf16
+INFO: Found objectfifo A_L2L1_1: num_elem=2048, dtype=bf16
+INFO: Found objectfifo A_L2L1_2: num_elem=2048, dtype=bf16
+INFO: Found objectfifo A_L2L1_3: num_elem=2048, dtype=bf16
+INFO: Found objectfifo B_L3L2_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo B_L2L1_0: num_elem=4096, dtype=bf16
+INFO: Found objectfifo B_L3L2_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo B_L2L1_1: num_elem=4096, dtype=bf16
+INFO: Found objectfifo C_L1L2_0_0: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L1L2_0_1: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L1L2_0_2: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L1L2_0_3: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L2L3_0: num_elem=8192, dtype=bf16
+INFO: Found objectfifo C_L1L2_1_0: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L1L2_1_1: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L1L2_1_2: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L1L2_1_3: num_elem=2048, dtype=bf16
+INFO: Found objectfifo C_L2L3_1: num_elem=8192, dtype=bf16
+INFO: 
+Metadata counts and shapes:
+INFO: 
+Metadata symbol: C_L2L3_0
+INFO:   Total tiles passed: 12
+INFO:   Unique shapes and counts:
+INFO:     Shape: (2, 6, 128, 64), Count: 1
+INFO: 
+Metadata symbol: A_L3L2_0
+INFO:   Total tiles passed: 576
+INFO:   Unique shapes and counts:
+INFO:     Shape: (6, 48, 64, 64), Count: 2
+INFO: 
+Metadata symbol: B_L3L2_0
+INFO:   Total tiles passed: 576
+INFO:   Unique shapes and counts:
+INFO:     Shape: (6, 48, 64, 64), Count: 2
+INFO: 
+Metadata symbol: C_L2L3_1
+INFO:   Total tiles passed: 12
+INFO:   Unique shapes and counts:
+INFO:     Shape: (2, 6, 128, 64), Count: 1
+INFO: 
+Metadata symbol: A_L3L2_1
+INFO:   Total tiles passed: 576
+INFO:   Unique shapes and counts:
+INFO:     Shape: (6, 48, 64, 64), Count: 2
+INFO: 
+Metadata symbol: B_L3L2_1
+INFO:   Total tiles passed: 576
+INFO:   Unique shapes and counts:
+INFO:     Shape: (6, 48, 64, 64), Count: 2
+/scratch/cubansil/mlir-aie/programming_examples/ml/transformer/scripts/run_analysis.py:494: UserWarning: set_ticklabels() should only be used with a fixed number of ticks, i.e. after set_ticks() or using a FixedLocator.
+  ax1.set_xticklabels(symbol_names, rotation=45, ha='right')
+INFO: Saved L3 tiling plot to /scratch/cubansil/mlir-aie/programming_examples/ml/transformer/npu2_results/ffn-2/l3_tiling.png
+INFO: Not in MHA output directory, skipping workload analysis.
