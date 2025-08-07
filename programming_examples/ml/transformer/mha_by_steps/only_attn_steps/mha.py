@@ -654,6 +654,7 @@ def my_mha(
                             offsets=[0, 0, 0, 2 * M * N + head_offset],
                             sizes=[head_dim // attn_score_v_mm_dims[2], len(right_mtx_in[V_STR][L1_POS_STR]), attn_score_v_mm_dims[1], attn_score_v_mm_dims[2]],
                             strides=[attn_score_v_mm_dims[2], head_dim, N, 1],
+                            issue_token=True if dev == "npu2" else False,
                         )
 
                         npu_dma_memcpy_nd(
@@ -665,7 +666,12 @@ def my_mha(
                             strides=[output_mm_dims[1] * N, head_dim * N, N, 1],
                             issue_token=True,
                         )
-                        dma_wait(Wo_l3l2_fifos)
+                        if dev == "npu2":
+                            # For some reason functionality breaks in Strix when only issuing
+                            # token from Wo, even though it works for the Phoenix
+                            dma_wait(v_l3l2_fifos, Wo_l3l2_fifos) 
+                        else:
+                            dma_wait(Wo_l3l2_fifos)
 
                     npu_dma_memcpy_nd(
                         metadata=output_l2l3_fifos,
