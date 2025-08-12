@@ -18,6 +18,7 @@
 #include <bits/stdc++.h>
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <optional>
 #include <ostream>
 #include <stdfloat>
@@ -132,37 +133,6 @@ void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
       Q_proj[m * N + n] = Tout(sum);
     }
   }
-}
-
-template <typename Tin, typename Tout, typename Tacc>
-float matmul_timed(int M, int N, int K, int H, const std::vector<Tin> A,
-                   const std::vector<Tin> B, std::vector<Tout> &C,
-                   int b_col_maj) {
-  auto start = std::chrono::high_resolution_clock::now();
-  const int num_heads = H;
-  const int head_dim = N / num_heads;
-
-  Tout *Q_proj = &C[0];
-
-  const Tin *X = &A[0];
-  const Tin *W_Q = &A[M * K];
-  // Q = X * W_Q
-  for (int m = 0; m < M; ++m) {
-    for (int n = 0; n < N; ++n) {
-      Tacc sum = 0;
-      for (int k = 0; k < K; ++k) {
-        if (!b_col_maj) {
-          sum += Tacc(X[m * K + k] * W_Q[k * N + n]);
-        } else {
-          sum += Tacc(X[m * K + k] * W_Q[k + n * K]);
-        }
-      }
-      Q_proj[m * N + n] = sum;
-    }
-  }
-  return std::chrono::duration_cast<std::chrono::microseconds>(
-             std::chrono::high_resolution_clock::now() - start)
-      .count();
 }
 
 // Below hasn't been updated
@@ -327,7 +297,7 @@ void print_matrix(const std::vector<int8_t> matrix, int n_cols,
                   std::ostream &ostream, const char col_sep[],
                   const char elide_sym[], int w) {
   std::vector<int16_t> cast_matrix(matrix.size());
-  for (int i = 0; i < matrix.size(); i++) {
+  for (uint i = 0; i < matrix.size(); i++) {
     cast_matrix[i] = (int16_t)matrix[i];
   }
   print_matrix(cast_matrix, n_cols, n_printable_rows, n_printable_cols, ostream,
@@ -400,6 +370,7 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
   int n_errors = 0;
   std::vector<struct error<Tout>> errors;
   Tout max_rel_error = (Tout)0.0f;
+  struct error<Tout> max_error;
 
   std::vector<Tout> CRef(M * N);
   matmul<Tin, Tout, Tacc>(M, N, K, H, A, B, CRef, b_col_maj);
@@ -418,6 +389,7 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
             std::max(std::abs(error->actual), std::abs(error->expected));
         if (rel_error > max_rel_error) {
           max_rel_error = rel_error;
+          max_error = *error;
         }
         n_errors++;
       }
@@ -488,15 +460,6 @@ int verify_stochastic(int M, int N, int K, int H, std::vector<Tin> A,
   return n_errors;
 }
 #endif
-
-template <typename Tin, typename Tout, typename Tacc>
-float time_matmul(int M, int N, int K, int H, std::vector<Tin> A,
-                  std::vector<Tin> B, std::vector<Tout> C, int n_samples,
-                  int verbosity = 0, float abs_tol = 0.5, float rel_tol = 0.05,
-                  int b_col_maj = 0) {
-  std::vector<Tout> CRef(M * N);
-  return matmul_timed<Tin, Tout, Tacc>(M, N, K, H, A, B, CRef, b_col_maj);
-}
 
 // --------------------------------------------------------------------------
 // Tracing

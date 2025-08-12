@@ -47,6 +47,7 @@ endif
 dtype_in?=bf16
 dtype_out?=bf16
 trace_size?=0
+emulate_bfloat16_mmul_with_bfp16?=1
 
 include ${srcdir}/../makefile-common
 
@@ -59,6 +60,11 @@ aie2_runtime_dir = ${AIEOPT_DIR}/aie_runtime_lib/AIE2
 
 SKIP_KERNELS=true
 KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -I${kernels_dir} -I${srcdir}/../../../../aie_kernels 
+
+ifeq ($(emulate_bfloat16_mmul_with_bfp16), 1)
+KERNEL_DEFINES += -DAIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16
+aieargs += --emulate-bf16-mmul-with-bfp16 true
+endif
 
 # Define matmul and softmax dimension lists
 # If these values are changed, make sure to update the corresponding kernel code's
