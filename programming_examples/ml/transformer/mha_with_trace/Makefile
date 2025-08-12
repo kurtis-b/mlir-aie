@@ -30,17 +30,16 @@ b_col_maj?=0
 
 # Unless the full_design flag is set, the python code will remove a part of the tiles used in the design based on the tile to be traced
 # For some reason trace with (0,0) doesn't compile, so using (0,1) by default for tracing
-# Some tiles also don't generate traces, which needs investigation
-trace_tile?=(0,0)
+trace_tile?=(0,1)
 aieargs=--dev ${devicename} -M $M -K $K -N $N -H $H --dtype_in ${dtype_in} --dtype_out ${dtype_out} --n-aie-cols ${n_aie_cols} --b-col-maj ${b_col_maj} --trace-tile '${trace_tile}'
 
-full_design?=0
+full_design?=1
 ifeq (${full_design}, 1)
   aieargs+=--full-design
 endif
 
-runargs_verif=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1 --verify 1 --trace_tile '${trace_tile}' --full_design ${full_design}
-runargs_no_verif=--b_col_maj ${b_col_maj} -v 2 --warmup 1 --iters 1 --verify 0 --trace_tile '${trace_tile}' --full_design ${full_design}
+runargs_verif=--b_col_maj ${b_col_maj} -v 2 --warmup 0 --iters 1 --verify 1 --trace_tile '${trace_tile}' --full_design ${full_design}
+runargs_no_verif=--b_col_maj ${b_col_maj} -v 2 --warmup 0 --iters 1 --verify 0 --trace_tile '${trace_tile}' --full_design ${full_design}
 target_suffix=mha
 
 # set this flag to 1 for linear buffer allocation
@@ -56,6 +55,7 @@ endif
 dtype_in?=bf16
 dtype_out?=bf16
 trace_size?=1048576
+emulate_bfloat16_mmul_with_bfp16?=1
 
 include ${srcdir}/../makefile-common
 
@@ -68,6 +68,11 @@ aie2_runtime_dir = ${AIEOPT_DIR}/aie_runtime_lib/AIE2
 
 SKIP_KERNELS=true
 KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -I${kernels_dir} -I${srcdir}/../../../../aie_kernels 
+
+ifeq ($(emulate_bfloat16_mmul_with_bfp16), 1)
+KERNEL_DEFINES += -DAIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16
+aieargs += --emulate-bf16-mmul-with-bfp16 true
+endif
 
 # Define matmul and softmax dimension lists
 # If these values are changed, make sure to update the corresponding kernel code's

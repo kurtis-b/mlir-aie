@@ -18,6 +18,7 @@
 #include <bits/stdc++.h>
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <optional>
 #include <ostream>
 #include <stdfloat>
@@ -236,132 +237,6 @@ void matmul(int M, int N, int K, int H, const std::vector<Tin> A,
   }
 }
 
-template <typename Tin, typename Tout, typename Tacc>
-float matmul_timed(int M, int N, int K, int H, const std::vector<Tin> A,
-                   const std::vector<Tin> B, std::vector<Tout> &C,
-                   int b_col_maj) {
-  auto start = std::chrono::high_resolution_clock::now();
-  const int num_heads = H;
-  const int head_dim = N / num_heads;
-
-  Tout *Q_proj = &C[0];
-  Tout *K_proj = &C[M * N];
-  Tout *V_proj = &C[2 * M * N];
-  Tout *attn_score = &C[3 * M * N];
-
-  const Tin *X = &A[0];
-  const Tin *W_Q = &A[M * K];
-  const Tin *W_K = &A[M * K + K * N];
-  const Tin *W_V = &B[0];
-
-  // 1. Compute Q = X * W_Q, K = X * W_K, and V = X * W_V
-  // Q = X * W_Q
-  for (int m = 0; m < M; ++m) {
-    for (int n = 0; n < N; ++n) {
-      Tacc sum = 0;
-      for (int k = 0; k < K; ++k) {
-        if (!b_col_maj) {
-          sum += Tacc(X[m * K + k] * W_Q[k * N + n]);
-        } else {
-          sum += Tacc(X[m * K + k] * W_Q[k + n * K]);
-        }
-      }
-      Q_proj[m * N + n] = Tout(sum);
-    }
-  }
-
-  // K = X * W_K
-  for (int m = 0; m < M; ++m) {
-    for (int n = 0; n < N; ++n) {
-      Tacc sum = 0;
-      for (int k = 0; k < K; ++k) {
-        if (!b_col_maj) {
-          sum += Tacc(X[m * K + k] * W_K[k * N + n]);
-        } else {
-          sum += Tacc(X[m * K + k] * W_K[k + n * K]);
-        }
-      }
-      K_proj[m * N + n] = Tout(sum);
-    }
-  }
-
-  // V = X * W_V
-  for (int m = 0; m < M; ++m) {
-    for (int n = 0; n < N; ++n) {
-      Tacc sum = 0;
-      for (int k = 0; k < K; ++k) {
-        if (!b_col_maj) {
-          sum += Tacc(X[m * K + k] * W_V[k * N + n]);
-        } else {
-          sum += Tacc(X[m * K + k] * W_V[k + n * K]);
-        }
-      }
-      V_proj[m * N + n] = Tout(sum);
-    }
-  }
-
-  // 2. Compute attention score per head: for each head, Q_h * K_h^T
-  // Output C is [M * M * num_heads], row-major: for each head, [M x M]
-  for (int h = 0; h < num_heads; ++h) {
-    for (int i = 0; i < M; ++i) {
-      for (int j = 0; j < M; ++j) {
-        Tacc sum = 0;
-        for (int n = 0; n < head_dim; ++n) {
-          int q_idx = i * N + h * head_dim + n;
-          int k_idx = j * N + h * head_dim + n;
-          sum += Q_proj[q_idx] * K_proj[k_idx];
-        }
-        // Scalar divide by head_dim (not embed_dim) for per-head scaling
-        attn_score[h * M * M + i * M + j] = Tout(sum / head_dim);
-      }
-    }
-  }
-
-  // 3. Apply softmax to attention scores per head
-  // For each head, for each row i, softmax over j (columns)
-  for (int h = 0; h < num_heads; ++h) {
-    for (int i = 0; i < M; ++i) {
-      // Find max for numerical stability
-      Tacc max_score = attn_score[h * M * M + i * M];
-      for (int j = 1; j < M; ++j) {
-        Tacc val = attn_score[h * M * M + i * M + j];
-        if (val > max_score)
-          max_score = val;
-      }
-      // Compute exp and sum
-      Tacc sum_exp = 0;
-      for (int j = 0; j < M; ++j) {
-        if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_score[" << h << "][" << i << "][" << j
-                    << "] before softmax: " << attn_score[h * M * M + i * M + j]
-                    << "\n";
-        }
-        Tacc exp_val = std::exp(attn_score[h * M * M + i * M + j] - max_score);
-        attn_score[h * M * M + i * M + j] = exp_val;
-        if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_score[" << h << "][" << i << "][" << j
-                    << "] after exp: " << attn_score[h * M * M + i * M + j]
-                    << "\n";
-        }
-        sum_exp += exp_val;
-      }
-      // Normalize
-      for (int j = 0; j < M; ++j) {
-        attn_score[h * M * M + i * M + j] =
-            Tout(attn_score[h * M * M + i * M + j] / sum_exp);
-        if (h == 0 && i == 0 && j < 10) {
-          std::cout << "attn_score[" << h << "][" << i << "][" << j
-                    << "] after softmax: " << attn_score[h * M * M + i * M + j]
-                    << "\n";
-        }
-      }
-    }
-  }
-  return std::chrono::duration_cast<std::chrono::microseconds>(
-             std::chrono::high_resolution_clock::now() - start)
-      .count();
-}
-
 // Below hasn't been updated
 #if 0 
 template <typename Tin, typename Tout, typename Tacc>
@@ -568,7 +443,7 @@ void print_matrix(const std::vector<int8_t> matrix, int n_cols,
                   std::ostream &ostream, const char col_sep[],
                   const char elide_sym[], int w) {
   std::vector<int16_t> cast_matrix(matrix.size());
-  for (int i = 0; i < matrix.size(); i++) {
+  for (uint i = 0; i < matrix.size(); i++) {
     cast_matrix[i] = (int16_t)matrix[i];
   }
   print_matrix(cast_matrix, n_cols, n_printable_rows, n_printable_cols, ostream,
@@ -623,7 +498,8 @@ void print_error_summary(std::ostream &os, int n_errors,
   }
   if (n_errors > 0) {
     os << "Maximum relative error: " << std::setw(3) << std::setprecision(0)
-       << max_rel_error * 100 << "%" << std::endl;
+       << max_rel_error * 100 << "%"
+       << " (last above)" << std::endl;
   }
 }
 
@@ -641,6 +517,7 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
   int n_errors = 0;
   std::vector<struct error<Tout>> errors;
   Tout max_rel_error = (Tout)0.0f;
+  struct error<Tout> max_error;
 
   std::vector<Tout> CRef(3 * M * N + H * M * M);
   matmul<Tin, Tout, Tacc>(M, N, K, H, A, B, CRef, b_col_maj);
@@ -659,6 +536,7 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
             std::max(std::abs(error->actual), std::abs(error->expected));
         if (rel_error > max_rel_error) {
           max_rel_error = rel_error;
+          max_error = *error;
         }
         n_errors++;
       }
@@ -678,6 +556,7 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
             std::max(std::abs(error->actual), std::abs(error->expected));
         if (rel_error > max_rel_error) {
           max_rel_error = rel_error;
+          max_error = *error;
         }
         n_errors++;
       }
@@ -697,6 +576,7 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
             std::max(std::abs(error->actual), std::abs(error->expected));
         if (rel_error > max_rel_error) {
           max_rel_error = rel_error;
+          max_error = *error;
         }
         n_errors++;
       }
@@ -718,6 +598,7 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
               std::max(std::abs(error->actual), std::abs(error->expected));
           if (rel_error > max_rel_error) {
             max_rel_error = rel_error;
+            max_error = *error;
           }
           n_errors++;
         }
@@ -800,15 +681,6 @@ int verify_stochastic(int M, int N, int K, int H, std::vector<Tin> A,
   return n_errors;
 }
 #endif
-
-template <typename Tin, typename Tout, typename Tacc>
-float time_matmul(int M, int N, int K, int H, std::vector<Tin> A,
-                  std::vector<Tin> B, std::vector<Tout> C, int n_samples,
-                  int verbosity = 0, float abs_tol = 0.5, float rel_tol = 0.05,
-                  int b_col_maj = 0) {
-  std::vector<Tout> CRef(H * M * M);
-  return matmul_timed<Tin, Tout, Tacc>(M, N, K, H, A, B, CRef, b_col_maj);
-}
 
 // --------------------------------------------------------------------------
 // Tracing
