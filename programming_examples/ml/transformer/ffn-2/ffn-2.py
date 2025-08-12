@@ -5,7 +5,6 @@
 #
 # (c) Copyright 2025 AMD Inc.
 import argparse
-from ml_dtypes import bfloat16
 import numpy as np
 
 from aie.extras.context import mlir_mod_ctx
@@ -13,15 +12,10 @@ from aie.extras.context import mlir_mod_ctx
 from aie.dialects.aie import *
 from aie.dialects.aiex import *
 from aie.helpers.dialects.ext.scf import _for as range_
-from aie.helpers.taplib import TensorAccessPattern, TensorTiler2D, TensorAccessSequence
+from aie.helpers.taplib import TensorAccessPattern, TensorAccessSequence
 
-dtype_map = {
-    "bf16": bfloat16,
-    "i8": np.int8,
-    "i16": np.int16,
-    "f32": np.float32,
-    "i32": np.int32,
-}
+from aie.iron import str_to_dtype
+
 
 microkernel_mac_dim_map = {
     "npu": {
@@ -39,6 +33,7 @@ microkernel_mac_dim_map = {
         "i16": (4, 4, 8),
     },
 }
+
 
 def main():
     argparser = argparse.ArgumentParser(
@@ -119,8 +114,8 @@ def my_matmul(
     n_aie_rows = 4
     n_aie_cores = n_aie_rows * n_aie_cols
 
-    dtype_in = dtype_map[dtype_in_str]
-    dtype_out = dtype_map[dtype_out_str]
+    dtype_in = str_to_dtype(dtype_in_str)
+    dtype_out = str_to_dtype(dtype_out_str)
 
     assert np.issubdtype(dtype_in, np.integer) == np.issubdtype(
         dtype_out, np.integer
@@ -192,11 +187,9 @@ def my_matmul(
     n_A_tiles_per_shim = n_aie_rows // n_aie_cols if n_aie_cols < 4 else 1
 
     if dev == "npu":
-        if n_aie_cols == 2:
-            dev_ty = AIEDevice.npu1
+        dev_ty = AIEDevice.npu1
     else:
-        if n_aie_cols == 2:
-            dev_ty = AIEDevice.npu2
+        dev_ty = AIEDevice.npu2
 
     # These will hold TensorAccessPattern objects that represent the runtime
     # npu_dma_memcpy_nd operations of this design. They are only used if generate_taps is true
@@ -224,7 +217,7 @@ def my_matmul(
         # Tile declarations as tile[row][col]
         if dev == "npu":
             tiles = [
-                [tile(col + 1, row) for col in range(0, n_aie_cols)] for row in range(0, 6) # 2nd column only
+                [tile(col + 2, row) for col in range(0, n_aie_cols)] for row in range(0, 6) # 3rd and 4th column
             ]
         else:
             tiles = [
@@ -372,7 +365,14 @@ def my_matmul(
         for row in range(n_aie_rows):
             for col in range(n_aie_cols):
 
-                @core(core_tiles[row][col], f"ffn-2_mm_{m}x{k}x{n}.o", stack_size=0xD00)
+                # The stack size choice is a workaround explained here:
+                # https://github.com/Xilinx/mlir-aie/pull/2391#issuecomment-2967432485
+                # In summary, the Peano compiler uses a stack size greater than the default one used by this kernel
+                # (default is 0x400, chess' stack size is smaller). This is only necessary for bf16 through bfp16 emulation on npu2.
+                # Exceding the stack size leads to wrong results from the kernel, but no error is triggered.
+                # Stack usage can be checked as explained here:
+                # https://github.com/Xilinx/llvm-aie/issues/487#issuecomment-2969438585
+                @core(core_tiles[row][col], f"ffn-2_mm_{m}x{k}x{n}.o", stack_size=0x5280)
                 def core_body():
                     for _ in range_(0xFFFFFFFF):
                         loop = (
@@ -400,11 +400,6 @@ def my_matmul(
                             C_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
 
         # To/from AIE-array data movement
-        # TODO: Need to update the runtime_sequence to use TensorTiler2D like in FFN-1 and 
-        # the matrix multiplication example. Found that using TensorTiler2D as done in those
-        # examples causes an error during compilation, as the shim_dma_single_bd_task for the B
-        # tiles has size 3072 for a part of the dma_bd, which is larger than the allowed
-        # amount of 1024. 
         @runtime_sequence(
             np.ndarray[(M * K,), np.dtype[dtype_in]],
             np.ndarray[(K * N,), np.dtype[dtype_in]],
@@ -412,7 +407,7 @@ def my_matmul(
         )
         def sequence(A, B, C):
             # We are limited in the number of BDs. After synchronizing, we can reuse BDs.
-            # We only transfer 6 rows of tiles at once before starting a new transfer block.
+            # We only transfer 4 rows of tiles at once before starting a new transfer block.
             tb_max_n_rows = (
                 4  # tb = transfer block; block of transfers before sync call
             )
@@ -464,14 +459,15 @@ def my_matmul(
                         # Use the calculated sizes/strides/offsets to record the data movement
                         # caused by the above call to npu_dma_memcpy_nd.
                         # This line does not change MLIR output at all.
-                        C_taps.append(
-                            TensorAccessPattern(
-                                (M, N),
-                                offset=C_offset,
-                                sizes=C_sizes,
-                                strides=C_strides,
+                        if generate_taps:
+                            C_taps.append(
+                                TensorAccessPattern(
+                                    (M, N),
+                                    offset=C_offset,
+                                    sizes=C_sizes,
+                                    strides=C_strides,
+                                )
                             )
-                        )
 
                         for tile_row in range(tb_n_rows):
 
@@ -507,25 +503,29 @@ def my_matmul(
                                 k,
                             ]
                             A_strides = [0, k, K, 1]
-                            npu_dma_memcpy_nd(
-                                metadata=A_l3l2_fifos[col],
-                                bd_id=bd_id_base + 2 * tile_row + 1,
-                                mem=A,
-                                offsets=[0, 0, 0, A_offset],
-                                sizes=A_sizes,
-                                strides=A_strides,
-                            )
-                            # Use the calculated sizes/strides/offsets to record the data movement
-                            # caused by the above call to npu_dma_memcpy_nd.
-                            # This line does not change MLIR output at all.
-                            A_taps.append(
-                                TensorAccessPattern(
-                                    (M, K),
-                                    offset=A_offset,
+
+                            # always equal to n_aie_rows since we have n_aie_rows row tiles for matrix A
+                            if col < n_aie_rows:
+                                npu_dma_memcpy_nd(
+                                    metadata=A_l3l2_fifos[col],
+                                    bd_id=bd_id_base + 2 * tile_row + 1,
+                                    mem=A,
+                                    offsets=[0, 0, 0, A_offset],
                                     sizes=A_sizes,
                                     strides=A_strides,
                                 )
-                            )
+                            # # Use the calculated sizes/strides/offsets to record the data movement
+                            # # caused by the above call to npu_dma_memcpy_nd.
+                            # # This line does not change MLIR output at all.
+                            if generate_taps:
+                                A_taps.append(
+                                    TensorAccessPattern(
+                                        (M, K),
+                                        offset=A_offset,
+                                        sizes=A_sizes,
+                                        strides=A_strides,
+                                    )
+                                )
 
                             # B input transfer:
                             # Transfer the first a (n)-wide block of columns of B,
@@ -561,17 +561,18 @@ def my_matmul(
                                 sizes=B_sizes,
                                 strides=B_strides,
                             )
-                            # Use the calculated sizes/strides/offsets to record the data movement
-                            # caused by the above call to npu_dma_memcpy_nd.
-                            # This line does not change MLIR output at all.
-                            B_taps.append(
-                                TensorAccessPattern(
-                                    (K, N),
-                                    offset=B_col_offset,
-                                    sizes=B_sizes,
-                                    strides=B_strides,
+                            # # Use the calculated sizes/strides/offsets to record the data movement
+                            # # caused by the above call to npu_dma_memcpy_nd.
+                            # # This line does not change MLIR output at all.
+                            if generate_taps:
+                                B_taps.append(
+                                    TensorAccessPattern(
+                                        (K, N),
+                                        offset=B_col_offset,
+                                        sizes=B_sizes,
+                                        strides=B_strides,
+                                    )
                                 )
-                            )
                     if tb > 0 or (tb == 0 and pingpong > 0):
                         dma_wait(*C_l2l3_fifos)
             dma_wait(*C_l2l3_fifos)

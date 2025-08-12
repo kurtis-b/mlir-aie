@@ -5,7 +5,6 @@
 #
 # (c) Copyright 2025 AMD Inc.
 import argparse
-from ml_dtypes import bfloat16
 import numpy as np
 
 from aie.extras.context import mlir_mod_ctx
@@ -15,13 +14,7 @@ from aie.dialects.aiex import *
 from aie.helpers.dialects.ext.scf import _for as range_
 from aie.helpers.taplib import TensorAccessPattern, TensorAccessSequence
 
-dtype_map = {
-    "bf16": bfloat16,
-    "i8": np.int8,
-    "i16": np.int16,
-    "f32": np.float32,
-    "i32": np.int32,
-}
+from aie.iron import str_to_dtype
 
 
 def main():
@@ -97,8 +90,8 @@ def my_addandnorm(
     n_aie_rows = 2 
     n_aie_cores = n_aie_rows * n_aie_cols
 
-    dtype_in = dtype_map[dtype_in_str]
-    dtype_out = dtype_map[dtype_out_str]
+    dtype_in = str_to_dtype(dtype_in_str)
+    dtype_out = str_to_dtype(dtype_out_str)
 
     # npu is a 4 row x 4 col array
     if dev == "npu" and n_aie_cols > 4:
@@ -120,11 +113,9 @@ def my_addandnorm(
     n_A_tiles_per_shim = n_aie_rows // n_aie_cols
 
     if dev == "npu":
-        if n_aie_cols == 1:
-            dev_ty = AIEDevice.npu1
+        dev_ty = AIEDevice.npu1
     else:
-        if n_aie_cols == 1:
-            dev_ty = AIEDevice.npu2
+        dev_ty = AIEDevice.npu2
 
     # These will hold TensorAccessPattern objects that represent the runtime
     # npu_dma_memcpy_nd operations of this design. They are only used if generate_taps is true
@@ -271,7 +262,7 @@ def my_addandnorm(
         # Set up compute tiles
         for row in range(n_aie_rows):
             for col in range(n_aie_cols):
-                @core(core_tiles[row][col], f"addandnorm_{m}x{n}.o", stack_size=0xD00)
+                @core(core_tiles[row][col], f"addandnorm_{m}x{n}.o", stack_size=0xF00)
                 def core_body():
                     for _ in range_(0xFFFFFFFF):
                         loop = (
