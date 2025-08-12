@@ -821,12 +821,12 @@ extern "C" {
         a_in, b_in, c_out);                                                    \
   }
 
-#define matmul_scalar_c_func(ctype_in, mlir_type_in, ctype_out, mlir_type_out, \
-                             r, s, t, m, k, n, rowmaj)                         \
-  void                                                                         \
-  matmul_scalar_##mlir_type_in##_##mlir_type_out##_##m##_##k##_##n##_##rowmaj( \
-      ctype_in *a_in, ctype_in *b_in, ctype_out *c_out) {                      \
-    matmul_scalar<ctype_in, ctype_out, m, k, n>(a_in, b_in, c_out);            \
+#define matmul_scalar_c_func(ctype_in, mlir_type_in, ctype_out, mlir_type_out,     \
+                             r, s, t, m, k, n, rowmaj)                             \
+  void                                                                             \
+      matmul_scalar_##mlir_type_in##_##mlir_type_out##_##m##_##k##_##n##_##rowmaj( \
+          ctype_in *a_in, ctype_in *b_in, ctype_out *c_out) {                      \
+    matmul_scalar<ctype_in, ctype_out, m, k, n>(a_in, b_in, c_out);                \
   }
 
 #define zero_vectorized_c_func(ctype_in, mlir_type_in, ctype_out,              \

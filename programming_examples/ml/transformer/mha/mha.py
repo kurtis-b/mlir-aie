@@ -5,7 +5,6 @@
 #
 # (c) Copyright 2025 AMD Inc.
 import argparse
-from ml_dtypes import bfloat16
 import numpy as np
 
 from aie.extras.context import mlir_mod_ctx
@@ -13,15 +12,10 @@ from aie.extras.context import mlir_mod_ctx
 from aie.dialects.aie import *
 from aie.dialects.aiex import *
 from aie.helpers.dialects.ext.scf import _for as range_
-from aie.helpers.taplib import TensorTiler2D, TensorAccessSequence
+from aie.helpers.taplib import TensorAccessPattern, TensorAccessSequence
 
-dtype_map = {
-    "bf16": bfloat16,
-    "i8": np.int8,
-    "i16": np.int16,
-    "f32": np.float32,
-    "i32": np.int32,
-}
+from aie.iron import str_to_dtype
+
 
 microkernel_mac_dim_map = {
     "npu": {
@@ -39,6 +33,7 @@ microkernel_mac_dim_map = {
         "i16": (4, 4, 8),
     },
 }
+
 
 def main():
     argparser = argparse.ArgumentParser(
@@ -215,8 +210,8 @@ def my_mha(
         }
     }
 
-    dtype_in = dtype_map[dtype_in_str]
-    dtype_out = dtype_map[dtype_out_str]
+    dtype_in = str_to_dtype(dtype_in_str)
+    dtype_out = str_to_dtype(dtype_out_str)
 
     for key, val in left_mtx_in.items():
         l1_list = val.get(L1_POS_STR, [])
@@ -726,12 +721,20 @@ def my_mha(
         # L1 to L3 links
         object_fifo_link(output_l1l2_fifos, output_l2l3_fifos)
 
+        # The stack size choice is a workaround explained here:
+        # https://github.com/Xilinx/mlir-aie/pull/2391#issuecomment-2967432485
+        # In summary, the Peano compiler uses a stack size greater than the default one used by this kernel
+        # (default is 0x400, chess' stack size is smaller). This is only necessary for bf16 through bfp16 emulation on npu2.
+        # Exceding the stack size leads to wrong results from the kernel, but no error is triggered.
+        # Stack usage can be checked as explained here:
+        # https://github.com/Xilinx/llvm-aie/issues/487#issuecomment-2969438585
+
         # Compute for Q, K, V projections
         for row, l1_pos in enumerate(right_mtx_in[WQ_STR][L1_POS_STR]):
             @core(
                 core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]],
                 f"mha_mm_{q_proj_dims[0]}x{q_proj_dims[1]}x{q_proj_dims[2]}_row_major.o",
-                stack_size=0xD00
+                stack_size=0x2940
             )
             def core_body():
                 for _ in range_(0xFFFFFFFF):
@@ -750,7 +753,7 @@ def my_mha(
             @core(
                 core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]],
                 f"mha_mm_{k_proj_dims[0]}x{k_proj_dims[1]}x{k_proj_dims[2]}_row_major.o",
-                stack_size=0xD00
+                stack_size=0x2940
             )
             def core_body():
                 for _ in range_(0xFFFFFFFF):
@@ -769,7 +772,7 @@ def my_mha(
             @core(
                 core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]],
                 f"mha_mm_{v_proj_dims[0]}x{v_proj_dims[1]}x{v_proj_dims[2]}_row_major.o",
-                stack_size=0xD00
+                stack_size=0x2940
             )
             def core_body():
                 for _ in range_(0xFFFFFFFF):
@@ -786,7 +789,7 @@ def my_mha(
 
         # Compute for attention score
         for head, l1_pos in enumerate(left_mtx_in[Q_STR][L1_POS_STR]):
-            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_mm_dims[0]}x{attn_score_mm_dims[1]}x{attn_score_mm_dims[2]}_col_major.o", stack_size=0xD00)
+            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_mm_dims[0]}x{attn_score_mm_dims[1]}x{attn_score_mm_dims[2]}_col_major.o", stack_size=0x2940)
             def core_body():
                 for _ in range_(0xFFFFFFFF):
                     for _ in range_(H // len(left_mtx_in[Q_STR][L1_POS_STR])):
@@ -803,7 +806,7 @@ def my_mha(
 
         # Apply softmax to attention scores
         for head, l1_pos in enumerate(l1_fuse_mtx_in[ATTN_SCORE_STR][L1_POS_STR]):
-            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_softmax.o", stack_size=0xD00) # Make sure to use the bundled obj file, not the softmax-only obj file
+            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_softmax.o", stack_size=0x2940) # Make sure to use the bundled obj file, not the softmax-only obj file
             def core_body():
                 for _ in range_(0xFFFFFFFF):
                     for _ in range_(H // len(l1_fuse_mtx_in[ATTN_SCORE_STR][L1_POS_STR])):
@@ -815,7 +818,7 @@ def my_mha(
 
         # Calculate attention score * V        
         for head, l1_pos in enumerate(l1_fuse_mtx_in[SOFTMAX_STR][L1_POS_STR]):
-            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_v_mm_dims[0]}x{attn_score_v_mm_dims[1]}x{attn_score_v_mm_dims[2]}_row_major.o", stack_size=0xD00)
+            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_v_mm_dims[0]}x{attn_score_v_mm_dims[1]}x{attn_score_v_mm_dims[2]}_row_major.o", stack_size=0x2940)
             def core_body():
                 for _ in range_(0xFFFFFFFF):
                     for _ in range_(H // len(l1_fuse_mtx_in[SOFTMAX_STR][L1_POS_STR])):
@@ -830,7 +833,7 @@ def my_mha(
                         softmax_l2l1_fifos[head].release(ObjectFifoPort.Consume, 1)
 
         for head, l1_pos in enumerate(l1_fuse_mtx_in[ATTN_SCORE_V_STR][L1_POS_STR]):
-            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{output_mm_dims[0]}x{output_mm_dims[1]}x{output_mm_dims[2]}_row_major.o", stack_size=0xD00)
+            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{output_mm_dims[0]}x{output_mm_dims[1]}x{output_mm_dims[2]}_row_major.o", stack_size=0x2940)
             def core_body():
                 for _ in range_(0xFFFFFFFF):
                     elem_output = output_l1l1_fifos[head].acquire(ObjectFifoPort.Produce, 1)
@@ -843,7 +846,7 @@ def my_mha(
                         attn_score_v_l1l1_fifos[head].release(ObjectFifoPort.Consume, 1)
                     output_l1l1_fifos[head].release(ObjectFifoPort.Produce, 1)
 
-        @core(core_tiles[l1_fuse_mtx_in[ACCUM_STR][L1_POS_STR][0][ROW_IDX]][l1_fuse_mtx_in[ACCUM_STR][L1_POS_STR][0][COL_IDX]], f"mha_add_{output_mm_dims[0]}x{output_mm_dims[2]}.o", stack_size=0xD00)
+        @core(core_tiles[l1_fuse_mtx_in[ACCUM_STR][L1_POS_STR][0][ROW_IDX]][l1_fuse_mtx_in[ACCUM_STR][L1_POS_STR][0][COL_IDX]], f"mha_add_{output_mm_dims[0]}x{output_mm_dims[2]}.o", stack_size=0x2940)
         def core_body():
             for _ in range_(0xFFFFFFFF):
                 elem_output = output_l1l2_fifos.acquire(ObjectFifoPort.Produce, 1)

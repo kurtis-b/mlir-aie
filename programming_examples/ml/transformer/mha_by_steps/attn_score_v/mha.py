@@ -5,7 +5,6 @@
 #
 # (c) Copyright 2025 AMD Inc.
 import argparse
-from ml_dtypes import bfloat16
 import numpy as np
 
 from aie.extras.context import mlir_mod_ctx
@@ -13,15 +12,10 @@ from aie.extras.context import mlir_mod_ctx
 from aie.dialects.aie import *
 from aie.dialects.aiex import *
 from aie.helpers.dialects.ext.scf import _for as range_
-from aie.helpers.taplib import TensorTiler2D, TensorAccessSequence
+from aie.helpers.taplib import TensorAccessPattern, TensorAccessSequence
 
-dtype_map = {
-    "bf16": bfloat16,
-    "i8": np.int8,
-    "i16": np.int16,
-    "f32": np.float32,
-    "i32": np.int32,
-}
+from aie.iron import str_to_dtype
+
 
 microkernel_mac_dim_map = {
     "npu": {
@@ -39,6 +33,7 @@ microkernel_mac_dim_map = {
         "i16": (4, 4, 8),
     },
 }
+
 
 def main():
     argparser = argparse.ArgumentParser(
@@ -215,8 +210,8 @@ def my_mha(
         }
     }
 
-    dtype_in = dtype_map[dtype_in_str]
-    dtype_out = dtype_map[dtype_out_str]
+    dtype_in = str_to_dtype(dtype_in_str)
+    dtype_out = str_to_dtype(dtype_out_str)
 
     for key, val in left_mtx_in.items():
         l1_list = val.get(L1_POS_STR, [])
@@ -681,7 +676,7 @@ def my_mha(
             @core(
                 core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]],
                 f"mha_mm_{q_proj_dims[0]}x{q_proj_dims[1]}x{q_proj_dims[2]}_row_major.o",
-                stack_size=0xD00
+                stack_size=0x2940
             )
             def core_body():
                 for _ in range_(0xFFFFFFFF):
@@ -700,7 +695,7 @@ def my_mha(
             @core(
                 core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]],
                 f"mha_mm_{k_proj_dims[0]}x{k_proj_dims[1]}x{k_proj_dims[2]}_row_major.o",
-                stack_size=0xD00
+                stack_size=0x2940
             )
             def core_body():
                 for _ in range_(0xFFFFFFFF):
@@ -719,7 +714,7 @@ def my_mha(
             @core(
                 core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]],
                 f"mha_mm_{v_proj_dims[0]}x{v_proj_dims[1]}x{v_proj_dims[2]}_row_major.o",
-                stack_size=0xD00
+                stack_size=0x2940
             )
             def core_body():
                 for _ in range_(0xFFFFFFFF):
@@ -736,7 +731,7 @@ def my_mha(
 
         # Compute for attention score
         for head, l1_pos in enumerate(left_mtx_in[Q_STR][L1_POS_STR]):
-            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_mm_dims[0]}x{attn_score_mm_dims[1]}x{attn_score_mm_dims[2]}_col_major.o", stack_size=0xD00)
+            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_mm_dims[0]}x{attn_score_mm_dims[1]}x{attn_score_mm_dims[2]}_col_major.o", stack_size=0x2940)
             def core_body():
                 for _ in range_(0xFFFFFFFF):
                     for _ in range_(H // len(left_mtx_in[Q_STR][L1_POS_STR])):
@@ -753,7 +748,7 @@ def my_mha(
 
         # Apply softmax to attention scores
         for head, l1_pos in enumerate(l1_fuse_mtx_in[ATTN_SCORE_STR][L1_POS_STR]):
-            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_softmax.o", stack_size=0xD00) # Make sure to use the bundled obj file, not the softmax-only obj file
+            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_softmax.o", stack_size=0x2940) # Make sure to use the bundled obj file, not the softmax-only obj file
             def core_body():
                 for _ in range_(0xFFFFFFFF):
                     for _ in range_(H // len(l1_fuse_mtx_in[ATTN_SCORE_STR][L1_POS_STR])):
@@ -765,7 +760,7 @@ def my_mha(
 
         # Calculate attention score * V        
         for head, l1_pos in enumerate(l1_fuse_mtx_in[SOFTMAX_STR][L1_POS_STR]):
-            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_v_mm_dims[0]}x{attn_score_v_mm_dims[1]}x{attn_score_v_mm_dims[2]}_row_major.o", stack_size=0xD00)
+            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_v_mm_dims[0]}x{attn_score_v_mm_dims[1]}x{attn_score_v_mm_dims[2]}_row_major.o", stack_size=0x2940)
             def core_body():
                 for _ in range_(0xFFFFFFFF):
                     for _ in range_(H // len(l1_fuse_mtx_in[SOFTMAX_STR][L1_POS_STR])):

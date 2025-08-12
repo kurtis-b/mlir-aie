@@ -18,6 +18,7 @@
 #include <bits/stdc++.h>
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <optional>
 #include <ostream>
 #include <stdfloat>
@@ -103,7 +104,7 @@ template <>
 std::bfloat16_t get_random<std::bfloat16_t>() {
   // Random numbers should NOT be uniformly between 0 and 1, because that
   // would make the matrix product AB always close to 1.
-  return std::fabs(std::bfloat16_t(4.0 * (float)rand() / (float)(RAND_MAX)));
+  return std::bfloat16_t(4.0 * (float)rand() / (float)(RAND_MAX));
 }
 
 template <typename Tin, typename Tout, typename Tacc>
@@ -151,49 +152,6 @@ void addandnorm(int M, int N, const std::vector<Tin> A,
       //   }
     }
   }
-}
-
-template <typename Tin, typename Tout, typename Tacc>
-float addandnorm_timed(int M, int N, const std::vector<Tin> A,
-                       const std::vector<Tin> B, std::vector<Tout> &C,
-                       int b_col_maj) {
-  auto start = std::chrono::high_resolution_clock::now();
-  std::vector<Tacc> add_result(M * N);
-  for (int row = 0; row < M; row++) {
-    for (int col = 0; col < N; col++) {
-      float sum = 0;
-      if (!b_col_maj) {
-        sum = float(A[row * N + col] + B[row * N + col]);
-      } else {
-        sum = float(A[row * N + col] + B[row * N + col]);
-      }
-      add_result[row * N + col] = Tacc(sum);
-    }
-  }
-  for (int row = 0; row < M; row++) {
-    float sum = 0;
-    float sumsq = 0;
-    for (int col = 0; col < N; col++) {
-      sum += add_result[row * N + col];
-      sumsq += add_result[row * N + col] * add_result[row * N + col];
-    }
-    float mean = sum / N;
-    float var = (sumsq / N) - (mean * mean);
-    for (int col = 0; col < N; col++) {
-      //   if (row == 0 && col < 10) {
-      //     std::cout << add_result[row * N + col] << ", ";
-      //     std::cout << mean << " " << var << ", ";
-      //   }
-      C[row * N + col] =
-          Tout((add_result[row * N + col] - mean) / std::sqrt(var));
-      //   if (row == 0 && col < 10) {
-      //     std::cout << "result: " << C[row * N + col] << std::endl;
-      //   }
-    }
-  }
-  return std::chrono::duration_cast<std::chrono::microseconds>(
-             std::chrono::high_resolution_clock::now() - start)
-      .count();
 }
 
 template <typename Tin, typename Tout, typename Tacc>
@@ -365,7 +323,7 @@ void print_matrix(const std::vector<int8_t> matrix, int n_cols,
                   std::ostream &ostream, const char col_sep[],
                   const char elide_sym[], int w) {
   std::vector<int16_t> cast_matrix(matrix.size());
-  for (int i = 0; i < matrix.size(); i++) {
+  for (uint i = 0; i < matrix.size(); i++) {
     cast_matrix[i] = (int16_t)matrix[i];
   }
   print_matrix(cast_matrix, n_cols, n_printable_rows, n_printable_cols, ostream,
@@ -413,7 +371,8 @@ void print_error_summary(std::ostream &os, int n_errors,
   }
   if (n_errors > 0) {
     os << "Maximum relative error: " << std::setw(3) << std::setprecision(0)
-       << max_rel_error * 100 << "%" << std::endl;
+       << max_rel_error * 100 << "%"
+       << " (last above)" << std::endl;
   }
 }
 
@@ -431,6 +390,7 @@ int verify(int M, int N, std::vector<Tin> A, std::vector<Tin> B,
   int n_errors = 0;
   std::vector<struct error<Tout>> errors;
   Tout max_rel_error = (Tout)0.0f;
+  struct error<Tout> max_error;
 
   std::vector<Tout> CRef(M * N);
   addandnorm<Tin, Tout, Tacc>(M, N, A, B, CRef, b_col_maj);
@@ -449,11 +409,14 @@ int verify(int M, int N, std::vector<Tin> A, std::vector<Tin> B,
             std::max(std::abs(error->actual), std::abs(error->expected));
         if (rel_error > max_rel_error) {
           max_rel_error = rel_error;
+          max_error = *error;
         }
         n_errors++;
       }
     }
   }
+  if (n_errors)
+    errors.push_back(max_error);
   print_error_summary(std::cout, n_errors, errors, max_rel_error);
 
   std::cout << std::endl << "Reference:" << std::endl;
@@ -516,15 +479,6 @@ int verify_stochastic(int M, int N, std::vector<Tin> A, std::vector<Tin> B,
 
   print_error_summary(std::cout, n_errors, errors, max_rel_error);
   return n_errors;
-}
-
-template <typename Tin, typename Tout, typename Tacc>
-float time_matmul(int M, int N, std::vector<Tin> A, std::vector<Tin> B,
-                  std::vector<Tout> C, int n_samples, int verbosity = 0,
-                  float abs_tol = 0.5, float rel_tol = 0.05,
-                  int b_col_maj = 0) {
-  std::vector<Tout> CRef(M * N);
-  return addandnorm_timed<Tin, Tout, Tacc>(M, N, A, B, CRef, b_col_maj);
 }
 
 // --------------------------------------------------------------------------

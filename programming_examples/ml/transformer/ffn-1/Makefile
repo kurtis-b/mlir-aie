@@ -48,10 +48,16 @@ endif
 dtype_in?=bf16
 dtype_out?=bf16
 trace_size?=0
+emulate_bfloat16_mmul_with_bfp16?=1
 
 KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -DDIM_M=${m} -DDIM_K=${k} -DDIM_N=${n}
 ifeq (${b_col_maj}, 1)
 	KERNEL_DEFINES+=-DB_COL_MAJ
+endif
+
+ifeq ($(emulate_bfloat16_mmul_with_bfp16), 1)
+KERNEL_DEFINES += -DAIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16
+aieargs += --emulate-bf16-mmul-with-bfp16 true
 endif
 
 RELU_KERNEL_DEFINES=-DDIM_M=${m} -DDIM_N=${n}
