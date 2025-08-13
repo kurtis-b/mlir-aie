@@ -233,7 +233,7 @@ def my_mha(
 
     attn_score_mm_dims = (16, 32, 256)
     softmax_dims = (attn_score_mm_dims[0], attn_score_mm_dims[2])
-    attn_score_v_mm_dims = (softmax_dims[0], softmax_dims[1], 16)
+    attn_score_v_mm_dims = (softmax_dims[0], softmax_dims[1], 32)
     output_mm_dims = (attn_score_v_mm_dims[0], attn_score_v_mm_dims[2], 256)
     mha_dims = [attn_score_mm_dims, attn_score_v_mm_dims, output_mm_dims]
 
@@ -294,11 +294,9 @@ def my_mha(
     fifo_depth = 2
 
     if dev == "npu":
-        if n_aie_cols == 4:
-            dev_ty = AIEDevice.npu1
+        dev_ty = AIEDevice.npu1
     else:
-        if n_aie_cols == 4:
-            dev_ty = AIEDevice.npu2
+        dev_ty = AIEDevice.npu2
 
     @device(dev_ty)
     def device_body():
@@ -622,7 +620,7 @@ def my_mha(
             @core(
                 core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]],
                 f"mha_mm_{q_proj_dims[0]}x{q_proj_dims[1]}x{q_proj_dims[2]}_row_major.o",
-                stack_size=0x2940
+                stack_size=0xF00
             )
             def core_body():
                 for _ in range_(0xFFFFFFFF):
@@ -641,7 +639,7 @@ def my_mha(
             @core(
                 core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]],
                 f"mha_mm_{k_proj_dims[0]}x{k_proj_dims[1]}x{k_proj_dims[2]}_row_major.o",
-                stack_size=0x2940
+                stack_size=0xF00
             )
             def core_body():
                 for _ in range_(0xFFFFFFFF):
@@ -660,7 +658,7 @@ def my_mha(
             @core(
                 core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]],
                 f"mha_mm_{v_proj_dims[0]}x{v_proj_dims[1]}x{v_proj_dims[2]}_row_major.o",
-                stack_size=0x2940
+                stack_size=0xF00
             )
             def core_body():
                 for _ in range_(0xFFFFFFFF):
@@ -677,7 +675,7 @@ def my_mha(
 
         # Compute for attention score
         for head, l1_pos in enumerate(left_mtx_in[Q_STR][L1_POS_STR]):
-            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_mm_dims[0]}x{attn_score_mm_dims[1]}x{attn_score_mm_dims[2]}_col_major.o", stack_size=0x2940)
+            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_mm_{attn_score_mm_dims[0]}x{attn_score_mm_dims[1]}x{attn_score_mm_dims[2]}_col_major.o", stack_size=0xF00)
             def core_body():
                 for _ in range_(0xFFFFFFFF):
                     for _ in range_(H // len(left_mtx_in[Q_STR][L1_POS_STR])):
@@ -694,7 +692,7 @@ def my_mha(
 
         # Apply softmax to attention scores
         for head, l1_pos in enumerate(l1_fuse_mtx_in[ATTN_SCORE_STR][L1_POS_STR]):
-            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_softmax.o", stack_size=0x2940) # Make sure to use the bundled obj file, not the softmax-only obj file
+            @core(core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]], f"mha_softmax.o", stack_size=0xF00) # Make sure to use the bundled obj file, not the softmax-only obj file
             def core_body():
                 for _ in range_(0xFFFFFFFF):
                     for _ in range_(H // len(l1_fuse_mtx_in[ATTN_SCORE_STR][L1_POS_STR])):

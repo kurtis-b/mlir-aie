@@ -69,7 +69,7 @@ endif
 # Define matmul and softmax dimension lists
 # If these values are changed, make sure to update the corresponding kernel code's
 # combos(X) and "#if" macros. 
-matmul_dims := 64x64x64 16x32x256 16x256x16 16x16x256
+matmul_dims := 64x64x64 16x32x256 16x256x32 16x32x256
 softmax_dims := 16x256
 add_dims := 16x256
 
