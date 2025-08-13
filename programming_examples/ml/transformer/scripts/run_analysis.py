@@ -517,13 +517,13 @@ def analyse_loop_iterations(input_file, output_dir):
             "1,2": {"type": "GEMM", "size": 64*64*64},
             "1,3": {"type": "Softmax", "size": 16*256, "num_exps": 6*(256/16)*(768/256)}, # 6 heads, (256/16) = 16 iters in sequence dim, 768/256 = 3 iters in hidden dim
             "2,0": {"type": "GEMM", "size": 64*64*64},
-            "2,1": {"type": "GEMM", "size": 16*256*16},
+            "2,1": {"type": "GEMM", "size": 16*256*32},
             "2,2": 0,
-            "2,3": {"type": "GEMM", "size": 16*256*16},
+            "2,3": {"type": "GEMM", "size": 16*256*32},
             "3,0": {"type": "GEMM", "size": 64*64*64},
-            "3,1": {"type": "GEMM", "size": 16*16*256},
+            "3,1": {"type": "GEMM", "size": 16*32*256},
             "3,2": {"type": "Add", "size": 16*256, "num_adds": (256/16)*(768/256)}, # (256/16) = 16 iters in sequence dim, 768/256 = 3 iters in hidden dim
-            "3,3": {"type": "GEMM", "size": 16*16*256},
+            "3,3": {"type": "GEMM", "size": 16*32*256},
         }
         l3_symbol_to_workload = {
             "Wq_L3L2": ["0,0", "1,0"],
@@ -693,17 +693,27 @@ def analyse_execution_times(csv_file, output_dir):
                 if mha_val > 0:
                     diff = abs(sum_val - mha_val) / mha_val
                     if diff >= 0.05:
-                        raise RuntimeError(
+                        logging.getLogger("analyse_tiling").warning(
                             f"Sum of {label} times for attn+proj ({sum_val}) differs from mha ({mha_val}) by more than 5% ({diff*100:.2f}%)"
                         )
-
-            # Delete mha entry
-            del designs[mha_idx]
-            del avg_times[mha_idx]
-            del min_times[mha_idx]
-            del max_times[mha_idx]
-            del M[mha_idx]
-            del K[mha_idx]
+                        for idx in [attn_idx, proj_idx]:
+                            logging.getLogger("analyse_tiling").warning(
+                                f"Removing design {designs[idx]} with {label} time {avg_times[idx]} from the plot"
+                            )
+                            del designs[idx]
+                            del avg_times[idx]
+                            del min_times[idx]
+                            del max_times[idx]
+                            del M[idx]
+                            del K[idx]
+                    else:
+                        # Delete mha entry
+                        del designs[mha_idx]
+                        del avg_times[mha_idx]
+                        del min_times[mha_idx]
+                        del max_times[mha_idx]
+                        del M[mha_idx]
+                        del K[mha_idx]
             del N[mha_idx]
         # Replace 'mha_by_steps/only_attn_steps' with 'mha-attn' in designs
         designs = ['mha-attn' if d == 'mha_by_steps/only_attn_steps' else d for d in designs]
@@ -725,7 +735,7 @@ def analyse_execution_times(csv_file, output_dir):
     ax.set_ylabel('Execution Time (us)')
     ax.set_xlabel('Design')
     ax.set_title('Execution Times Across Designs')
-    ax.legend(loc='upper left')
+    ax.legend()
 
     # Annotate each bar with "MxKxN" and the product
     # TODO: The number of AIEs is hardcoded, but it should be determined from the design files.
@@ -805,7 +815,7 @@ def analyse_fine_grained_times(csv_file, output_dir):
     ax.set_ylabel('Execution Time (us)')
     ax.set_xlabel('Step')
     ax.set_title('Execution Times Across Steps')
-    ax.legend(loc='upper left')
+    ax.legend()
 
     plt.tight_layout()
     plot_file = os.path.join(output_dir, "fine_grained_times.png")

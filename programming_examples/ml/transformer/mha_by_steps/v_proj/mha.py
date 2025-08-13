@@ -278,11 +278,9 @@ def my_mha(
     fifo_depth = 2
 
     if dev == "npu":
-        if n_aie_cols == 4:
-            dev_ty = AIEDevice.npu1
+        dev_ty = AIEDevice.npu1
     else:
-        if n_aie_cols == 4:
-            dev_ty = AIEDevice.npu2
+        dev_ty = AIEDevice.npu2
 
     @device(dev_ty)
     def device_body():
@@ -394,7 +392,7 @@ def my_mha(
             @core(
                 core_tiles[l1_pos[ROW_IDX]][l1_pos[COL_IDX]],
                 f"mha_mm_{v_proj_dims[0]}x{v_proj_dims[1]}x{v_proj_dims[2]}_row_major.o",
-                stack_size=0x2940
+                stack_size=0xF00
             )
             def core_body():
                 for _ in range_(0xFFFFFFFF):

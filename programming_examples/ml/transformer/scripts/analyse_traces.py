@@ -18,13 +18,13 @@ WORKLOAD_AT_TILE = {
         "tile3,3": {"type": "GEMM", "size": 64*64*64},
         "tile3,4": {"type": "Softmax", "size": 16*256},
         "tile4,1": {"type": "GEMM", "size": 64*64*64},
-        "tile4,2": {"type": "GEMM", "size": 16*256*16},
+        "tile4,2": {"type": "GEMM", "size": 16*256*32},
         "tile4,3": 0,
-        "tile4,4": {"type": "GEMM", "size": 16*256*16},
+        "tile4,4": {"type": "GEMM", "size": 16*256*32},
         "tile5,1": {"type": "GEMM", "size": 64*64*64},
-        "tile5,2": {"type": "GEMM", "size": 16*16*256},
+        "tile5,2": {"type": "GEMM", "size": 16*32*256},
         "tile5,3": {"type": "Add", "size": 16*256},
-        "tile5,4": {"type": "GEMM", "size": 16*16*256},
+        "tile5,4": {"type": "GEMM", "size": 16*32*256},
     },
     "npu2": {
         "tile2,0": {"type": "GEMM", "size": 64*64*64},
@@ -36,13 +36,13 @@ WORKLOAD_AT_TILE = {
         "tile3,2": {"type": "GEMM", "size": 64*64*64},
         "tile3,3": {"type": "Softmax", "size": 16*256},
         "tile4,0": {"type": "GEMM", "size": 64*64*64},
-        "tile4,1": {"type": "GEMM", "size": 16*256*16},
+        "tile4,1": {"type": "GEMM", "size": 16*256*32},
         "tile4,2": 0,
-        "tile4,3": {"type": "GEMM", "size": 16*256*16},
+        "tile4,3": {"type": "GEMM", "size": 16*256*32},
         "tile5,0": {"type": "GEMM", "size": 64*64*64},
-        "tile5,1": {"type": "GEMM", "size": 16*16*256},
+        "tile5,1": {"type": "GEMM", "size": 16*32*256},
         "tile5,2": {"type": "Add", "size": 16*256},
-        "tile5,3": {"type": "GEMM", "size": 16*16*256},
+        "tile5,3": {"type": "GEMM", "size": 16*32*256},
     }
 }
 
@@ -284,7 +284,7 @@ def main():
     missing_str = ", ".join(missing_tiles) if missing_tiles else "None"
     ax.set_title(f"Performance Across Tiles\nMissing traces: {missing_str}")
     ax.set_xticks(range(len(tiles)))
-    ax.set_xticklabels(new_xticklabels, ha='center', fontsize=10.5)  
+    ax.set_xticklabels(new_xticklabels, ha='center', fontsize=10.5, rotation=45)
     plt.tight_layout()
     output_path = os.path.join(args.results_dir, "performance_per_tile.png")
     plt.savefig(output_path)
@@ -398,7 +398,7 @@ def main():
     ax.set_xlabel("Core Location\n(Workload Size and Type)")
     ax.set_title("Kernel Time (Avg, Min, Max) Across Tiles")
     ax.set_xticks(x)
-    ax.set_xticklabels(kernel_xticklabels, ha='center', fontsize=10.5)
+    ax.set_xticklabels(kernel_xticklabels, ha='center', fontsize=10.5, rotation=45)
     # Create legend for workload types
     kernel_unique_types = list(set(kernel_types))
     kernel_handles = [plt.Rectangle((0,0),1,1, color=type_to_color.get(t, "gray")) for t in kernel_unique_types]

@@ -956,18 +956,18 @@ extern "C" {
 #define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 64, 64, 64, 0)
 #endif
 #endif
-#if (DIM_M == 16) && (DIM_K == 256) && (DIM_N == 16)
+#if (DIM_M == 16) && (DIM_K == 256) && (DIM_N == 32)
 #ifdef AIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 8, 8, 8, 16, 256, 16, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 8, 8, 8, 16, 256, 32, 0)
 #else
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 256, 16, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 256, 32, 0)
 #endif
 #endif
-#if (DIM_M == 16) && (DIM_K == 16) && (DIM_N == 256)
+#if (DIM_M == 16) && (DIM_K == 32) && (DIM_N == 256)
 #ifdef AIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 8, 8, 8, 16, 16, 256, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 8, 8, 8, 16, 32, 256, 0)
 #else
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 16, 256, 0)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 32, 256, 0)
 #endif
 #endif
 #if (DIM_M == 16) && (DIM_K == 32) && (DIM_N == 256)
@@ -985,18 +985,18 @@ extern "C" {
 #define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 64, 64, 64, 1)
 #endif
 #endif
-#if (DIM_M == 16) && (DIM_K == 256) && (DIM_N == 16)
+#if (DIM_M == 16) && (DIM_K == 256) && (DIM_N == 32)
 #ifdef AIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 8, 8, 8, 16, 256, 16, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 8, 8, 8, 16, 256, 32, 1)
 #else
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 256, 16, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 256, 32, 1)
 #endif
 #endif
-#if (DIM_M == 16) && (DIM_K == 16) && (DIM_N == 256)
+#if (DIM_M == 16) && (DIM_K == 32) && (DIM_N == 256)
 #ifdef AIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 8, 8, 8, 16, 16, 256, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 8, 8, 8, 16, 32, 256, 1)
 #else
-#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 16, 256, 1)
+#define combos(X) X(bfloat16, bf16, bfloat16, bf16, 4, 8, 8, 16, 32, 256, 1)
 #endif
 #endif
 #if (DIM_M == 16) && (DIM_K == 32) && (DIM_N == 256)

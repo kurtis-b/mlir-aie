@@ -55,19 +55,10 @@ extern "C" {
 #define combos(X) X(bfloat16, bf16, 16, 256)
 #endif
 #if (DIM_M == 16) && (DIM_N == 16)
-#define combos(X) X(bfloat16, bf16, 16, 16)
-#endif
-#if (DIM_M == 16) && (DIM_N == 128)
-#define combos(X) X(bfloat16, bf16, 16, 128)
-#endif
-#if (DIM_M == 32) && (DIM_N == 64)
-#define combos(X) X(bfloat16, bf16, 32, 64)
+#define combos(X) X(bfloat16, bf16, 16, 32)
 #endif
 #if (DIM_M == 32) && (DIM_N == 256)
 #define combos(X) X(bfloat16, bf16, 32, 256)
-#endif
-#if (DIM_M == 32) && (DIM_N == 16)
-#define combos(X) X(bfloat16, bf16, 32, 16)
 #endif
 #if (DIM_M == 16) && (DIM_N == 1)
 #define combos(X) X(bfloat16, bf16, 16, 1)
