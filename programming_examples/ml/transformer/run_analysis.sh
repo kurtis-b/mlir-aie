@@ -41,18 +41,17 @@ else
             if [ "$dirname" == "only_attn_steps" ] || [ "$dirname" == "only_proj_steps" ]; then
                 dirname="mha"
             fi
-            python3 "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "build/aie_${dirname}.mlir.prj/input_physical.mlir" --task mem-util --output_dir "$run_output_dir" >> "$BASEDIR/$results_dir/run_analysis.txt" 2>&1
-            python3 "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "build/aie_${dirname}.mlir" --task comp-dist --output_dir "$run_output_dir" >> "$BASEDIR/$results_dir/run_analysis.txt" 2>&1
-            python3 "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "build/aie_${dirname}.mlir" --task loop-iters --output_dir "$run_output_dir" >> "$BASEDIR/$results_dir/run_analysis.txt" 2>&1
+            python "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "build/aie_${dirname}.mlir.prj/input_physical.mlir" --task mem-util --output_dir "$run_output_dir" >> "$BASEDIR/$results_dir/run_analysis.txt" 2>&1
+            python "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "build/aie_${dirname}.mlir" --task comp-dist --output_dir "$run_output_dir" >> "$BASEDIR/$results_dir/run_analysis.txt" 2>&1
+            python "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "build/aie_${dirname}.mlir" --task loop-iters --output_dir "$run_output_dir" >> "$BASEDIR/$results_dir/run_analysis.txt" 2>&1
             cd "$BASEDIR"
         fi
     done
     echo "Generating plot for execution times..."
-    python3 "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "$BASEDIR/$results_dir/run_no_verify_exec_times.csv" --task exec-times --output_dir "$BASEDIR/$results_dir" >> "$BASEDIR/$results_dir/run_analysis.txt" 2>&1
-    python3 "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "$BASEDIR/$results_dir/fine_grained_profiling_times.csv" --task fine-grained --output_dir "$BASEDIR/$results_dir" >> "$BASEDIR/$results_dir/run_analysis.txt" 2>&1
+    python "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "$BASEDIR/$results_dir/run_no_verify_exec_times.csv" --task exec-times --output_dir "$BASEDIR/$results_dir" >> "$BASEDIR/$results_dir/run_analysis.txt" 2>&1
+    python "$BASEDIR/scripts/run_analysis.py" --dev "$devicename" --input_file "$BASEDIR/$results_dir/fine_grained_profiling_times.csv" --task fine-grained --output_dir "$BASEDIR/$results_dir" >> "$BASEDIR/$results_dir/run_analysis.txt" 2>&1
+
+    echo "Generating trace analysis..."
+    "$BASEDIR/scripts/trace_tiles_full_design.sh" "$BASEDIR/$results_dir/mha" "$BASEDIR/mha_with_trace"
+    echo "Analysis completed."
 fi
-
-echo "Generating trace analysis..."
-"$BASEDIR/scripts/trace_tiles_full_design.sh" "$BASEDIR/$results_dir/mha" "$BASEDIR/mha_with_trace"
-
-echo "Analysis completed."

@@ -372,7 +372,7 @@ def my_matmul(
                 # Exceding the stack size leads to wrong results from the kernel, but no error is triggered.
                 # Stack usage can be checked as explained here:
                 # https://github.com/Xilinx/llvm-aie/issues/487#issuecomment-2969438585
-                @core(core_tiles[row][col], f"ffn-2_mm_{m}x{k}x{n}.o", stack_size=0x5280)
+                @core(core_tiles[row][col], f"ffn-2_mm_{m}x{k}x{n}.o", stack_size=0xF00)
                 def core_body():
                     for _ in range_(0xFFFFFFFF):
                         loop = (
