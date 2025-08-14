@@ -1,0 +1,48 @@
+rm -rf _build
+mkdir -p _build
+cd _build &&  cmake -E env CXXFLAGS="-std=c++23 -ggdb -DDTYPE_IN=std::bfloat16_t -DDTYPE_OUT=std::bfloat16_t -DDTYPE_ACC=float" \
+	cmake `echo /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/..` -D CMAKE_C_COMPILER=gcc-13 -D CMAKE_CXX_COMPILER=g++-13 -DTARGET_NAME=single_core -Dsubdir=single_core
+-- The C compiler identification is GNU 13.3.0
+-- The CXX compiler identification is GNU 13.3.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/gcc-13 - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/g++-13 - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring done (0.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/_build
+cd _build &&  cmake --build . --config Release
+gmake[1]: Entering directory '/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/_build'
+gmake[2]: Entering directory '/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/_build'
+gmake[3]: Entering directory '/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/_build'
+gmake[3]: Leaving directory '/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/_build'
+gmake[3]: Entering directory '/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/_build'
+[ 33%] Building CXX object CMakeFiles/single_core.dir/home/cj/mlir-aie/runtime_lib/test_lib/test_utils.cpp.o
+[ 66%] Building CXX object CMakeFiles/single_core.dir/single_core/test.cpp.o
+[100%] Linking CXX executable single_core
+gmake[3]: Leaving directory '/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/_build'
+[100%] Built target single_core
+gmake[2]: Leaving directory '/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/_build'
+gmake[1]: Leaving directory '/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/_build'
+cp _build/single_core single_core.exe 
+mkdir -p build
+python3 /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/single_core.py -m 16 -k 16 -n 256 --b-col-maj 0 --dev npu2 -M 256 -K 768 -N 768 --dtype_in bf16 --dtype_out bf16 --emulate-bf16-mmul-with-bfp16 true --trace_size 65536 > build/aie_trace_256x768x768_16x16x256.mlir
+mkdir -p build
+cd build && /home/cj/mlir-aie/ironenv/lib/python3.12/site-packages/llvm-aie/bin/clang++ -O2 -std=c++20 --target=aie2p-none-unknown-elf -Wno-parentheses -Wno-attributes -Wno-macro-redefined -Wno-empty-body -Wno-missing-template-arg-list-after-template-kw -DNDEBUG -I /home/cj/mlir-aie/ironenv/lib/python3.12/site-packages/mlir_aie/include  -Dbf16_bf16_ONLY -DDIM_M=16 -DDIM_K=16 -DDIM_N=256 -I/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/../../../../aie_kernels/aie2p -DAIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16 -c /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/mm_4x2.cc -o mm_16x16x256.o
+/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/mm_4x2.cc:207:17: error: static assertion failed due to requirement '16U % (4 * r) == 0'
+  207 |   static_assert(m % (4 * r) == 0);
+      |                 ^~~~~~~~~~~~~~~~
+/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/mm_4x2.cc:271:8: note: in instantiation of function template specialization 'matmul_vectorized_8x8x8_bf16_bf16<16U, 16U, 256U>' requested here
+  271 | combos(matmul_vectorized_c_func) combos(matmul_scalar_c_func)
+      |        ^
+/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/mm_4x2.cc:207:29: note: expression evaluates to '16 == 0'
+  207 |   static_assert(m % (4 * r) == 0);
+      |                 ~~~~~~~~~~~~^~~~
+1 error generated.
+make: *** [Makefile:66: build/mm_16x16x256.o] Error 1
