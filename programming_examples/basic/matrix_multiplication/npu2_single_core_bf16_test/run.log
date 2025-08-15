@@ -14,7 +14,7 @@ cd _build &&  cmake -E env CXXFLAGS="-std=c++23 -ggdb -DDTYPE_IN=std::bfloat16_t
 -- Check for working CXX compiler: /usr/bin/g++-13 - skipped
 -- Detecting CXX compile features
 -- Detecting CXX compile features - done
--- Configuring done (0.3s)
+-- Configuring done (0.2s)
 -- Generating done (0.0s)
 -- Build files have been written to: /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/_build
 cd _build &&  cmake --build . --config Release
@@ -32,28 +32,28 @@ gmake[2]: Leaving directory '/home/cj/mlir-aie/programming_examples/basic/matrix
 gmake[1]: Leaving directory '/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/_build'
 cp _build/single_core single_core.exe 
 mkdir -p build
-python3 /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/single_core.py -m 24 -k 16 -n 264 --b-col-maj 0 --dev npu2 -M 264 -K 768 -N 792 --dtype_in bf16 --dtype_out bf16 --emulate-bf16-mmul-with-bfp16 true --trace_size 0 > build/aie_264x768x792_24x16x264.mlir
+python3 /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/single_core.py -m 16 -k 256 -n 32 --b-col-maj 0 --dev npu2 -M 256 -K 768 -N 768 --dtype_in bf16 --dtype_out bf16 --emulate-bf16-mmul-with-bfp16 true --trace_size 0 > build/aie_256x768x768_16x256x32.mlir
 mkdir -p build
-cd build && /home/cj/mlir-aie/ironenv/lib/python3.12/site-packages/llvm-aie/bin/clang++ -O2 -std=c++20 --target=aie2p-none-unknown-elf -Wno-parentheses -Wno-attributes -Wno-macro-redefined -Wno-empty-body -Wno-missing-template-arg-list-after-template-kw -DNDEBUG -I /home/cj/mlir-aie/ironenv/lib/python3.12/site-packages/mlir_aie/include  -Dbf16_bf16_ONLY -DDIM_M=24 -DDIM_K=16 -DDIM_N=264 -I/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/../../../../aie_kernels/aie2p -DAIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16 -c /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/mm_3x3.cc -o mm_24x16x264.o
+cd build && /home/cj/mlir-aie/ironenv/lib/python3.12/site-packages/llvm-aie/bin/clang++ -O2 -std=c++20 --target=aie2p-none-unknown-elf -Wno-parentheses -Wno-attributes -Wno-macro-redefined -Wno-empty-body -Wno-missing-template-arg-list-after-template-kw -DNDEBUG -I /home/cj/mlir-aie/ironenv/lib/python3.12/site-packages/mlir_aie/include  -Dbf16_bf16_ONLY -DDIM_M=16 -DDIM_K=256 -DDIM_N=32 -I/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/../../../../aie_kernels/aie2p -DAIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16 -c /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/mm_2x4.cc -o mm_16x256x32.o
 mkdir -p build
-cd build && aiecc.py --alloc-scheme=basic-sequential --aie-generate-xclbin --no-compile-host --xclbin-name=final_264x768x792_24x16x264.xclbin \
+cd build && aiecc.py --alloc-scheme=basic-sequential --aie-generate-xclbin --no-compile-host --xclbin-name=final_256x768x768_16x256x32.xclbin \
 			--no-xchesscc --no-xbridge --peano /home/cj/mlir-aie/ironenv/lib/python3.12/site-packages/llvm-aie \
-			--aie-generate-npu-insts --npu-insts-name=insts_264x768x792_24x16x264.txt ../build/aie_264x768x792_24x16x264.mlir
+			--aie-generate-npu-insts --npu-insts-name=insts_256x768x768_16x256x32.txt ../build/aie_256x768x768_16x256x32.mlir
 
-Generating: /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/build/aie_264x768x792_24x16x264.mlir.prj/aie_cdo_elfs.bin
-Generating: /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/build/aie_264x768x792_24x16x264.mlir.prj/aie_cdo_init.bin
-Generating: /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/build/aie_264x768x792_24x16x264.mlir.prj/aie_cdo_enable.bin
+Generating: /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/build/aie_256x768x768_16x256x32.mlir.prj/aie_cdo_elfs.bin
+Generating: /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/build/aie_256x768x768_16x256x32.mlir.prj/aie_cdo_init.bin
+Generating: /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/build/aie_256x768x768_16x256x32.mlir.prj/aie_cdo_enable.bin
 export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
- ./single_core.exe -x build/final_264x768x792_24x16x264.xclbin -i build/insts_264x768x792_24x16x264.txt -k MLIR_AIE -M 264 -K 768 -N 792 --b_col_maj 0 --warmup 10 --iters 1000 --verify 0
+ ./single_core.exe -x build/final_256x768x768_16x256x32.xclbin -i build/insts_256x768x768_16x256x32.txt -k MLIR_AIE -M 256 -K 768 -N 768 --b_col_maj 0 --warmup 10 --iters 1000 --verify 0
 
-Avg NPU matmul time: 2675us.
-Avg NPU gflops: 120.059
+Avg NPU matmul time: 2153.05us.
+Avg NPU gflops: 140.261
 
-Min NPU matmul time: 2347us.
-Max NPU gflops: 136.838
+Min NPU matmul time: 2067us.
+Max NPU gflops: 146.101
 
-Max NPU matmul time: 3468us.
-Min NPU gflops: 92.6065
+Max NPU matmul time: 3012us.
+Min NPU gflops: 100.262
 
 PASS!
 

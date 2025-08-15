@@ -10,23 +10,27 @@ echo "expansion,avg_us,min_us,max_us,M,K,N,m,k,n" > "$output_file"
 rm *.json *.png
 
 cd ".." || continue
+export dtype_in="bf16"
+export dtype_out="bf16"
+export trace_size="131072"
+export emulate_bfloat16_mmul_with_bfp16="1"
 for expansion in 2x2 2x4 3x3 4x2; do
     echo "Processing $expansion"
     export mm_src="mm_$expansion.cc"
     if [ "$expansion" = "3x3" ]; then
         export M="264"
         export K="768"
-        export N="768"
+        export N="792"
         export m="24"
-        export k="256"
-        export n="24"
+        export k="32"
+        export n="264"
     else
         export M="256"
         export K="768"
         export N="768"
         export m="16"
-        export k="256"
-        export n="16"
+        export k="32"
+        export n="256"
     fi
     export runargs="--b_col_maj 0 --warmup 0 --iters 1 --verify 1"
     make clean > /dev/null 2>&1

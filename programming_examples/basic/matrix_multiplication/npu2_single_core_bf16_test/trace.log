@@ -32,17 +32,17 @@ gmake[2]: Leaving directory '/home/cj/mlir-aie/programming_examples/basic/matrix
 gmake[1]: Leaving directory '/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/_build'
 cp _build/single_core single_core.exe 
 mkdir -p build
-python3 /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/single_core.py -m 16 -k 16 -n 256 --b-col-maj 0 --dev npu2 -M 256 -K 768 -N 768 --dtype_in bf16 --dtype_out bf16 --emulate-bf16-mmul-with-bfp16 true --trace_size 65536 > build/aie_trace_256x768x768_16x16x256.mlir
+python3 /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/single_core.py -m 16 -k 256 -n 32 --b-col-maj 0 --dev npu2 -M 256 -K 768 -N 768 --dtype_in bf16 --dtype_out bf16 --emulate-bf16-mmul-with-bfp16 true --trace_size 131072 > build/aie_trace_256x768x768_16x256x32.mlir
 mkdir -p build
-cd build && /home/cj/mlir-aie/ironenv/lib/python3.12/site-packages/llvm-aie/bin/clang++ -O2 -std=c++20 --target=aie2p-none-unknown-elf -Wno-parentheses -Wno-attributes -Wno-macro-redefined -Wno-empty-body -Wno-missing-template-arg-list-after-template-kw -DNDEBUG -I /home/cj/mlir-aie/ironenv/lib/python3.12/site-packages/mlir_aie/include  -Dbf16_bf16_ONLY -DDIM_M=16 -DDIM_K=16 -DDIM_N=256 -I/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/../../../../aie_kernels/aie2p -DAIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16 -c /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/mm_4x2.cc -o mm_16x16x256.o
+cd build && /home/cj/mlir-aie/ironenv/lib/python3.12/site-packages/llvm-aie/bin/clang++ -O2 -std=c++20 --target=aie2p-none-unknown-elf -Wno-parentheses -Wno-attributes -Wno-macro-redefined -Wno-empty-body -Wno-missing-template-arg-list-after-template-kw -DNDEBUG -I /home/cj/mlir-aie/ironenv/lib/python3.12/site-packages/mlir_aie/include  -Dbf16_bf16_ONLY -DDIM_M=16 -DDIM_K=256 -DDIM_N=32 -I/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/../../../../aie_kernels/aie2p -DAIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16 -c /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/mm_4x2.cc -o mm_16x256x32.o
 /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/mm_4x2.cc:207:17: error: static assertion failed due to requirement '16U % (4 * r) == 0'
   207 |   static_assert(m % (4 * r) == 0);
       |                 ^~~~~~~~~~~~~~~~
-/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/mm_4x2.cc:271:8: note: in instantiation of function template specialization 'matmul_vectorized_8x8x8_bf16_bf16<16U, 16U, 256U>' requested here
+/home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/mm_4x2.cc:271:8: note: in instantiation of function template specialization 'matmul_vectorized_8x8x8_bf16_bf16<16U, 256U, 32U>' requested here
   271 | combos(matmul_vectorized_c_func) combos(matmul_scalar_c_func)
       |        ^
 /home/cj/mlir-aie/programming_examples/basic/matrix_multiplication/npu2_single_core_bf16_test/mm_4x2.cc:207:29: note: expression evaluates to '16 == 0'
   207 |   static_assert(m % (4 * r) == 0);
       |                 ~~~~~~~~~~~~^~~~
 1 error generated.
-make: *** [Makefile:66: build/mm_16x16x256.o] Error 1
+make: *** [Makefile:66: build/mm_16x256x32.o] Error 1

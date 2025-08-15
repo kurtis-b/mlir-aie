@@ -8,10 +8,10 @@ import matplotlib.pyplot as plt
 # First number is row, second number is column
 THEORETICAL_PEAK_BF16_BF16 = {"npu2": 256, "npu": 128} # MACs per cycle
 WORKLOAD_AT_EXPANSION = {
-    "2x2": 16*32*256,
-    "2x4": 16*32*256,
-    "3x3": 24*32*264,
-    "4x2": 16*32*256,
+    "2x2": 32*64*64,
+    "2x4": 32*64*64,
+    "3x3": 48*64*72,
+    "4x2": 32*64*64,
 }
 
 CLOCK_FREQ = 10**9  # 1 GHz
