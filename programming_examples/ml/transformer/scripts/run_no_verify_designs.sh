@@ -11,7 +11,7 @@ if [ -f "$output_file" ]; then
     rm "$output_file"
 fi
 touch "$output_file"
-echo "design,avg_us,min_us,max_us,M,K,N" > "$output_file"
+echo "design,avg_us,min_us,max_us,M,K,N,H" > "$output_file"
 
 # Skipping add_and_norm for now because it fails with the Strix
 # for dir in mha mha_by_steps/only_attn_steps mha_by_steps/only_proj_steps add_and_norm ffn-1 ffn-2; do
@@ -25,7 +25,7 @@ for dir in mha mha_by_steps/only_attn_steps mha_by_steps/only_proj_steps ffn-1 f
         avg_line=$(grep -E "Avg.*time.*:.*us" run_output.txt)
         min_line=$(grep -E "Min.*time.*:.*us" run_output.txt)
         max_line=$(grep -E "Max.*time.*:.*us" run_output.txt)
-        matrix_line=$(grep -Eo "Matrix size [0-9]+x[0-9]+(x[0-9]+)?" run_output.txt)
+        matrix_line=$(grep -Eo "Matrix size [0-9]+x[0-9]+(x[0-9]+)?(, H: [0-9]+)?" run_output.txt)
 
         if [[ $avg_line =~ :\ *([0-9.]+)us ]]; then
             avg_value="${BASH_REMATCH[1]}"
@@ -45,20 +45,33 @@ for dir in mha mha_by_steps/only_attn_steps mha_by_steps/only_proj_steps ffn-1 f
             max_value=""
         fi
 
-        if [[ $matrix_line =~ ([0-9]+)x([0-9]+)x([0-9]+) ]]; then
+        if [[ $matrix_line =~ ([0-9]+)x([0-9]+)x([0-9]+),\ H:\ ([0-9]+) ]]; then
             M="${BASH_REMATCH[1]}"
             K="${BASH_REMATCH[2]}"
             N="${BASH_REMATCH[3]}"
+            H="${BASH_REMATCH[4]}"
+        elif [[ $matrix_line =~ ([0-9]+)x([0-9]+)x([0-9]+) ]]; then
+            M="${BASH_REMATCH[1]}"
+            K="${BASH_REMATCH[2]}"
+            N="${BASH_REMATCH[3]}"
+            H=""
+        elif [[ $matrix_line =~ ([0-9]+)x([0-9]+),\ H:\ ([0-9]+) ]]; then
+            M="${BASH_REMATCH[1]}"
+            K="${BASH_REMATCH[2]}"
+            N="1"
+            H="${BASH_REMATCH[3]}"
         elif [[ $matrix_line =~ ([0-9]+)x([0-9]+) ]]; then
             M="${BASH_REMATCH[1]}"
             K="${BASH_REMATCH[2]}"
             N="1"
+            H=""
         else
             M=""
             K=""
             N=""
+            H=""
         fi
-        echo "$dir,$avg_value,$min_value,$max_value,$M,$K,$N" >> "$output_file"
+        echo "$dir,$avg_value,$min_value,$max_value,$M,$K,$N,$H" >> "$output_file"
         cd "$orig_dir" || exit
     fi
 done

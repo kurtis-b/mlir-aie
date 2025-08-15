@@ -77,7 +77,7 @@ int main(int argc, const char *argv[]) {
   int H = vm["H"].as<int>();
 
   if (verbosity >= 1) {
-    std::cout << "Matrix size " << M << "x" << K << "x" << N << std::endl;
+    std::cout << "Matrix size " << M << "x" << K << "x" << N << ", H: " << H << std::endl;
   }
 
   int A_VOLUME = M * K + 2 * K * N;
