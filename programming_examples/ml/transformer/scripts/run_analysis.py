@@ -629,6 +629,7 @@ def analyse_execution_times(csv_file, output_dir):
     M = []
     K = []
     N = []
+    H = []
 
     with open(csv_file, 'r') as f:
         reader = csv.DictReader(f)
@@ -640,6 +641,7 @@ def analyse_execution_times(csv_file, output_dir):
             M.append(int(row['M']))
             K.append(int(row['K']))
             N.append(int(row['N']))
+            H.append(int(row['H']) if row['H'] else 0)
 
         # Add a combined data point for designs containing 'ffn'
         ffn_indices = [i for i, d in enumerate(designs) if 'ffn' in d]
@@ -655,6 +657,7 @@ def analyse_execution_times(csv_file, output_dir):
             M.append(M[ffn_indices[0]])
             K.append(K[ffn_indices[0]])
             N.append(N[ffn_indices[0]])
+            H.append(H[ffn_indices[0]])
         for idx in sorted(ffn_indices, reverse=True):
             del designs[idx]
             del avg_times[idx]
@@ -663,6 +666,7 @@ def analyse_execution_times(csv_file, output_dir):
             del M[idx]
             del K[idx]
             del N[idx]
+            del H[idx]
         # Sum times for 'mha_by_steps/only_attn_steps' and 'mha_by_steps/only_proj_steps'
         attn_idx = None
         proj_idx = None
@@ -706,6 +710,8 @@ def analyse_execution_times(csv_file, output_dir):
                             del max_times[idx]
                             del M[idx]
                             del K[idx]
+                            del N[idx]
+                            del H[idx]
                     else:
                         # Delete mha entry
                         del designs[mha_idx]
@@ -714,15 +720,16 @@ def analyse_execution_times(csv_file, output_dir):
                         del max_times[mha_idx]
                         del M[mha_idx]
                         del K[mha_idx]
-            del N[mha_idx]
+                        del N[mha_idx]
+                        del H[mha_idx]
         # Replace 'mha_by_steps/only_attn_steps' with 'mha-attn' in designs
         designs = ['mha-attn' if d == 'mha_by_steps/only_attn_steps' else d for d in designs]
         # Replace 'mha_by_steps/only_proj_steps' with 'mha-proj' in designs
         designs = ['mha-proj' if d == 'mha_by_steps/only_proj_steps' else d for d in designs]
 
     # Sort the data by avg_times (lowest to highest)
-    sorted_data = sorted(zip(avg_times, min_times, max_times, designs, M, K, N))
-    avg_times, min_times, max_times, designs, M, K, N = map(list, zip(*sorted_data))
+    sorted_data = sorted(zip(avg_times, min_times, max_times, designs, M, K, N, H))
+    avg_times, min_times, max_times, designs, M, K, N, H = map(list, zip(*sorted_data))
     fig, ax = plt.subplots(figsize=(max(8, len(designs) * 1.2), 5))
     x = range(len(designs))
     ax.bar(x, avg_times, color='skyblue', label='Avg (us)')
@@ -743,20 +750,18 @@ def analyse_execution_times(csv_file, output_dir):
     # Increase the y-axis upper limit by 50% to add whitespace at the top
     ax.set_ylim(top=y_max * 1.5)
     y_text = y_max * 1.45  # Place annotation at the original top (now below the new limit)
-    for idx, (m, k, n, bar_height, design) in enumerate(zip(M, K, N, avg_times, designs)):
+    for idx, (m, k, n, h, bar_height, design) in enumerate(zip(M, K, N, H, avg_times, designs)):
         text = ""
         if design == 'ffn':
             text = f"{2*m*k*n/1e6:.1f}×10$^9$ MACs\n16 cores"
         elif design == 'mha':
             total_macs = 4 * m * k * n  + m * k * m + m * m * n
-            total_exps = m * m
-            total_adds = m * n
-            text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n12 cores\n{total_exps/1e3:.1f}×10$^3$ Exps\n2 cores\n{total_adds/1e3:.1f}×10$^3$ Adds\n1 core"
+            total_exps = m * m * h
+            text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n12 cores\n{total_exps/1e3:.1f}×10$^3$ Exps\n2 cores"
         elif design == 'mha-attn':
             total_macs = m * k * n + m * k * m + m * m * n
-            total_exps = m * m
-            total_adds = m * n
-            text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n6 cores\n{total_exps/1e3:.1f}×10$^3$ Exps\n2 cores\n{total_adds/1e3:.1f}×10$^3$ Adds\n1 core"
+            total_exps = m * m * h
+            text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n6 cores\n{total_exps/1e3:.1f}×10$^3$ Exps\n2 cores"
         elif design == 'mha-proj':
             total_macs = 3 * m * k * n
             text = f"{total_macs/1e6:.1f}×10$^9$ MACs\n6 cores"
