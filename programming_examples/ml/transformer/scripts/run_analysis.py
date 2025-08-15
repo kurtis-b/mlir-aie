@@ -806,8 +806,8 @@ def analyse_fine_grained_times(csv_file, output_dir):
             max_times.append(float(row['max_us']))
 
     # Sort the data by avg_times (lowest to highest)
-    sorted_data = sorted(zip(avg_times, min_times, max_times, step))
-    avg_times, min_times, max_times, step = map(list, zip(*sorted_data))
+    sorted_data = sorted(zip(step, avg_times, min_times, max_times))
+    step, avg_times, min_times, max_times = map(list, zip(*sorted_data))
     fig, ax = plt.subplots(figsize=(max(8, len(step) * 1.2), 5))
     x = range(len(step))
     ax.bar(x, avg_times, color='skyblue', label='Avg (us)')
