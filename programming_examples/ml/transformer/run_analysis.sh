@@ -28,9 +28,7 @@ else
     echo "Running designs without verification to gather execution times..."
     "$BASEDIR/scripts/run_no_verify_designs.sh" "$BASEDIR/$results_dir"
     "$BASEDIR/scripts/run_fine_grained_profiling.sh" "$BASEDIR/$results_dir"
-    # Skipping add_and_norm for now because it fails with the Strix
-    # for dir in "$BASEDIR/mha" "$BASEDIR/mha_by_steps/only_attn_steps" "$BASEDIR/mha_by_steps/only_proj_steps" "$BASEDIR/add_and_norm" "$BASEDIR/ffn-1" "$BASEDIR/ffn-2"; do
-    for dir in "$BASEDIR/mha" "$BASEDIR/mha_by_steps/only_attn_steps" "$BASEDIR/mha_by_steps/only_proj_steps" "$BASEDIR/ffn-1" "$BASEDIR/ffn-2"; do
+    for dir in "$BASEDIR/mha" "$BASEDIR/mha_by_steps/only_attn_steps" "$BASEDIR/mha_by_steps/only_proj_steps" "$BASEDIR/ffn-1" "$BASEDIR/ffn-2" "$BASEDIR/add_and_norm"; do
         if [ -d "$dir" ]; then
             run_output_dir="$BASEDIR/$results_dir/$(basename "$dir")"
             mkdir -p "$run_output_dir"
