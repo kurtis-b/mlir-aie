@@ -87,7 +87,7 @@ def my_addandnorm(
     # Using 2 rows because there's not enough channels to use 4 cores and 3 cores makes the tiling uneven. 
     # But Layernorm is much faster than the other transformer operations even with 2 rows, so will likely 
     # move to 1 row at some point.
-    n_aie_rows = 2 
+    n_aie_rows = 1
     n_aie_cores = n_aie_rows * n_aie_cols
 
     dtype_in = str_to_dtype(dtype_in_str)
@@ -272,21 +272,21 @@ def my_addandnorm(
                         )  # Workaround for issue #1547
                         for _ in loop:
                             elem_in_a = A_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
-                            elem_in_b = B_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
                             elem_c = C_l1_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
-                            add(elem_in_a, elem_in_b, elem_c)
-                            A_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
-                            B_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
-                            C_l1_fifos[row][col].release(ObjectFifoPort.Produce, 1)
-
-                            elem_c = C_l1_fifos[row][col].acquire(ObjectFifoPort.Consume, 1)
-                            elem_out = C_l1l2_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
                             # TODO: Split up the LayerNorm into a step to generate
                             # the sums of each row and then a step to normalize.
                             # This would remove the need to tile across the whole
                             # workload's rows.
-                            norm(elem_c, elem_out)
+                            norm(elem_in_a, elem_c)
+                            A_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
+                            C_l1_fifos[row][col].release(ObjectFifoPort.Produce, 1)
+
+                            elem_in_b = B_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
+                            elem_c = C_l1_fifos[row][col].acquire(ObjectFifoPort.Consume, 1)
+                            elem_out = C_l1l2_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
+                            add(elem_c, elem_in_b, elem_out)
                             C_l1_fifos[row][col].release(ObjectFifoPort.Consume, 1)
+                            B_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
                             C_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
 
 
