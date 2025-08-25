@@ -858,3 +858,55 @@ INFO:     Shape: (6, 48, 64, 64), Count: 2
   ax1.set_xticklabels(symbol_names, rotation=45, ha='right')
 INFO: Saved L3 tiling plot to /home/cj/mlir-aie/programming_examples/ml/transformer/npu2_results/ffn-2/l3_tiling.png
 INFO: Not in MHA output directory, skipping workload analysis.
+INFO: Tile memory usage excluding stack (in bytes and kB):
+INFO: Tile (7, 1): 24592 bytes (24.02 kB)
+INFO:   Buffer: C_L1L2_0_0_cons_buff_0, 4 x bf16 = 8 bytes
+INFO:   Buffer: C_L1L2_0_0_cons_buff_1, 4 x bf16 = 8 bytes
+INFO:   Buffer: B_L3L2_0_cons_buff_0, 3072 x bf16 = 6144 bytes
+INFO:   Buffer: B_L3L2_0_cons_buff_1, 3072 x bf16 = 6144 bytes
+INFO:   Buffer: A_L3L2_0_cons_buff_0, 3072 x bf16 = 6144 bytes
+INFO:   Buffer: A_L3L2_0_cons_buff_1, 3072 x bf16 = 6144 bytes
+INFO: Tile (7, 2): 64 bytes (0.06 kB)
+INFO:   Buffer: C_L1L2_0_0_buff_0, 4 x bf16 = 8 bytes
+INFO:   Buffer: C_L1L2_0_0_buff_1, 4 x bf16 = 8 bytes
+INFO:   Buffer: C_L1_0_0_buff_0, 4 x bf16 = 8 bytes
+INFO:   Buffer: C_L1_0_0_buff_1, 4 x bf16 = 8 bytes
+INFO:   Buffer: B_L2L1_0_cons_buff_0, 4 x bf16 = 8 bytes
+INFO:   Buffer: B_L2L1_0_cons_buff_1, 4 x bf16 = 8 bytes
+INFO:   Buffer: A_L2L1_0_cons_buff_0, 4 x bf16 = 8 bytes
+INFO:   Buffer: A_L2L1_0_cons_buff_1, 4 x bf16 = 8 bytes
+INFO: Saved L2 memory utilization plot to /home/cj/mlir-aie/programming_examples/ml/transformer/npu2_results/add_and_norm/l2_mem_utilization.png
+INFO: Saved L1 memory utilization plot to /home/cj/mlir-aie/programming_examples/ml/transformer/npu2_results/add_and_norm/l1_mem_utilization.png
+INFO: 
+Tile loop upper bounds and matmul info:
+INFO: Tile (7, 2): 64 iterations
+INFO: Tiles with 'matmul' and 'macs_one_iter': []
+INFO: Tiles without 'matmul' and/or 'macs_one_iter': ['(7, 2)']
+INFO: No tiles with matmul found for computation utilization plot.
+INFO: Found objectfifo A_L2L1_0: num_elem=3072, dtype=bf16
+INFO: Found objectfifo A_L3L2_0: num_elem=3072, dtype=bf16
+INFO: Found objectfifo B_L2L1_0: num_elem=3072, dtype=bf16
+INFO: Found objectfifo B_L3L2_0: num_elem=3072, dtype=bf16
+INFO: Found objectfifo C_L1L2_0_0: num_elem=3072, dtype=bf16
+INFO: Found objectfifo C_L2L3_0: num_elem=3072, dtype=bf16
+INFO: 
+Metadata counts and shapes:
+INFO: 
+Metadata symbol: C_L2L3_0
+INFO:   Total tiles passed: 64
+INFO:   Unique shapes and counts:
+INFO:     Shape: (64, 1, 4, 768), Count: 1
+INFO: 
+Metadata symbol: A_L3L2_0
+INFO:   Total tiles passed: 64
+INFO:   Unique shapes and counts:
+INFO:     Shape: (64, 1, 4, 768), Count: 1
+INFO: 
+Metadata symbol: B_L3L2_0
+INFO:   Total tiles passed: 64
+INFO:   Unique shapes and counts:
+INFO:     Shape: (64, 1, 4, 768), Count: 1
+/home/cj/mlir-aie/programming_examples/ml/transformer/scripts/run_analysis.py:494: UserWarning: set_ticklabels() should only be used with a fixed number of ticks, i.e. after set_ticks() or using a FixedLocator.
+  ax1.set_xticklabels(symbol_names, rotation=45, ha='right')
+INFO: Saved L3 tiling plot to /home/cj/mlir-aie/programming_examples/ml/transformer/npu2_results/add_and_norm/l3_tiling.png
+INFO: Not in MHA output directory, skipping workload analysis.

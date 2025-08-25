@@ -12,9 +12,7 @@ if [ -f "$output_file" ]; then
 fi
 touch "$output_file"
 
-# Skipping add_and_norm for now because it fails with the Strix
-# for dir in mha mha_by_steps/only_attn_steps mha_by_steps/only_proj_steps add_and_norm ffn-1 ffn-2; do
-for dir in mha mha_by_steps/only_attn_steps mha_by_steps/only_proj_steps ffn-1 ffn-2; do
+for dir in mha mha_by_steps/only_attn_steps mha_by_steps/only_proj_steps ffn-1 ffn-2 add_and_norm; do
     if [ -d "$dir" ]; then
         echo "Processing $dir"
         orig_dir=$(pwd)
