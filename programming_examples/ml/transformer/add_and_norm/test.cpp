@@ -51,16 +51,16 @@ constexpr int verify_stochastic_n_samples = 1000;
 
 // Verification tolerance
 // See "Note on Numerical Tolerances" in README.md
-float abs_tol = matmul_common::get_abs_tol<C_DATATYPE>();
-float rel_tol = matmul_common::get_rel_tol<C_DATATYPE>();
+float abs_tol = add_and_norm_common::get_abs_tol<C_DATATYPE>();
+float rel_tol = add_and_norm_common::get_rel_tol<C_DATATYPE>();
 
 int main(int argc, const char *argv[]) {
   // Program arguments parsing
   cxxopts::Options options("Matrix Matrix Multiplication Test");
   cxxopts::ParseResult vm;
-  matmul_common::add_default_options(options);
+  add_and_norm_common::add_default_options(options);
 
-  matmul_common::parse_options(argc, argv, options, vm);
+  add_and_norm_common::parse_options(argc, argv, options, vm);
   int verbosity = vm["verbosity"].as<int>();
   int do_verify = vm["verify"].as<int>();
   int n_iterations = vm["iters"].as<int>();
@@ -158,13 +158,13 @@ int main(int argc, const char *argv[]) {
   A_DATATYPE *bufA = bo_a.map<A_DATATYPE *>();
   std::vector<A_DATATYPE> AVec(A_VOLUME);
   for (int i = 0; i < A_VOLUME; i++) {
-    AVec[i] = matmul_common::get_random<A_DATATYPE>();
+    AVec[i] = add_and_norm_common::get_random<A_DATATYPE>();
   }
   memcpy(bufA, AVec.data(), (AVec.size() * sizeof(A_DATATYPE)));
   B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
   std::vector<B_DATATYPE> BVec(B_VOLUME);
   for (int i = 0; i < B_VOLUME; i++) {
-    BVec[i] = matmul_common::get_random<B_DATATYPE>();
+    BVec[i] = add_and_norm_common::get_random<B_DATATYPE>();
     // Diagonal:
     // if(i % N == i / N) {
     //   BVec[i] = 1.0;
@@ -189,9 +189,9 @@ int main(int argc, const char *argv[]) {
     std::cout << "Verification tolerance " << abs_tol << " absolute, "
               << rel_tol << " relative.\n";
     std::cout << "A = \n";
-    matmul_common::print_matrix(AVec, N);
+    add_and_norm_common::print_matrix(AVec, N);
     std::cout << "B = \n";
-    matmul_common::print_matrix(BVec, N);
+    add_and_norm_common::print_matrix(BVec, N);
   }
 
   // Instruction buffer for DMA configuration
@@ -250,12 +250,12 @@ int main(int argc, const char *argv[]) {
       }
       auto vstart = std::chrono::system_clock::now();
       if (do_verify_stochastic) {
-        errors = matmul_common::verify_stochastic<A_DATATYPE, C_DATATYPE,
+        errors = add_and_norm_common::verify_stochastic<A_DATATYPE, C_DATATYPE,
                                                   ACC_DATATYPE>(
             M, N, AVec, BVec, CVec, verify_stochastic_n_samples, verbosity,
             abs_tol, rel_tol, b_col_maj);
       } else {
-        errors = matmul_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
+        errors = add_and_norm_common::verify<A_DATATYPE, C_DATATYPE, ACC_DATATYPE>(
             M, N, AVec, BVec, CVec, verbosity, abs_tol, rel_tol, b_col_maj);
       }
       auto vstop = std::chrono::system_clock::now();
@@ -281,7 +281,7 @@ int main(int argc, const char *argv[]) {
 
   // Only write out trace of last iteration.
   if (trace_size > 0) {
-    matmul_common::write_out_trace((char *)bufTrace, trace_size,
+    add_and_norm_common::write_out_trace((char *)bufTrace, trace_size,
                                    vm["trace_file"].as<std::string>());
   }
 

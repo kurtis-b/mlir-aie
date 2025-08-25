@@ -80,16 +80,21 @@ ifeq ($(dtype_out),i8)
 endif
 
 
-layernnorm_src := ${srcdir}/../../../../aie_kernels/aie2/layernorm.cc
 add_src := ${srcdir}/../../../../aie_kernels/aie2/add.cc
+layernorm_src := ${srcdir}/../../../../aie_kernels/aie2/layernorm.cc
+ifeq ($(devicename),npu)
+runtime_lib := ${srcdir}/../../../../aie_runtime_lib/AIE2 
+else ifeq ($(devicename),npu2)
+runtime_lib := ${srcdir}/../../../../aie_runtime_lib/AIE2P
+endif
 
-build/layernorm_${m}x${n}.o: ${layernnorm_src}
+build/layernorm_${m}x${n}.o: ${layernorm_src}
 	mkdir -p ${@D}
-	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -I${srcdir}/../../../../aie_runtime_lib/AIE2 -c $< -o ${@F}
+	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -I${runtime_lib} -c $< -o ${@F}
 
 build/add_${m}x${n}.o: ${add_src}
 	mkdir -p ${@D}
-	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -I${srcdir}/../../../../aie_runtime_lib/AIE2 -c $< -o ${@F}
+	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} -DDIM_M=${m} -DDIM_N=${n} -I${runtime_lib} -c $< -o ${@F}
 
 build/addandnorm_${m}x${n}.o: build/layernorm_${m}x${n}.o build/add_${m}x${n}.o
 	mkdir -p ${@D}

@@ -25,7 +25,7 @@
 
 #include "test_utils.h"
 
-namespace matmul_common {
+namespace add_and_norm_common {
 
 // --------------------------------------------------------------------------
 // Command Line Argument Handling
@@ -110,46 +110,30 @@ std::bfloat16_t get_random<std::bfloat16_t>() {
 template <typename Tin, typename Tout, typename Tacc>
 void addandnorm(int M, int N, const std::vector<Tin> A,
                 const std::vector<Tin> B, std::vector<Tout> &C, int b_col_maj) {
-  std::vector<Tin> add_result(M * N);
-  for (int row = 0; row < M; row++) {
-    for (int col = 0; col < N; col++) {
-      float sum = 0;
-      if (!b_col_maj) {
-        sum = float(A[row * N + col] + B[row * N + col]);
-      } else {
-        sum = float(A[row * N + col] + B[row * N + col]);
-      }
-      add_result[row * N + col] = Tin(sum);
-    }
-  }
+  // First, compute layernorm of A: for each row, normalize A[row]
+  std::vector<float> A_norm(M * N);
   for (int row = 0; row < M; row++) {
     float sum = 0;
     float sumsq = 0;
     for (int col = 0; col < N; col++) {
-      sum += (float)add_result[row * N + col];
-      sumsq +=
-          (float)add_result[row * N + col] * (float)add_result[row * N + col];
-      if ((row == 0) && ((col + 1) % 16 == 0)) {
-        float mean = sum / (float)N;
-        float var = (sumsq / (float)N) - (mean * mean);
-        // std::cout << sum << ", " << sumsq << ", " << mean << ", " << var
-        //           << std::endl;
-      }
+      float val = static_cast<float>(A[row * N + col]);
+      sum += val;
+      sumsq += val * val;
     }
-    float mean = sum / (float)N;
-    float var = (sumsq / (float)N) - (mean * mean);
+    float mean = sum / N;
+    float var = (sumsq / N) - (mean * mean);
+    float denom = std::sqrt(var);
     for (int col = 0; col < N; col++) {
-      //   if (row == 0 && col < 10) {
-      //     std::cout << std::endl;
-      //     std::cout << add_result[row * N + col] << ", ";
-      //     std::cout << sum << " " << sumsq << ", ";
-      //     std::cout << mean << " " << var << ", ";
-      //   }
-      C[row * N + col] =
-          Tout((add_result[row * N + col] - mean) / std::sqrt(var));
-      //   if (row == 0 && col < 10) {
-      //     std::cout << "result: " << C[row * N + col] << std::endl;
-      //   }
+      A_norm[row * N + col] = (static_cast<float>(A[row * N + col]) - mean) / denom;
+      C[row * N + col] = static_cast<Tout>(A_norm[row * N + col]);
+    }
+  }
+  // Then, add normalized A and B
+  for (int row = 0; row < M; row++) {
+    for (int col = 0; col < N; col++) {
+      float b_val = static_cast<float>(B[row * N + col]);
+      float result = A_norm[row * N + col] + b_val;
+      C[row * N + col] = static_cast<Tout>(result);
     }
   }
 }
@@ -157,25 +141,26 @@ void addandnorm(int M, int N, const std::vector<Tin> A,
 template <typename Tin, typename Tout, typename Tacc>
 Tout addandnorm_acc(int M, int N, int row, int col, const std::vector<Tin> A,
                     const std::vector<Tin> B, int b_col_maj) {
-  Tout outVal = 0;
+  // First, compute mean and variance of the row of A
   float sum = 0;
-  if (!b_col_maj) {
-    sum = float(A[row * N + col] + B[row * N + col]);
-  } else {
-    sum = float(A[row * N + col] + B[row * N + col]);
-  }
-  Tacc add_result = Tacc(sum);
-  sum = 0;
   float sumsq = 0;
   for (int i = 0; i < N; i++) {
-    float add = A[row * N + i] + B[row * N + i];
-    sum += add;
-    sumsq += add * add;
+    float val = static_cast<float>(A[row * N + i]);
+    sum += val;
+    sumsq += val * val;
   }
   float mean = sum / N;
   float var = (sumsq / N) - (mean * mean);
-  outVal = (outVal - mean) / std::sqrt(var);
-  return (Tout)outVal;
+  float denom = std::sqrt(var);
+
+  // Normalize A[row, col]
+  float a_norm = (static_cast<float>(A[row * N + col]) - mean) / denom;
+
+  // Add normalized A and B
+  float b_val = static_cast<float>(B[row * N + col]);
+  float result = a_norm + b_val;
+
+  return static_cast<Tout>(result);
 }
 
 // nearly_equal function adapted from Stack Overflow, License CC BY-SA 4.0
@@ -330,7 +315,7 @@ void print_matrix(const std::vector<int8_t> matrix, int n_cols,
                col_sep, elide_sym, w);
 }
 
-constexpr int max_printable_errors = 32;
+constexpr int max_printable_errors = 256;
 
 template <typename Tout>
 struct error {
@@ -420,9 +405,9 @@ int verify(int M, int N, std::vector<Tin> A, std::vector<Tin> B,
   print_error_summary(std::cout, n_errors, errors, max_rel_error);
 
   std::cout << std::endl << "Reference:" << std::endl;
-  matmul_common::print_matrix(CRef, N);
+  add_and_norm_common::print_matrix(CRef, N);
   std::cout << std::endl << "Output:" << std::endl;
-  matmul_common::print_matrix(C, N);
+  add_and_norm_common::print_matrix(C, N);
   //   for (int i = 0; i < N; i++) {
   //     std::cout << C[i] << ", " << A[i] << ", " << C[i] - A[i] << std::endl;
   //   }
@@ -493,6 +478,6 @@ void write_out_trace(char *traceOutPtr, size_t trace_size, std::string path) {
   }
 }
 
-} // namespace matmul_common
+} // namespace add_and_norm_common
 
 #endif
