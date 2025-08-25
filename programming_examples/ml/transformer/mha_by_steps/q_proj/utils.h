@@ -25,7 +25,7 @@
 
 #include "test_utils.h"
 
-namespace matmul_common {
+namespace mha_common {
 
 // --------------------------------------------------------------------------
 // Command Line Argument Handling
@@ -399,9 +399,9 @@ int verify(int M, int N, int K, int H, std::vector<Tin> A, std::vector<Tin> B,
 
   //   if (n_errors > 0) {
   //   std::cout << std::endl << "Reference:" << std::endl;
-  //   matmul_common::print_matrix(CRef, M);
+  //   mha_common::print_matrix(CRef, M);
   //   std::cout << std::endl << "Output:" << std::endl;
-  //   matmul_common::print_matrix(C, M);
+  //   mha_common::print_matrix(C, M);
   //   }
 
   return n_errors;
@@ -473,6 +473,6 @@ void write_out_trace(char *traceOutPtr, size_t trace_size, std::string path) {
   }
 }
 
-} // namespace matmul_common
+} // namespace mha_common
 
 #endif
