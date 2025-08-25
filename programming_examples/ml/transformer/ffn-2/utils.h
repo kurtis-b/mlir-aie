@@ -25,7 +25,7 @@
 
 #include "test_utils.h"
 
-namespace matmul_common {
+namespace ffn_2_common {
 
 // --------------------------------------------------------------------------
 // Command Line Argument Handling
@@ -382,9 +382,9 @@ int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
 
   if (n_errors > 0) {
     std::cout << std::endl << "Reference:" << std::endl;
-    matmul_common::print_matrix(CRef, N);
+    ffn_2_common::print_matrix(CRef, N);
     std::cout << std::endl << "Output:" << std::endl;
-    matmul_common::print_matrix(C, N);
+    ffn_2_common::print_matrix(C, N);
   }
 
   return n_errors;
@@ -453,6 +453,6 @@ void write_out_trace(char *traceOutPtr, size_t trace_size, std::string path) {
   }
 }
 
-} // namespace matmul_common
+} // namespace ffn_2_common
 
 #endif
