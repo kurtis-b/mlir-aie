@@ -213,7 +213,7 @@ def my_matmul(
             matmul_vectorized_func_name,
             inputs=[A_l1_ty, B_l1_ty, C_l1_ty],
         )
-        relu = external_func(f"{dtype_out_str}_relu", inputs=[C_l1_ty, C_l1_ty])
+        gelu = external_func(f"{dtype_out_str}_gelu", inputs=[C_l1_ty, C_l1_ty])
 
         # Tile declarations as tile[row][col]
         if dev == "npu":
@@ -397,7 +397,7 @@ def my_matmul(
                                 matmul(elem_in_a, elem_in_b, elem_out)
                                 A_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
                                 B_l2l1_fifos[col].release(ObjectFifoPort.Consume, 1)
-                            relu(elem_out, elem_out)
+                            gelu(elem_out, elem_out)
 
                             C_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
 

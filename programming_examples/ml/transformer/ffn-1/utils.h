@@ -25,7 +25,7 @@
 
 #include "test_utils.h"
 
-namespace matmul_common {
+namespace ffn_1_common {
 
 // --------------------------------------------------------------------------
 // Command Line Argument Handling
@@ -139,10 +139,10 @@ void matmul_fused_relu(int M, int N, int K, const std::vector<Tin> A,
           running_sum += Tacc(A[row * K + k] * B[k + col * K]);
         }
       }
-      if (running_sum < 0) {
-        running_sum = 0;
-      }
-      C[row * N + col] = Tout(running_sum);
+      // Apply GELU activation function
+      float val = static_cast<float>(running_sum);
+      float gelu = 0.5f * val * (1.0f + std::tanh((2.0f / M_PI) * (val + 0.044715f * std::pow(val, 3))));
+      C[row * N + col] = Tout(gelu);
     }
   }
 }
@@ -173,10 +173,10 @@ Tout mul_acc_fused_relu(int M, int N, int K, int row, int col,
       running_sum += Tacc(A[row * K + k] * B[k + col * K]);
     }
   }
-  if (running_sum < 0) {
-    running_sum = 0;
-  }
-  return (Tout)running_sum;
+  // Apply GELU activation function
+  float val = static_cast<float>(running_sum);
+  float gelu = 0.5f * val * (1.0f + std::tanh((2.0f / M_PI) * (val + 0.044715f * std::pow(val, 3))));
+  return (Tout)gelu;
 }
 
 // nearly_equal function adapted from Stack Overflow, License CC BY-SA 4.0
@@ -422,9 +422,9 @@ int verify(int M, int N, int K, std::vector<Tin> A, std::vector<Tin> B,
 
   if (n_errors > 0) {
     std::cout << std::endl << "Reference:" << std::endl;
-    matmul_common::print_matrix(CRef, N);
+    ffn_1_common::print_matrix(CRef, N);
     std::cout << std::endl << "Output:" << std::endl;
-    matmul_common::print_matrix(C, N);
+    ffn_1_common::print_matrix(C, N);
   }
 
   return n_errors;
@@ -493,6 +493,6 @@ void write_out_trace(char *traceOutPtr, size_t trace_size, std::string path) {
   }
 }
 
-} // namespace matmul_common
+} // namespace ffn_1_common
 
 #endif

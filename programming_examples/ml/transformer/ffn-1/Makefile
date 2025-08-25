@@ -60,21 +60,19 @@ KERNEL_DEFINES += -DAIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16
 aieargs += --emulate-bf16-mmul-with-bfp16 true
 endif
 
-RELU_KERNEL_DEFINES=-DDIM_M=${m} -DDIM_N=${n}
+GELU_KERNEL_DEFINES=-DDIM_M=${m} -DDIM_N=${n}
 
 include ${srcdir}/../makefile-common
-
-relu_src := ${srcdir}/../../../../aie_kernels/aie2/relu.cc
 
 build/mm_${m}x${k}x${n}.o: ${kernels_dir}/mm.cc
 	mkdir -p ${@D}
 	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} ${KERNEL_DEFINES} -c $< -o ${@F}
 
-build/relu_${m}x${n}.o: ${relu_src}
+build/gelu_${m}x${n}.o: ${kernels_dir}/gelu.cc
 	mkdir -p ${@D}
-	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} ${RELU_KERNEL_DEFINES} -c $< -o ${@F}
+	cd ${@D} && ${KERNEL_CC} ${KERNEL_CFLAGS} ${GELU_KERNEL_DEFINES} -c $< -o ${@F}
 
-build/ffn-1_mm_${m}x${k}x${n}.o: build/mm_${m}x${k}x${n}.o build/relu_${m}x${n}.o
+build/ffn-1_mm_${m}x${k}x${n}.o: build/mm_${m}x${k}x${n}.o build/gelu_${m}x${n}.o
 	mkdir -p ${@D}
 	ar rvs $@ $^
 
