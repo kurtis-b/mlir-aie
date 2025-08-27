@@ -861,6 +861,7 @@ def my_mha(
             np.ndarray[(2 * K * N,), np.dtype[dtype_in]],                   # Order: W_V, W_O
             np.ndarray[((4 * M * N),), np.dtype[dtype_out]],                # Order: Q, K, V, attn_score_v
         )
+        # BD's 0-4 will be used for each shim tile. Got these values by looking at the generated MLIR. 
         def sequence(A, B, C):
             # Send the data for calculating Q, K, V projections
             for row_offset in range(0, M, q_proj_dims[0]):

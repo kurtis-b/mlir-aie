@@ -11,8 +11,8 @@
 // This file contains common helper functions for the matrix multiplication
 // host code, such as verifying and printing matrices.
 
-#ifndef MATRIX_MULTIPLICATION_H
-#define MATRIX_MULTIPLICATION_H
+#ifndef ADD_AND_NORM_H
+#define ADD_AND_NORM_H
 
 #include <algorithm>
 #include <bits/stdc++.h>
@@ -111,11 +111,13 @@ template <typename Tin, typename Tout, typename Tacc>
 void addandnorm(int M, int N, const std::vector<Tin> A,
                 const std::vector<Tin> B, std::vector<Tout> &C, int b_col_maj) {
   // First, compute layernorm of A: for each row, normalize A[row]
+  std::cout << "Computing layernorm for A...\n";
   std::vector<float> A_norm(M * N);
   for (int row = 0; row < M; row++) {
     float sum = 0;
     float sumsq = 0;
     for (int col = 0; col < N; col++) {
+      std::cout << "Computing layernorm for A[" << row << ", " << col << "]...\n";
       float val = static_cast<float>(A[row * N + col]);
       sum += val;
       sumsq += val * val;
@@ -124,10 +126,12 @@ void addandnorm(int M, int N, const std::vector<Tin> A,
     float var = (sumsq / N) - (mean * mean);
     float denom = std::sqrt(var);
     for (int col = 0; col < N; col++) {
+      std::cout << "Normalizing A[" << row << ", " << col << "]...\n";
       A_norm[row * N + col] = (static_cast<float>(A[row * N + col]) - mean) / denom;
       C[row * N + col] = static_cast<Tout>(A_norm[row * N + col]);
     }
   }
+  std::cout << "Layernorm for A complete.\n";
   // Then, add normalized A and B
   for (int row = 0; row < M; row++) {
     for (int col = 0; col < N; col++) {
@@ -382,6 +386,7 @@ int verify(int M, int N, std::vector<Tin> A, std::vector<Tin> B,
 
   for (int row = 0; row < M; row++) {
     for (int col = 0; col < N; col++) {
+      std::cout << "Verifying [" << row << ", " << col << "]...\n";
       std::optional<struct error<Tout>> error =
           verify_single(std::cout, row, col, CRef[row * N + col],
                         C[row * N + col], abs_tol, rel_tol);

@@ -84,9 +84,6 @@ def my_addandnorm(
     trace_size,
     generate_taps=False,
 ):
-    # Using 2 rows because there's not enough channels to use 4 cores and 3 cores makes the tiling uneven. 
-    # But Layernorm is much faster than the other transformer operations even with 2 rows, so will likely 
-    # move to 1 row at some point.
     n_aie_rows = 1
     n_aie_cores = n_aie_rows * n_aie_cols
 
@@ -140,12 +137,10 @@ def my_addandnorm(
                 [tile(2, row)] for row in range(0, 6) # 3rd column only
             ]
         else:
-            tiles = [
-                [tile(7, row)] for row in range(0, 6) # 8th column only
-            ]
-        shim_tiles = tiles[0]
-        mem_tiles = tiles[1]
-        core_tiles = tiles[2:]
+            # Using 1 AIE since there's only space for 1 core to run add and norm
+            shim_tiles = [tile(4, 0)] # Col 4, Row 0
+            mem_tiles = [tile(4, 1)] # Col 4, Row 1
+            core_tiles = [[tile(2, 4)]] # Col 2, Row 4
 
         # AIE-array data movement with object fifos
         A_l3l2_fifos = [None] * n_aie_cols
@@ -296,6 +291,9 @@ def my_addandnorm(
             np.ndarray[(M * N,), np.dtype[dtype_in]],
             np.ndarray[(M * N,), np.dtype[dtype_out]],
         )
+        # Add and Norm will use BD's 5-7 of the shim tile, since it uses the same shim tile as 
+        # one column of FFN-1. Setting this explicitly since FFN-1 uses BD's 0-4 for the same 
+        # shim tile.
         def sequence(A, B, C):
             # for row_tile in range(M // m // n_aie_rows):
             #     for col_tile in range(N // n // n_aie_cols):
@@ -322,12 +320,13 @@ def my_addandnorm(
                 # row_offset = row_tile * m * n_aie_rows * N
                 # col_offset = col_tile * n + col * n
                 # offset = col_offset + row_offset
+
                 offset = 0
                 sizes = [M // m // n_aie_rows, N // n // n_aie_cols, m * n_aie_rows, n * n_aie_cols]
                 strides = [m * n_aie_rows * N, n * n_aie_cols, N, 1]
                 npu_dma_memcpy_nd(
                     metadata=C_l2l3_fifos[col],
-                    bd_id=0,
+                    bd_id=5,
                     mem=C,
                     offsets=[0, 0, 0, offset],
                     sizes=sizes,
@@ -337,7 +336,7 @@ def my_addandnorm(
                 # A input transfer:
                 npu_dma_memcpy_nd(
                     metadata=A_l3l2_fifos[col],
-                    bd_id=1,
+                    bd_id=6,
                     mem=A,
                     offsets=[0, 0, 0, offset],
                     sizes=sizes,
@@ -347,7 +346,7 @@ def my_addandnorm(
                 # B input transfer:
                 npu_dma_memcpy_nd(
                     metadata=B_l3l2_fifos[col],
-                    bd_id=2,
+                    bd_id=7,
                     mem=B,
                     offsets=[0, 0, 0, offset],
                     sizes=sizes,

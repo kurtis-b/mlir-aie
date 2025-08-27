@@ -4,126 +4,64 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
-# Copyright (C) 2024, Advanced Micro Devices, Inc.
+# Copyright (C) 2025, Advanced Micro Devices, Inc.
 # 
 ##===----------------------------------------------------------------------===##
-
-# This file is to be included from one of the subdirectories, e.g. 
-# /matrix_vector/, after defining at least the targetname and kernels variable.
-#
-# The build steps for these matrix and matrix-vector multiplication designs all
-# look the same. We need to build:
-#  - A common host test code, 
-#  - a kernel implemented in C using AIE intrinsics,
-#  - the actual design implemented in MLIR.
-# There are also targets for signing the resulting xclbin, extracting traces 
-# and cleaning everything.
-#
-# Since the targets are all the same for all designs, they are defined here.
-# Subdirectories need only include this makefile-common after defining the 
-# following variables:
-# - subdir	    -- subdirectory you are including this from
-# - targetname  -- resulting test host code will be named targetname.exe
-# - kernels	    -- which kernels in kernels folder to compile and link in
-#					  (without file extension)
-# - M, K, N	    -- final dimensions of matrices, set in each makefile separately 
-#				      may be used by design; N=1 for matrix-vector
-
 srcdir := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 current_dir := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 include ${current_dir}../../../makefile-common
+targetname=encoder
 
-# M, K, N: final GEMM dimensions
-M1?=256
-K1?=768
-N1?=3072
-M2?=256
-K2?=3072
-N2?=768
+dtype_in_cpp=std::bfloat16_t
+dtype_out_cpp=std::bfloat16_t
+dtype_acc_cpp=float
+seq_len_cpp=256
+emb_dim_cpp=768
+ffn_dim_cpp=3072
+
 b_col_maj?=0
+trace_size?=0
 
-runargs=--b_col_maj ${b_col_maj} -v 1 --warmup 10 --iters 100
-
-# set this flag to 1 for linear buffer allocation
-# else, 0 for bank-aware
-use_linear_buf_alloc?=1
-
-ifeq (${use_linear_buf_alloc}, 1)
-buffer_aloc_flag=basic-sequential
-else
-buffer_aloc_flag=bank-aware
-endif
-
-dtype_in?=i16
-dtype_out?=i16
-trace_size?=4096
-
-
-ifeq ($(dtype_in),bf16)
-	dtype_in_cpp=std::bfloat16_t
-endif
-ifeq ($(dtype_out),bf16)
-	dtype_out_cpp=std::bfloat16_t
-	dtype_acc_cpp=float
-endif
-ifeq ($(dtype_in),i16)
-	dtype_in_cpp=int16_t
-endif
-ifeq ($(dtype_out),i16)
-	dtype_out_cpp=int16_t
-	dtype_acc_cpp=int16_t
-endif
-ifeq ($(dtype_out),i32)
-	dtype_out_cpp=int32_t
-	dtype_acc_cpp=int32_t
-endif
-ifeq ($(dtype_out),f32)
-	dtype_out_cpp=float
-	dtype_acc_cpp=float
-endif
-ifeq ($(dtype_in),i8)
-	dtype_in_cpp=int8_t
-endif
-ifeq ($(dtype_out),i8)
-	dtype_out_cpp=int8_t
-	dtype_acc_cpp=int8_t
-endif
-
-targetname=transformer
-xclbin_target1?=build/final_ffn-1.xclbin
-insts_target1?=build/insts_ffn-1.txt
-xclbin_target2?=build/final_ffn-2.xclbin
-insts_target2?=build/insts_ffn-2.txt
-xclbin_target3?=build/final_addandnorm.xclbin
-insts_target3?=build/insts_addandnorm.txt
-
-xclbin_target?=${xclbin_target3}
-
-CHESS?=false
+runargs=-x ../add_and_norm/build/final_add_and_norm.xclbin --instr_ffn1 ../ffn-1/build/insts_ffn-1.txt --kernel_ffn1 FFNONE --instr_ffn2 ../ffn-2/build/insts_ffn-2.txt --kernel_ffn2 FFNTWO --instr_addnorm ../add_and_norm/build/insts_add_and_norm.txt --kernel_addnorm ADD_AND_NORM --instr_mha ../mha/build/insts_mha.txt --kernel_mha MHA
 
 # default sequential buffer allocation, if not already defined
 buffer_aloc_flag?=basic-sequential
 
+# When make is run, the builds are generated in their respective directories
+# Thus, the print targets are able to be run even though they're defined in
+# makefile-common and it isn't included here
 .PHONY: all
-all: ${xclbin_target} ${targetname}.exe
+all: 
+	rm -rf build
+	mkdir -p build
+	prev_xclbin=""
+	counter=0x901; prev_xclbin=""; \
+	for dir in ffn-1 ffn-2 mha add_and_norm; do \
+		$(MAKE) -C ../$$dir clean; \
+		$(MAKE) -C ../$$dir; \
+		mlir_target=$$(make -C ../$$dir print-mlir-target --no-print-directory | tail -n 1); \
+		xclbin_target=$$(make -C ../$$dir print-xclbin-target --no-print-directory | tail -n 1); \
+		insts_target=$$(make -C ../$$dir print-insts-target --no-print-directory | tail -n 1); \
+		echo "$$dir mlir_target: $$mlir_target"; \
+		echo "$$dir xclbin_target: $$xclbin_target"; \
+		echo "$$dir insts_target: $$insts_target"; \
+		cp ../$$dir/build/*.o build/; \
+		kernel_name=$$(echo $$dir | tr -d '-'); \
+		kernel_name=$$(echo $$kernel_name | tr '[:lower:]' '[:upper:]'); \
+		kernel_name=$$(echo $$kernel_name | sed -e 's/1/ONE/g' -e 's/2/TWO/g' -e 's/3/THREE/g' -e 's/4/FOUR/g' -e 's/5/FIVE/g' -e 's/6/SIX/g' -e 's/7/SEVEN/g' -e 's/8/EIGHT/g' -e 's/9/NINE/g' -e 's/0/ZERO/g'); \
+		aiecc_flags="--xclbin-kernel-name=$$kernel_name --xclbin-kernel-id=$$counter --xclbin-instance-name=$${kernel_name}INST --no-aiesim --alloc-scheme=${buffer_aloc_flag} --aie-generate-xclbin --no-compile-host --xclbin-name=../../$$dir/$$xclbin_target --no-xchesscc --no-xbridge --peano ${PEANO_INSTALL_DIR} --aie-generate-npu-insts --npu-insts-name=../../$$dir/$$insts_target"; \
+		if [ -n "$$prev_xclbin" ]; then aiecc_flags="$$aiecc_flags --xclbin-input=$$prev_xclbin"; fi; \
+		echo "$$dir aiecc_flags: $$aiecc_flags"; \
+		cd build && aiecc.py $$aiecc_flags ../../$$dir/$$mlir_target; \
+		counter=$$(printf "0x%03x" $$(( 0x$${counter#0x} + 1 )) ); \
+		prev_xclbin=../../$$dir/$$xclbin_target; \
+		cd ..; \
+	done
 
-${xclbin_target}: 
-	mkdir -p ${@D}
-	$(MAKE) -C ffn-1
-	$(MAKE) -C ffn-2
-	$(MAKE) -C add_and_norm
-	cp ffn-1/build/*.o build/
-	cp ffn-2/build/*.o build/
-	cp add_and_norm/build/*.o build/
-	cd ${@D} && aiecc.py --xclbin-kernel-name=FFNONE --xclbin-kernel-id=0x901 --xclbin-instance-name=FFNONEINST --no-aiesim --alloc-scheme=basic-sequential --aie-generate-cdo --no-compile-host --xclbin-name=final_ffn-1.xclbin --no-xchesscc --no-xbridge --peano /home/cj/mlir-aie/my_install/llvm-aie --aie-generate-npu --npu-insts-name=insts_ffn-1.txt ../ffn-1/build/aie_ffn-1.mlir
-	cd ${@D} && aiecc.py --xclbin-kernel-name=FFNTWO --xclbin-kernel-id=0x902 --xclbin-instance-name=FFNTWOINST --no-aiesim  --alloc-scheme=basic-sequential --aie-generate-cdo --no-compile-host --xclbin-input=final_ffn-1.xclbin --xclbin-name=final_ffn-2.xclbin --no-xchesscc --no-xbridge --peano /home/cj/mlir-aie/my_install/llvm-aie --aie-generate-npu --npu-insts-name=insts_ffn-2.txt ../ffn-2/build/aie_ffn-2.mlir
-	cd ${@D} && aiecc.py --xclbin-kernel-name=ADDANDNORM --xclbin-kernel-id=0x903 --xclbin-instance-name=ADDANDNORMINST --no-aiesim  --alloc-scheme=basic-sequential --aie-generate-cdo --no-compile-host --xclbin-input=final_ffn-2.xclbin --xclbin-name=final_addandnorm.xclbin --no-xchesscc --no-xbridge --peano /home/cj/mlir-aie/my_install/llvm-aie --aie-generate-npu --npu-insts-name=insts_addandnorm.txt ../add_and_norm/build/aie_addandnorm.mlir
-
-${targetname}.exe: ${srcdir}/test.cpp ${srcdir}/common.h
+${targetname}.exe: ${srcdir}/test.cpp
 	rm -rf _build
 	mkdir -p _build
-	cd _build && ${powershell} cmake -E env CXXFLAGS="-std=c++23 -ggdb -DDTYPE_IN=${dtype_in_cpp} -DDTYPE_OUT=${dtype_out_cpp} -DDTYPE_ACC=${dtype_acc_cpp}" \
-		cmake ${srcdir} -D CMAKE_C_COMPILER=gcc-13 -D CMAKE_CXX_COMPILER=g++-13 -DTARGET_NAME=${targetname}
+	cd _build && ${powershell} cmake `${getwslpath} ${srcdir}` -DTARGET_NAME=${targetname} -DSEQ_LEN=${seq_len_cpp} -DEMB_DIM=${emb_dim_cpp} -DFFN_DIM=${ffn_dim_cpp}
 	cd _build && ${powershell} cmake --build . --config Release
 ifeq "${powershell}" "powershell.exe"
 	cp _build/${targetname}.exe $@
@@ -131,16 +69,15 @@ else
 	cp _build/${targetname} $@ 
 endif
 
-xclbin_sign=/opt/xilinx/xrt/amdxdna/setup_xclbin_firmware.sh 
-.PHONY: sign
-sign: ${xclbin_target}
-	${xclbin_sign} -dev Phoenix -xclbin $<
-
 .PHONY: run
-run: ${targetname}.exe ${xclbin_target}
+run: ${targetname}.exe
 	export XRT_HACK_UNSECURE_LOADING_XCLBIN=1 && \
-	${powershell} ./$< -x ${xclbin_target} --instr1 ${insts_target1} --kernel1 FFNONE --M1 ${M1} --K1 ${K1} --N1 ${N1} --instr2 ${insts_target2} --kernel2 FFNTWO --M2 ${M2} --K2 ${K2} --N2 ${N2} --instr3 ${insts_target3} --kernel3 ADDANDNORM ${runargs}
+	${powershell} ./$< ${runargs}
 
 .PHONY: clean
-clean:
+clean: clean_trace
 	rm -rf build _build ${targetname}.exe
+
+.PHONY: clean_trace
+clean_trace:
+	rm -rf tmpTrace parse*.json trace_${target_suffix}.json trace.txt
