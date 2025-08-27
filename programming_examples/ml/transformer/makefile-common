@@ -187,6 +187,15 @@ else
 	cp _build/${targetname} $@ 
 endif
 
+print-mlir-target:
+	echo $(mlir_target)
+
+print-xclbin-target:
+	echo $(xclbin_target)
+
+print-insts-target:
+	echo $(insts_target)
+
 xclbin_sign=/opt/xilinx/xrt/amdxdna/setup_xclbin_firmware.sh 
 .PHONY: sign
 sign: ${xclbin_target}
