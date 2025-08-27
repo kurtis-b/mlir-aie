@@ -11,8 +11,8 @@
 // This file contains common helper functions for the matrix multiplication
 // host code, such as verifying and printing matrices.
 
-#ifndef MATRIX_MULTIPLICATION_H
-#define MATRIX_MULTIPLICATION_H
+#ifndef FFN_2_H
+#define FFN_2_H
 
 #include <algorithm>
 #include <bits/stdc++.h>

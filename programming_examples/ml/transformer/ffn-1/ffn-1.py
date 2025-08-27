@@ -407,6 +407,8 @@ def my_matmul(
             np.ndarray[(K * N,), np.dtype[dtype_in]],
             np.ndarray[(M * N,), np.dtype[dtype_out]],
         )
+        # BD's 0-4 will be used for each shim tile. Got these values by looking at the generated MLIR. 
+        # The first column's shim tile will have BD's 5-7 used by the Add & Norm design. 
         def sequence(A, B, C):
             # We are limited in the number of BDs. After synchronizing, we can reuse BDs.
             # We only transfer 4 rows of tiles at once before starting a new transfer block.

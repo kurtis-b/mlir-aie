@@ -56,7 +56,7 @@ float rel_tol = add_and_norm_common::get_rel_tol<C_DATATYPE>();
 
 int main(int argc, const char *argv[]) {
   // Program arguments parsing
-  cxxopts::Options options("Matrix Matrix Multiplication Test");
+  cxxopts::Options options("Add and Norm Test");
   cxxopts::ParseResult vm;
   add_and_norm_common::add_default_options(options);
 
