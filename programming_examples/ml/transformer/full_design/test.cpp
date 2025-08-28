@@ -66,7 +66,7 @@
 #define FFN2_OUT_VOLUME (SEQ_LEN * EMB_DIM)
 #endif
 #ifndef MHA_WEIGHT_VOLUME
-#define MHA_WEIGHT_VOLUME (SEQ_LEN * EMB_DIM)
+#define MHA_WEIGHT_VOLUME (EMB_DIM * EMB_DIM)
 #endif
 using A_DATATYPE = DTYPE_IN;
 using B_DATATYPE = DTYPE_IN;
@@ -268,6 +268,77 @@ int addandnorm(xrt::device &device, xrt::xclbin &xclbin, xrt::hw_context &contex
   return 0;
 }
 
+int mha(xrt::device &device, xrt::xclbin &xclbin, xrt::hw_context &context,
+         std::vector<A_DATATYPE> &actVec, std::vector<C_DATATYPE> &outVec,
+         const std::string& instr_file, const std::string& kernel_name) {
+  size_t ACT_SIZE = (ACT_VOLUME * sizeof(A_DATATYPE));
+  size_t WEIGHT_SIZE = (MHA_WEIGHT_VOLUME * sizeof(B_DATATYPE));
+  size_t OUT_SIZE = (ACT_VOLUME * sizeof(C_DATATYPE));
+
+  std::vector<uint32_t> instr_v = test_utils::load_instr_binary(instr_file);
+  // Get the kernel from the xclbin
+  auto xkernels = xclbin.get_kernels();
+  int verbosity = 0;
+  auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(),
+                               [kernel_name, verbosity](xrt::xclbin::kernel &k) {
+                                 auto name = k.get_name();
+                                 return name.rfind(kernel_name, 0) == 0;
+                               });
+  auto kernelName = xkernel.get_name();
+  // get a kernel handle
+  auto kernel = xrt::kernel(context, kernelName);
+
+  auto bo_instr = xrt::bo(device, instr_v.size() * sizeof(int), XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
+  auto bo_a = xrt::bo(device, ACT_SIZE + 2 * WEIGHT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(3)); // X, W_Q, W_K
+  auto bo_b = xrt::bo(device, 2 * WEIGHT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(4)); // W_V, W_O
+  auto bo_out = xrt::bo(device, 4 * OUT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(5)); // Q, K, V, O
+  auto bo_tmp1 = xrt::bo(device, 1, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(6));
+  // Workaround so we declare a really small trace buffer when one is not used
+  auto bo_trace = xrt::bo(device, 4, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(7));
+
+  A_DATATYPE *bufA = bo_a.map<A_DATATYPE *>();
+  memcpy(bufA, actVec.data(), (actVec.size() * sizeof(A_DATATYPE)));
+  std::vector<B_DATATYPE> weightVecA(2 * MHA_WEIGHT_VOLUME);
+  for (int i = 0; i < 2 * MHA_WEIGHT_VOLUME; i++) {
+    weightVecA[i] = mha_common::get_random<B_DATATYPE>();
+  }
+  memcpy(bufA + ACT_VOLUME, weightVecA.data(), (weightVecA.size() * sizeof(B_DATATYPE)));
+
+  B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
+  std::vector<B_DATATYPE> weightVecB(2 * MHA_WEIGHT_VOLUME);
+  for (int i = 0; i < 2 * MHA_WEIGHT_VOLUME; i++) {
+    weightVecB[i] = ffn_1_common::get_random<B_DATATYPE>();
+  }
+  memcpy(bufB, weightVecB.data(), (weightVecB.size() * sizeof(B_DATATYPE)));
+
+  // Initialize outputs; bufOut is results matrix plus tracing info
+  char *bufOut = bo_out.map<char *>();
+  outVec = std::vector<C_DATATYPE>(ACT_VOLUME);
+  memset(bufOut, 0, 4 * OUT_SIZE);
+  char *bufTrace = bo_trace.map<char *>();
+
+  // Instruction buffer for DMA configuration
+  void *bufInstr = bo_instr.map<void *>();
+  memcpy(bufInstr, instr_v.data(), instr_v.size() * sizeof(int));
+
+  bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  bo_a.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  bo_b.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  bo_out.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+  unsigned int opcode = 3;
+  auto run = kernel(opcode, bo_instr, instr_v.size(), bo_a, bo_b, bo_out, bo_tmp1, bo_trace);
+  ert_cmd_state r = run.wait();
+  if (r != ERT_CMD_STATE_COMPLETED) {
+    std::cout << "Kernel did not complete. Returned status: " << r << "\n";
+    return 1;
+  }
+  bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+  memcpy(outVec.data(), bufOut, (outVec.size() * sizeof(C_DATATYPE)));
+
+  return 0;
+}
+
 int main(int argc, const char *argv[]) {
   // Program arguments parsing
   cxxopts::Options options("Matrix Matrix Multiplication Test");
@@ -293,7 +364,21 @@ int main(int argc, const char *argv[]) {
   std::vector<A_DATATYPE> act2Vec = std::vector<A_DATATYPE>(SEQ_LEN * EMB_DIM);
   std::vector<C_DATATYPE> ffn1Vec = std::vector<C_DATATYPE>(SEQ_LEN * FFN_DIM);
 
-  int fail = ffn1(device, xclbin, context, act1Vec, ffn1Vec,
+  auto start_time = std::chrono::high_resolution_clock::now();
+  int fail = mha(device, xclbin, context, act1Vec, act2Vec,
+                  vm["instr_mha"].as<std::string>(), vm["kernel_mha"].as<std::string>());
+  std::cout << "\nMHA Output:\n";
+  for (int i = 0; i < 10; i++) {
+    std::cout << act2Vec[i] << ",";
+  }
+  // First input should be output from FFN-2 and second input should be skip connection input
+  fail |= addandnorm(device, xclbin, context, act2Vec, act1Vec, act1Vec,
+                  vm["instr_addnorm"].as<std::string>(), vm["kernel_addnorm"].as<std::string>());
+  std::cout << "\nAdd & Norm Output:\n";
+  for (int i = 0; i < 10; i++) {
+    std::cout << act1Vec[i] << ",";
+  }
+  fail |= ffn1(device, xclbin, context, act1Vec, ffn1Vec,
                   vm["instr_ffn1"].as<std::string>(), vm["kernel_ffn1"].as<std::string>());
   std::cout << "\nFFN1 Output:\n";
   for (int i = 0; i < 10; i++) {
@@ -313,5 +398,8 @@ int main(int argc, const char *argv[]) {
     std::cout << act1Vec[i] << ",";
   }
   std::cout << "\n";
+  auto end_time = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+  std::cout << "Total time elapsed: " << duration << " ms\n";
   return fail;
 }
