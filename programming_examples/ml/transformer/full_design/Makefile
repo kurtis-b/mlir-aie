@@ -18,6 +18,7 @@ dtype_acc_cpp=float
 seq_len_cpp=256
 emb_dim_cpp=768
 ffn_dim_cpp=3072
+LOG_RUNTIME=false
 
 b_col_maj?=0
 trace_size?=0
@@ -61,7 +62,7 @@ all:
 ${targetname}.exe: ${srcdir}/test.cpp
 	rm -rf _build
 	mkdir -p _build
-	cd _build && ${powershell} cmake `${getwslpath} ${srcdir}` -DTARGET_NAME=${targetname} -DSEQ_LEN=${seq_len_cpp} -DEMB_DIM=${emb_dim_cpp} -DFFN_DIM=${ffn_dim_cpp}
+	cd _build && ${powershell} cmake `${getwslpath} ${srcdir}` -DTARGET_NAME=${targetname} -DSEQ_LEN=${seq_len_cpp} -DEMB_DIM=${emb_dim_cpp} -DFFN_DIM=${ffn_dim_cpp} -DLOG_RUNTIME=${LOG_RUNTIME}
 	cd _build && ${powershell} cmake --build . --config Release
 ifeq "${powershell}" "powershell.exe"
 	cp _build/${targetname}.exe $@

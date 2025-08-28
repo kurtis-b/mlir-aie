@@ -30,6 +30,7 @@ endif()
 set(SEQ_LEN 256 CACHE STRING "sequence length")
 set(EMB_DIM 768 CACHE STRING "embedding dimension")
 set(FFN_DIM 3072 CACHE STRING "feedforward network dimension")
+set(LOG_RUNTIME false CACHE BOOL "Enable runtime logging")
 set(TARGET_NAME test CACHE STRING "Target to be built")
 
 SET (ProjectName ${TARGET_NAME})
@@ -54,6 +55,7 @@ target_compile_definitions(${currentTarget} PUBLIC
     SEQ_LEN=${SEQ_LEN}
     EMB_DIM=${EMB_DIM}
     FFN_DIM=${FFN_DIM}
+    LOG_RUNTIME=${LOG_RUNTIME}
 )
 
 target_include_directories (${currentTarget} PUBLIC
