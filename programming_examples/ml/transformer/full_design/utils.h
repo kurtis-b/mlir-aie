@@ -22,10 +22,142 @@
 #include <optional>
 #include <ostream>
 #include <stdfloat>
-
-#include "test_utils.h"
+#include <thread>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
 
 namespace full_design_common {
+  // Thread-safe queue that can take in 1 or 2 inputs (as std::vector<T> or std::pair<std::vector<T1>, std::vector<T2>>)
+  template <typename T1, typename T2 = void>
+  class ThreadSafeQueue {
+  public:
+    using SenderId = std::thread::id;
+    using ValueType = std::pair<std::vector<T1>, std::vector<T2>>;
+
+    struct Item {
+      ValueType value;
+      SenderId sender;
+      Item(ValueType v, SenderId s) : value(std::move(v)), sender(s) {}
+    };
+
+    ThreadSafeQueue() = default;
+
+    // Push for two inputs
+    void push(std::vector<T1> v1, std::vector<T2> v2, SenderId sender_id) {
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queue_.emplace(ValueType(std::move(v1), std::move(v2)), sender_id);
+      }
+      cv_.notify_one();
+    }
+
+    // Pop both value and sender id
+    bool pop(std::vector<T1>& out1, std::vector<T2>& out2, SenderId& sender) {
+      std::unique_lock<std::mutex> lock(mutex_);
+      cv_.wait(lock, [&] { return !queue_.empty() || done_; });
+      if (queue_.empty())
+        return false;
+      out1 = std::move(queue_.front().value.first);
+      out2 = std::move(queue_.front().value.second);
+      sender = queue_.front().sender;
+      queue_.pop();
+      return true;
+    }
+
+    // Overload for backward compatibility (ignores sender)
+    bool pop(std::vector<T1>& out1, std::vector<T2>& out2) {
+      SenderId dummy;
+      return pop(out1, out2, dummy);
+    }
+
+    void setDone() {
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        done_ = true;
+      }
+      cv_.notify_all();
+    }
+
+    bool empty() {
+      std::lock_guard<std::mutex> lock(mutex_);
+      return queue_.empty();
+    }
+
+    SenderId getCurrentThreadId() const {
+      return std::this_thread::get_id();
+    }
+  private:
+    std::queue<Item> queue_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool done_ = false;
+  };
+
+  // Specialization for single input
+  template <typename T1>
+  class ThreadSafeQueue<T1, void> {
+  public:
+    using SenderId = std::thread::id;
+    using ValueType = std::vector<T1>;
+
+    struct Item {
+      ValueType value;
+      SenderId sender;
+      Item(ValueType v, SenderId s) : value(std::move(v)), sender(s) {}
+    };
+
+    ThreadSafeQueue() = default;
+
+    void push(std::vector<T1> value, SenderId sender_id) {
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queue_.emplace(std::move(value), sender_id);
+      }
+      cv_.notify_one();
+    }
+
+    // Pop both value and sender id
+    bool pop(std::vector<T1>& result, SenderId& sender) {
+      std::unique_lock<std::mutex> lock(mutex_);
+      cv_.wait(lock, [&] { return !queue_.empty() || done_; });
+      if (queue_.empty())
+        return false;
+      result = std::move(queue_.front().value);
+      sender = queue_.front().sender;
+      queue_.pop();
+      return true;
+    }
+
+    // Overload for backward compatibility (ignores sender)
+    bool pop(std::vector<T1>& result) {
+      SenderId dummy;
+      return pop(result, dummy);
+    }
+
+    void setDone() {
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        done_ = true;
+      }
+      cv_.notify_all();
+    }
+
+    bool empty() {
+      std::lock_guard<std::mutex> lock(mutex_);
+      return queue_.empty();
+    }
+
+    SenderId getCurrentThreadId() const {
+      return std::this_thread::get_id();
+    }
+  private:
+    std::queue<Item> queue_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool done_ = false;
+  };
 
 // --------------------------------------------------------------------------
 // Command Line Argument Handling
