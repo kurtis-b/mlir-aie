@@ -68,6 +68,9 @@
 #ifndef MHA_WEIGHT_VOLUME
 #define MHA_WEIGHT_VOLUME (EMB_DIM * EMB_DIM)
 #endif
+#ifndef LOG_RUNTIME
+#define LOG_RUNTIME false
+#endif
 using A_DATATYPE = DTYPE_IN;
 using B_DATATYPE = DTYPE_IN;
 using C_DATATYPE = DTYPE_OUT;
@@ -357,49 +360,428 @@ int main(int argc, const char *argv[]) {
   // get a hardware context
   xrt::hw_context context(device, xclbin.get_uuid());
 
-  std::vector<A_DATATYPE> act1Vec = std::vector<A_DATATYPE>(SEQ_LEN * EMB_DIM);
+  std::vector<A_DATATYPE> act1Vec = std::vector<A_DATATYPE>(ACT_VOLUME);
   for (int i = 0; i < ACT_VOLUME; i++) {
     act1Vec[i] = full_design_common::get_random<A_DATATYPE>();
   }
-  std::vector<A_DATATYPE> act2Vec = std::vector<A_DATATYPE>(SEQ_LEN * EMB_DIM);
-  std::vector<C_DATATYPE> ffn1Vec = std::vector<C_DATATYPE>(SEQ_LEN * FFN_DIM);
-
-  auto start_time = std::chrono::high_resolution_clock::now();
-  int fail = mha(device, xclbin, context, act1Vec, act2Vec,
-                  vm["instr_mha"].as<std::string>(), vm["kernel_mha"].as<std::string>());
-  std::cout << "\nMHA Output:\n";
-  for (int i = 0; i < 10; i++) {
-    std::cout << act2Vec[i] << ",";
-  }
-  // First input should be output from FFN-2 and second input should be skip connection input
-  fail |= addandnorm(device, xclbin, context, act2Vec, act1Vec, act1Vec,
-                  vm["instr_addnorm"].as<std::string>(), vm["kernel_addnorm"].as<std::string>());
-  std::cout << "\nAdd & Norm Output:\n";
-  for (int i = 0; i < 10; i++) {
-    std::cout << act1Vec[i] << ",";
-  }
-  fail |= ffn1(device, xclbin, context, act1Vec, ffn1Vec,
-                  vm["instr_ffn1"].as<std::string>(), vm["kernel_ffn1"].as<std::string>());
-  std::cout << "\nFFN1 Output:\n";
-  for (int i = 0; i < 10; i++) {
-    std::cout << ffn1Vec[i] << ",";
-  }
-  fail |= ffn2(device, xclbin, context, ffn1Vec, act2Vec,
-                  vm["instr_ffn2"].as<std::string>(), vm["kernel_ffn2"].as<std::string>());
-  std::cout << "\nFFN2 Output:\n";
-  for (int i = 0; i < 10; i++) {
-    std::cout << act2Vec[i] << ",";
-  }
-  // First input should be output from FFN-2 and second input should be skip connection input
-  fail |= addandnorm(device, xclbin, context, act2Vec, act1Vec, act1Vec,
-                  vm["instr_addnorm"].as<std::string>(), vm["kernel_addnorm"].as<std::string>());
-  std::cout << "\nAdd & Norm Output:\n";
+  std::cout << "Input: ";
   for (int i = 0; i < 10; i++) {
     std::cout << act1Vec[i] << ",";
   }
   std::cout << "\n";
-  auto end_time = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-  std::cout << "Total time elapsed: " << duration << " ms\n";
-  return fail;
+
+  full_design_common::ThreadSafeQueue<A_DATATYPE> q_mha, q_ffn1, q_ffn2;
+  full_design_common::ThreadSafeQueue<C_DATATYPE, C_DATATYPE> q_addnorm;
+  auto mha_sender_id = q_mha.getCurrentThreadId();
+  auto ffn1_sender_id = q_ffn1.getCurrentThreadId();
+  auto ffn2_sender_id = q_ffn2.getCurrentThreadId();
+  auto addnorm_sender_id = q_addnorm.getCurrentThreadId();
+  std::atomic<bool> stop{false};
+  int numLayers = 32;  // 16 layers, so 2x that for number of iterations of Add & Norm
+  std::atomic<int> iteration{0};
+
+  // Buffer to hold the value from q_ffn1 until q_ffn2 provides its value
+  std::mutex ffn_pair_mutex;
+  std::mutex device_context_mutex;
+  std::optional<std::vector<A_DATATYPE>> ffn1_pending;
+
+  // Stage 1: MHA
+  std::thread t1([&] {
+    // Set up MHA
+    const std::string& instr_file = vm["instr_mha"].as<std::string>();
+    const std::string& kernel_name = vm["kernel_mha"].as<std::string>();
+    // std::cout << "MHA Kernel: " << kernel_name << " Instr: " << instr_file << "\n";
+
+    size_t ACT_SIZE = (ACT_VOLUME * sizeof(A_DATATYPE));
+    size_t WEIGHT_SIZE = (MHA_WEIGHT_VOLUME * sizeof(B_DATATYPE));
+    size_t OUT_SIZE = (ACT_VOLUME * sizeof(C_DATATYPE));
+
+    std::vector<uint32_t> instr_v = test_utils::load_instr_binary(instr_file);
+    // Get the kernel from the xclbin
+    auto xkernels = xclbin.get_kernels();
+    auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(),
+                                [kernel_name](xrt::xclbin::kernel &k) {
+                                  auto name = k.get_name();
+                                  return name.rfind(kernel_name, 0) == 0;
+                                });
+    auto kernelName = xkernel.get_name();
+    // get a kernel handle
+    device_context_mutex.lock();
+    auto kernel = xrt::kernel(context, kernelName);
+
+    auto bo_instr = xrt::bo(device, instr_v.size() * sizeof(int), XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
+    auto bo_a = xrt::bo(device, ACT_SIZE + 2 * WEIGHT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(3)); // X, W_Q, W_K
+    auto bo_b = xrt::bo(device, 2 * WEIGHT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(4)); // W_V, W_O
+    auto bo_out = xrt::bo(device, 4 * OUT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(5)); // Q, K, V, O
+    auto bo_tmp1 = xrt::bo(device, 1, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(6));
+    // Workaround so we declare a really small trace buffer when one is not used
+    auto bo_trace = xrt::bo(device, 4, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(7));
+    device_context_mutex.unlock();
+
+    A_DATATYPE *bufA = bo_a.map<A_DATATYPE *>();
+    std::vector<A_DATATYPE> actVec(ACT_VOLUME);
+    std::vector<B_DATATYPE> weightVecA(2 * MHA_WEIGHT_VOLUME);
+    B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
+    std::vector<B_DATATYPE> weightVecB(2 * MHA_WEIGHT_VOLUME);
+
+    // Initialize outputs; bufOut is results matrix plus tracing info
+    char *bufOut = bo_out.map<char *>();
+    std::vector<C_DATATYPE> outVec = std::vector<C_DATATYPE>(ACT_VOLUME);
+    char *bufTrace = bo_trace.map<char *>();
+
+    // Instruction buffer for DMA configuration
+    void *bufInstr = bo_instr.map<void *>();
+    memcpy(bufInstr, instr_v.data(), instr_v.size() * sizeof(int));
+    bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    unsigned int opcode = 3;
+    mha_sender_id = q_mha.getCurrentThreadId();
+    // std::cout << "MHA: Current sender_id: " << mha_sender_id << "\n";
+
+    for (int i = 0; i < 2 * MHA_WEIGHT_VOLUME; i++) {
+      weightVecA[i] = mha_common::get_random<B_DATATYPE>();
+    }
+    for (int i = 0; i < 2 * MHA_WEIGHT_VOLUME; i++) {
+      weightVecB[i] = ffn_1_common::get_random<B_DATATYPE>();
+    }
+
+    // Run loop
+    while (!stop) {
+      if (q_mha.pop(actVec)) {
+#if LOG_RUNTIME
+        auto start_time_run = std::chrono::high_resolution_clock::now();
+#endif
+        memcpy(bufA, actVec.data(), (actVec.size() * sizeof(A_DATATYPE)));
+        memcpy(bufA + ACT_VOLUME, weightVecA.data(), (weightVecA.size() * sizeof(B_DATATYPE)));
+        memcpy(bufB, weightVecB.data(), (weightVecB.size() * sizeof(B_DATATYPE)));
+
+        bo_a.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        bo_b.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+        auto run = kernel(opcode, bo_instr, instr_v.size(), bo_a, bo_b, bo_out, bo_tmp1, bo_trace);
+        ert_cmd_state r = run.wait();
+        if (r != ERT_CMD_STATE_COMPLETED) {
+          std::cout << "Kernel did not complete. Returned status: " << r << "\n";
+          return;
+        }
+        bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        memcpy(outVec.data(), bufOut, (outVec.size() * sizeof(C_DATATYPE)));
+
+        // Send both actVec and outVec to q_addnorm
+        q_addnorm.push(actVec, outVec, mha_sender_id);
+#if LOG_RUNTIME
+        auto end_time_run = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed_time = end_time_run - start_time_run;
+        std::cout << "MHA Kernel execution time: " << elapsed_time.count() << " ms\n";
+#endif
+      }
+    }
+  });
+
+  // Stage 2: FFN1
+  std::thread t2([&] {
+    // Set up FFN1
+    const std::string& instr_file = vm["instr_ffn1"].as<std::string>();
+    const std::string& kernel_name = vm["kernel_ffn1"].as<std::string>();
+    // std::cout << "FFN1 Kernel: " << kernel_name << " Instr: " << instr_file << "\n";
+
+    size_t ACT_SIZE = (ACT_VOLUME * sizeof(A_DATATYPE));
+    size_t WEIGHT_SIZE = (FFN1_WEIGHT_VOLUME * sizeof(B_DATATYPE));
+    size_t OUT_SIZE = (FFN1_OUT_VOLUME * sizeof(C_DATATYPE));
+
+    std::vector<uint32_t> instr_v = test_utils::load_instr_binary(instr_file);
+    // Get the kernel from the xclbin
+    auto xkernels = xclbin.get_kernels();
+    auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(),
+                                [kernel_name](xrt::xclbin::kernel &k) {
+                                  auto name = k.get_name();
+                                  return name.rfind(kernel_name, 0) == 0;
+                                });
+    auto kernelName = xkernel.get_name();
+    // get a kernel handle
+    device_context_mutex.lock();
+    auto kernel = xrt::kernel(context, kernelName);
+
+    auto bo_instr = xrt::bo(device, instr_v.size() * sizeof(int), XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
+    auto bo_a = xrt::bo(device, ACT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(3));
+    auto bo_b = xrt::bo(device, WEIGHT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(4));
+    auto bo_out = xrt::bo(device, OUT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(5));
+    auto bo_tmp1 = xrt::bo(device, 1, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(6));
+    // Workaround so we declare a really small trace buffer when one is not used
+    auto bo_trace = xrt::bo(device, 4, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(7));
+    device_context_mutex.unlock();
+
+    A_DATATYPE *bufA = bo_a.map<A_DATATYPE *>();
+    std::vector<A_DATATYPE> actVec(ACT_VOLUME);
+    B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
+    std::vector<B_DATATYPE> weightVec(FFN1_WEIGHT_VOLUME);
+
+    // Initialize outputs; bufOut is results matrix plus tracing info
+    char *bufOut = bo_out.map<char *>();
+    std::vector<C_DATATYPE> outVec = std::vector<C_DATATYPE>(FFN1_OUT_VOLUME);
+    char *bufTrace = bo_trace.map<char *>();
+
+    // Instruction buffer for DMA configuration
+    void *bufInstr = bo_instr.map<void *>();
+    memcpy(bufInstr, instr_v.data(), instr_v.size() * sizeof(int));
+    bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    unsigned int opcode = 3;
+    ffn1_sender_id = q_ffn1.getCurrentThreadId();
+
+    for (int i = 0; i < FFN1_WEIGHT_VOLUME; i++) {
+      weightVec[i] = ffn_1_common::get_random<B_DATATYPE>();
+    }
+
+    // Run loop
+    while (!stop) {
+      if (q_ffn1.pop(actVec)) {
+#if LOG_RUNTIME
+        auto start_time_run = std::chrono::high_resolution_clock::now();
+#endif
+        memcpy(bufA, actVec.data(), (actVec.size() * sizeof(A_DATATYPE)));
+        memcpy(bufB, weightVec.data(), (weightVec.size() * sizeof(B_DATATYPE)));
+
+        bo_a.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        bo_b.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+        auto run = kernel(opcode, bo_instr, instr_v.size(), bo_a, bo_b, bo_out, bo_tmp1, bo_trace);
+        ert_cmd_state r = run.wait();
+        if (r != ERT_CMD_STATE_COMPLETED) {
+          std::cout << "Kernel did not complete. Returned status: " << r << "\n";
+          return;
+        }
+        bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        memcpy(outVec.data(), bufOut, (outVec.size() * sizeof(C_DATATYPE)));
+
+        q_ffn2.push(outVec, ffn1_sender_id);
+#if LOG_RUNTIME
+        auto end_time_run = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed_time = end_time_run - start_time_run;
+        std::cout << "FFN1 Kernel execution time: " << elapsed_time.count() << " ms\n";
+#endif
+        // Store value until FFN2 is ready
+        std::lock_guard<std::mutex> lock(ffn_pair_mutex);
+        ffn1_pending = actVec;
+      }
+    }
+  });
+
+  // Stage 3: FFN2
+  std::thread t3([&] {
+    // Set up FFN2
+    const std::string& instr_file = vm["instr_ffn2"].as<std::string>();
+    const std::string& kernel_name = vm["kernel_ffn2"].as<std::string>();
+    // std::cout << "FFN2 Kernel: " << kernel_name << " Instr: " << instr_file << "\n";
+
+    size_t ACT_SIZE = (FFN1_OUT_VOLUME * sizeof(A_DATATYPE));
+    size_t WEIGHT_SIZE = (FFN2_WEIGHT_VOLUME * sizeof(B_DATATYPE));
+    size_t OUT_SIZE = (FFN2_OUT_VOLUME * sizeof(C_DATATYPE));
+
+    std::vector<uint32_t> instr_v = test_utils::load_instr_binary(instr_file);
+    // Get the kernel from the xclbin
+    auto xkernels = xclbin.get_kernels();
+    int verbosity = 0;
+    auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(),
+                                [kernel_name, verbosity](xrt::xclbin::kernel &k) {
+                                  auto name = k.get_name();
+                                  return name.rfind(kernel_name, 0) == 0;
+                                });
+    auto kernelName = xkernel.get_name();
+    // get a kernel handle
+    device_context_mutex.lock();
+    auto kernel = xrt::kernel(context, kernelName);
+
+    auto bo_instr = xrt::bo(device, instr_v.size() * sizeof(int), XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
+    auto bo_a = xrt::bo(device, ACT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(3));
+    auto bo_b = xrt::bo(device, WEIGHT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(4));
+    auto bo_out = xrt::bo(device, OUT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(5));
+    auto bo_tmp1 = xrt::bo(device, 1, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(6));
+    // Workaround so we declare a really small trace buffer when one is not used
+    auto bo_trace = xrt::bo(device, 4, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(7));
+    device_context_mutex.unlock();
+
+    A_DATATYPE *bufA = bo_a.map<A_DATATYPE *>();
+    std::vector<A_DATATYPE> actVec(FFN1_OUT_VOLUME);
+    B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
+    std::vector<B_DATATYPE> weightVec(FFN2_WEIGHT_VOLUME);
+
+    // Initialize outputs; bufOut is results matrix plus tracing info
+    char *bufOut = bo_out.map<char *>();
+    std::vector<C_DATATYPE> outVec = std::vector<C_DATATYPE>(FFN2_OUT_VOLUME);
+    char *bufTrace = bo_trace.map<char *>();
+
+    // Instruction buffer for DMA configuration
+    void *bufInstr = bo_instr.map<void *>();
+    memcpy(bufInstr, instr_v.data(), instr_v.size() * sizeof(int));
+    bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    unsigned int opcode = 3;
+    ffn2_sender_id = q_ffn2.getCurrentThreadId();
+    // std::cout << "FFN2: Current sender_id: " << ffn2_sender_id << "\n";
+
+    for (int i = 0; i < FFN2_WEIGHT_VOLUME; i++) {
+      weightVec[i] = ffn_1_common::get_random<B_DATATYPE>();
+    }
+
+    // Run loop
+    while (!stop) {
+      if (q_ffn2.pop(actVec)) {
+#if LOG_RUNTIME
+        auto start_time_run = std::chrono::high_resolution_clock::now();
+#endif
+        memcpy(bufA, actVec.data(), (actVec.size() * sizeof(A_DATATYPE)));
+        memcpy(bufB, weightVec.data(), (weightVec.size() * sizeof(B_DATATYPE)));
+
+        bo_a.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        bo_b.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+        auto run = kernel(opcode, bo_instr, instr_v.size(), bo_a, bo_b, bo_out, bo_tmp1, bo_trace);
+        ert_cmd_state r = run.wait();
+        if (r != ERT_CMD_STATE_COMPLETED) {
+          std::cout << "Kernel did not complete. Returned status: " << r << "\n";
+          return;
+        }
+        bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        memcpy(outVec.data(), bufOut, (outVec.size() * sizeof(C_DATATYPE)));
+
+        // Wait for FFN1 value to be ready
+        std::vector<A_DATATYPE> skipVec;
+        {
+          std::unique_lock<std::mutex> lock(ffn_pair_mutex);
+          // Wait until ffn1_pending is set
+          while (!ffn1_pending && !stop) {
+            lock.unlock();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            lock.lock();
+          }
+          if (stop) break;
+          skipVec = std::move(*ffn1_pending);
+          ffn1_pending.reset();
+        }
+        // Send both FFN1 and FFN2 results to q_addnorm
+        q_addnorm.push(skipVec, outVec, ffn2_sender_id);
+#if LOG_RUNTIME
+        auto end_time_run = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed_time = end_time_run - start_time_run;
+        std::cout << "FFN2 Kernel execution time: " << elapsed_time.count() << " ms\n";
+#endif
+      }
+    }
+  });
+
+  // Stage 4: Add & Norm
+  std::thread t4([&] {
+    // Set up Add & Norm
+    const std::string& instr_file = vm["instr_addnorm"].as<std::string>();
+    const std::string& kernel_name = vm["kernel_addnorm"].as<std::string>();
+    // std::cout << "Add & Norm Kernel: " << kernel_name << " Instr: " << instr_file << "\n";
+
+    size_t ACT_SIZE = (ACT_VOLUME * sizeof(A_DATATYPE));
+    size_t SKIP_SIZE = (ACT_VOLUME * sizeof(B_DATATYPE));
+    size_t OUT_SIZE = (ACT_VOLUME * sizeof(C_DATATYPE));
+
+    std::vector<uint32_t> instr_v = test_utils::load_instr_binary(instr_file);
+    // Get the kernel from the xclbin
+    auto xkernels = xclbin.get_kernels();
+    int verbosity = 0;
+    auto xkernel = *std::find_if(xkernels.begin(), xkernels.end(),
+                                [kernel_name, verbosity](xrt::xclbin::kernel &k) {
+                                  auto name = k.get_name();
+                                  return name.rfind(kernel_name, 0) == 0;
+                                });
+    auto kernelName = xkernel.get_name();
+    // get a kernel handle
+    device_context_mutex.lock();
+    auto kernel = xrt::kernel(context, kernelName);
+
+    auto bo_instr = xrt::bo(device, instr_v.size() * sizeof(int), XCL_BO_FLAGS_CACHEABLE, kernel.group_id(1));
+    auto bo_a = xrt::bo(device, ACT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(3));
+    auto bo_b = xrt::bo(device, SKIP_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(4));
+    auto bo_out = xrt::bo(device, OUT_SIZE, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(5));
+    auto bo_tmp1 = xrt::bo(device, 1, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(6));
+    // Workaround so we declare a really small trace buffer when one is not used
+    auto bo_trace = xrt::bo(device, 4, XRT_BO_FLAGS_HOST_ONLY, kernel.group_id(7));
+    device_context_mutex.unlock();
+
+    A_DATATYPE *bufA = bo_a.map<A_DATATYPE *>();
+    std::vector<A_DATATYPE> actVec;
+    B_DATATYPE *bufB = bo_b.map<B_DATATYPE *>();
+    std::vector<B_DATATYPE> skipVec;
+
+    // Initialize outputs; bufOut is results matrix plus tracing info
+    char *bufOut = bo_out.map<char *>();
+    std::vector<C_DATATYPE> outVec = std::vector<C_DATATYPE>(ACT_VOLUME);
+    char *bufTrace = bo_trace.map<char *>();
+
+    // Instruction buffer for DMA configuration
+    void *bufInstr = bo_instr.map<void *>();
+    memcpy(bufInstr, instr_v.data(), instr_v.size() * sizeof(int));
+    bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    unsigned int opcode = 3;
+    addnorm_sender_id = q_addnorm.getCurrentThreadId();
+    // std::cout << "Add & Norm: Current sender_id: " << addnorm_sender_id << "\n";
+
+    // Run loop
+    while (!stop) {
+      full_design_common::ThreadSafeQueue<A_DATATYPE, C_DATATYPE>::SenderId sender_id;
+      if (q_addnorm.pop(skipVec, actVec, sender_id)) {
+        // std::cout << "Add & Norm: Popped from queue. Sender ID: " << sender_id << "\n";
+#if LOG_RUNTIME
+        auto start_time_run = std::chrono::high_resolution_clock::now();
+#endif
+        memcpy(bufA, actVec.data(), (actVec.size() * sizeof(A_DATATYPE)));
+        memcpy(bufB, skipVec.data(), (skipVec.size() * sizeof(B_DATATYPE)));
+
+        bo_a.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        bo_b.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+        auto run = kernel(opcode, bo_instr, instr_v.size(), bo_a, bo_b, bo_out, bo_tmp1, bo_trace);
+        ert_cmd_state r = run.wait();
+        if (r != ERT_CMD_STATE_COMPLETED) {
+          std::cout << "Kernel did not complete. Returned status: " << r << "\n";
+          return;
+        }
+        bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        memcpy(outVec.data(), bufOut, (outVec.size() * sizeof(C_DATATYPE)));
+        std::cout << "Add & Norm " << std::to_string(iteration) << " Output: ";
+        for (int i = 0; i < 10; i++) {
+          std::cout << (float)outVec[i] << " ";
+        }
+        std::cout << "\n";
+
+        iteration++;
+        if (iteration >= numLayers) {
+          stop = true;
+          q_mha.setDone(); q_ffn1.setDone(); q_ffn2.setDone(); q_addnorm.setDone();
+          break;
+        }
+        // Feed result to next stage (example: send to q_mha for next cycle)
+        if (sender_id == ffn2_sender_id) {
+          // If called from FFN2 thread, push to q_mha
+          q_mha.push(outVec, addnorm_sender_id);
+        } else if (sender_id == mha_sender_id) {
+          // If called from MHA thread, push to q_ffn1
+          q_ffn1.push(outVec, addnorm_sender_id);
+        } else {
+          std::cout << "Add & Norm: Unknown sender_id\n";
+          return;
+        }
+#if LOG_RUNTIME
+        auto end_time_run = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed_time = end_time_run - start_time_run;
+        std::cout << "Add & Norm Kernel execution time: " << elapsed_time.count() << " ms\n";
+#endif
+      }
+    }
+  });
+
+  // Initial seed value
+  auto start_time_2 = std::chrono::high_resolution_clock::now();
+  q_mha.push(act1Vec, std::this_thread::get_id());
+  t1.join();
+  t2.join();
+  t3.join();
+  t4.join();
+  auto duration_2 = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::high_resolution_clock::now() - start_time_2).count();
+  std::cout << "Total time elapsed: " << duration_2 << " ms\n";
+  return 0;
 }
