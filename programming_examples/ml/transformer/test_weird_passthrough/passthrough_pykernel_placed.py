@@ -79,6 +79,15 @@ def passthroughKernel(vector_size):
                 of_in2.release(ObjectFifoPort.Consume, 2)
                 of_out1.release(ObjectFifoPort.Produce, 2)
 
+                # # Generating the data in 2 iterations works too to
+                # # provide of_out2 with data for 4 buffers
+                # # Comment the above before uncommenting below
+                # elemOut = of_out1.acquire(ObjectFifoPort.Produce, 1)
+                # elemIn = of_in2.acquire(ObjectFifoPort.Consume, 1)
+                # passThroughLine(elemIn, elemOut, lineWidthInBytes)
+                # of_in2.release(ObjectFifoPort.Consume, 1)
+                # of_out1.release(ObjectFifoPort.Produce, 1)
+
         # Compute tile 3
         @core(ComputeTile3)
         def core_body():
