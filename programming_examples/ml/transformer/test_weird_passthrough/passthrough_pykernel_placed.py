@@ -53,10 +53,10 @@ def passthroughKernel(vector_size):
         ComputeTile3 = tile(0, 3)
 
         # AIE-array data movement with object fifos
-        of_in1 = object_fifo("in1", ShimTile, MemTile, [2, 2], np.ndarray[(lineWidthInBytes,), np.dtype[np.uint16]])
-        of_in2 = object_fifo("in2", MemTile, ComputeTile2, [2, 2], np.ndarray[(lineWidthInBytes,), np.dtype[np.uint16]])
-        of_out1 = object_fifo("out1", ComputeTile2, MemTile, [2, 2], np.ndarray[(lineWidthInBytes,), np.dtype[np.uint16]])
-        of_out2 = object_fifo("out2", MemTile, ComputeTile3, [4, 4], np.ndarray[(lineWidthInBytes // 2,), np.dtype[np.uint16]])
+        of_in1 = object_fifo("in1", ShimTile, MemTile, [4, 4], np.ndarray[(lineWidthInBytes,), np.dtype[np.uint16]])
+        of_in2 = object_fifo("in2", MemTile, ComputeTile2, [4, 4], np.ndarray[(lineWidthInBytes,), np.dtype[np.uint16]])
+        of_out1 = object_fifo("out1", ComputeTile2, MemTile, [4, 4], np.ndarray[(lineWidthInBytes,), np.dtype[np.uint16]])
+        of_out2 = object_fifo("out2", MemTile, ComputeTile3, [8, 4], np.ndarray[(lineWidthInBytes // 2,), np.dtype[np.uint16]])
         of_out3 = object_fifo("out3", ComputeTile3, MemTile, [4, 4], np.ndarray[(lineWidthInBytes // 2,), np.dtype[np.uint16]])
         of_out4 = object_fifo("out4", MemTile, ShimTile, [2, 2], np.ndarray[(lineWidthInBytes,), np.dtype[np.uint16]])
         object_fifo_link(of_in1, of_in2)
@@ -66,21 +66,26 @@ def passthroughKernel(vector_size):
         # Set up compute tiles
         # By changing the array dimensions in out2, it seems like we essentially have an implicit offset when out1 produces data
         # and out2 consumes it. This also seems to be the case when out3 produces data and out4 consumes it.
+        # The data movement here is in 2 stages:
+        # Stage 1: Get 4 tiles of lineWidthInBytes from shim to compute tile 2 and send all 4 tiles to mem tile
+        # Stage 2: Get 2 tiles of lineWidthInBytes from the same mem tile and send 1 tile of lineWidthInBytes to shim for 2 iterations
 
         # Compute tile 2
         @core(ComputeTile2)
         def core_body():
             for _ in range_(sys.maxsize): 
-                # This seems to fill the 4 objfifos in out2
-                elemOut = of_out1.acquire(ObjectFifoPort.Produce, 2)
-                elemIn = of_in2.acquire(ObjectFifoPort.Consume, 2)
+                # This seems to fill the 8 objfifos in out2
+                elemOut = of_out1.acquire(ObjectFifoPort.Produce, 4)
+                elemIn = of_in2.acquire(ObjectFifoPort.Consume, 4)
                 passThroughLine(elemIn[0], elemOut[0], lineWidthInBytes)
                 passThroughLine(elemIn[1], elemOut[1], lineWidthInBytes)
-                of_in2.release(ObjectFifoPort.Consume, 2)
-                of_out1.release(ObjectFifoPort.Produce, 2)
+                passThroughLine(elemIn[2], elemOut[2], lineWidthInBytes)
+                passThroughLine(elemIn[3], elemOut[3], lineWidthInBytes)
+                of_in2.release(ObjectFifoPort.Consume, 4)
+                of_out1.release(ObjectFifoPort.Produce, 4)
 
-                # # Generating the data in 2 iterations works too to
-                # # provide of_out2 with data for 4 buffers
+                # # Generating the data in 4 iterations works too to
+                # # provide of_out2 with data for 4 buffers 2 times
                 # # Comment the above before uncommenting below
                 # elemOut = of_out1.acquire(ObjectFifoPort.Produce, 1)
                 # elemIn = of_in2.acquire(ObjectFifoPort.Consume, 1)
