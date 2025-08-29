@@ -70,7 +70,8 @@ def passthroughKernel(vector_size):
         # Compute tile 2
         @core(ComputeTile2)
         def core_body():
-            for _ in range_(sys.maxsize):
+            for _ in range_(sys.maxsize): 
+                # This seems to fill the 4 objfifos in out2
                 elemOut = of_out1.acquire(ObjectFifoPort.Produce, 2)
                 elemIn = of_in2.acquire(ObjectFifoPort.Consume, 2)
                 passThroughLine(elemIn[0], elemOut[0], lineWidthInBytes)
@@ -81,13 +82,18 @@ def passthroughKernel(vector_size):
         # Compute tile 3
         @core(ComputeTile3)
         def core_body():
-            for _ in range_(sys.maxsize):
-                elemIn = of_out2.acquire(ObjectFifoPort.Consume, 2)
+            for _ in range_(sys.maxsize): 
+                # # This seems to write the correct data at the correct offset implicitly
+                elemIn = of_out2.acquire(ObjectFifoPort.Consume, 4)
                 elemOut = of_out3.acquire(ObjectFifoPort.Produce, 2)
                 passThroughLine1(elemIn[0], elemOut[0], lineWidthInBytes // 2)
                 passThroughLine1(elemIn[1], elemOut[1], lineWidthInBytes // 2)
                 of_out3.release(ObjectFifoPort.Produce, 2)
-                of_out2.release(ObjectFifoPort.Consume, 2)
+                elemOut = of_out3.acquire(ObjectFifoPort.Produce, 2)
+                passThroughLine1(elemIn[2], elemOut[0], lineWidthInBytes // 2)
+                passThroughLine1(elemIn[3], elemOut[1], lineWidthInBytes // 2)
+                of_out3.release(ObjectFifoPort.Produce, 2)
+                of_out2.release(ObjectFifoPort.Consume, 4)
         #    print(ctx.module.operation.verify())
 
         vector_ty = np.ndarray[(N,), np.dtype[np.uint16]]
