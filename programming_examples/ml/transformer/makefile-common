@@ -188,13 +188,13 @@ else
 endif
 
 print-mlir-target:
-	echo $(mlir_target)
+	$(mlir_target)
 
 print-xclbin-target:
-	echo $(xclbin_target)
+	$(xclbin_target)
 
 print-insts-target:
-	echo $(insts_target)
+	$(insts_target)
 
 xclbin_sign=/opt/xilinx/xrt/amdxdna/setup_xclbin_firmware.sh 
 .PHONY: sign
