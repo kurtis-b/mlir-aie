@@ -18,9 +18,9 @@ K?=3072
 N?=768
 
 # m, k, n: single AIE core GEMM dimensions
-m?=32
-k?=64
-n?=64
+m?=64
+k?=32
+n?=128
 
 ifeq ($(devicename),npu2)
 n_aie_cols?=2
