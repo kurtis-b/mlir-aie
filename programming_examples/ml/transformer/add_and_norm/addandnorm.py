@@ -122,9 +122,9 @@ def my_addandnorm(
 
     @device(dev_ty)
     def device_body():
-        in_l2_ty = np.ndarray[(m * n * n_aie_rows,), np.dtype[dtype_in]]
+        in_l2_ty = np.ndarray[(m * n * 16,), np.dtype[dtype_in]]
         in_l1_ty = np.ndarray[(m, n), np.dtype[dtype_in]]
-        out_l2_ty = np.ndarray[(m * n * n_aie_rows,), np.dtype[dtype_out]]
+        out_l2_ty = np.ndarray[(m * n * 16,), np.dtype[dtype_out]]
         out_l1_ty = np.ndarray[(m, n), np.dtype[dtype_out]]
 
         # AIE Core Function declarations
@@ -159,7 +159,7 @@ def my_addandnorm(
                 f"A_L2L1_{row}",
                 mem_tiles[row // n_A_tiles_per_shim],
                 core_tiles[row][0:n_aie_cols],  # broadcast along one row
-                fifo_depth,
+                [fifo_depth * 16, fifo_depth],
                 in_l1_ty,
             )
         for col in range(n_aie_cols):
@@ -167,7 +167,7 @@ def my_addandnorm(
                 f"A_L3L2_{col}",
                 shim_tiles[col],
                 mem_tiles[col],
-                fifo_depth,
+                [fifo_depth, fifo_depth],
                 in_l2_ty,
             )
             # If n_cols == n_rows, n_A_tiles_per_shim is 1 and
@@ -194,7 +194,7 @@ def my_addandnorm(
                 f"B_L2L1_{row}",
                 mem_tiles[row // n_A_tiles_per_shim],
                 core_tiles[row][0:n_aie_cols],  # broadcast along one row
-                fifo_depth,
+                [fifo_depth * 16, fifo_depth],
                 in_l1_ty,
             )
         for col in range(n_aie_cols):
@@ -202,7 +202,7 @@ def my_addandnorm(
                 f"B_L3L2_{col}",
                 shim_tiles[col],
                 mem_tiles[col],
-                fifo_depth,
+                [fifo_depth, fifo_depth],
                 in_l2_ty,
             )
             start_row = col * n_A_tiles_per_shim
@@ -232,14 +232,14 @@ def my_addandnorm(
                     f"C_L1L2_{col}_{row}",
                     core_tiles[row][col],
                     mem_tiles[col],
-                    fifo_depth,
+                    [fifo_depth, fifo_depth * 16],
                     out_l1_ty,
                 )
             C_l2l3_fifos[col] = object_fifo(
                 f"C_L2L3_{col}",
                 mem_tiles[col],
                 shim_tiles[col],
-                fifo_depth,
+                [fifo_depth, fifo_depth],
                 out_l2_ty,
             )
             if n_aie_rows > 1:
@@ -261,27 +261,27 @@ def my_addandnorm(
                 def core_body():
                     for _ in range_(0xFFFFFFFF):
                         loop = (
-                            range_(n_tiles_per_core)
+                            range_(n_tiles_per_core * 16)
                             if n_tiles_per_core > 1
                             else range(1)
                         )  # Workaround for issue #1547
                         for _ in loop:
                             elem_in_a = A_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
+                            elem_in_b = B_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
                             elem_c = C_l1_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
+                            add(elem_in_a, elem_in_b, elem_c)
+                            A_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
+                            B_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
+                            C_l1_fifos[row][col].release(ObjectFifoPort.Produce, 1)
+
+                            elem_c = C_l1_fifos[row][col].acquire(ObjectFifoPort.Consume, 1)
+                            elem_out = C_l1l2_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
                             # TODO: Split up the LayerNorm into a step to generate
                             # the sums of each row and then a step to normalize.
                             # This would remove the need to tile across the whole
                             # workload's rows.
-                            norm(elem_in_a, elem_c)
-                            A_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
-                            C_l1_fifos[row][col].release(ObjectFifoPort.Produce, 1)
-
-                            elem_in_b = B_l2l1_fifos[row].acquire(ObjectFifoPort.Consume, 1)
-                            elem_c = C_l1_fifos[row][col].acquire(ObjectFifoPort.Consume, 1)
-                            elem_out = C_l1l2_fifos[row][col].acquire(ObjectFifoPort.Produce, 1)
-                            add(elem_c, elem_in_b, elem_out)
+                            norm(elem_c, elem_out)
                             C_l1_fifos[row][col].release(ObjectFifoPort.Consume, 1)
-                            B_l2l1_fifos[row].release(ObjectFifoPort.Consume, 1)
                             C_l1l2_fifos[row][col].release(ObjectFifoPort.Produce, 1)
 
 
@@ -322,8 +322,8 @@ def my_addandnorm(
                 # offset = col_offset + row_offset
 
                 offset = 0
-                sizes = [M // m // n_aie_rows, N // n // n_aie_cols, m * n_aie_rows, n * n_aie_cols]
-                strides = [m * n_aie_rows * N, n * n_aie_cols, N, 1]
+                sizes = [M // m // n_aie_rows // 16, N // n // n_aie_cols, m * n_aie_rows * 16, n * n_aie_cols]
+                strides = [m * n_aie_rows * N * 16, n * n_aie_cols, N, 1]
                 npu_dma_memcpy_nd(
                     metadata=C_l2l3_fifos[col],
                     bd_id=5,
