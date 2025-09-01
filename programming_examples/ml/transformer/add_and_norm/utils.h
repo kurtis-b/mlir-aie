@@ -110,13 +110,21 @@ std::bfloat16_t get_random<std::bfloat16_t>() {
 template <typename Tin, typename Tout, typename Tacc>
 void addandnorm(int M, int N, const std::vector<Tin> A,
                 const std::vector<Tin> B, std::vector<Tout> &C, int b_col_maj) {
-  // First, compute layernorm of A: for each row, normalize A[row]
-  std::vector<float> A_norm(M * N);
+  // First, add A and B elementwise
+  std::vector<float> AB(M * N);
+  for (int row = 0; row < M; row++) {
+    for (int col = 0; col < N; col++) {
+      float a_val = static_cast<float>(A[row * N + col]);
+      float b_val = static_cast<float>(B[row * N + col]);
+      AB[row * N + col] = a_val + b_val;
+    }
+  }
+  // Then, for each row, normalize the sum (layer norm)
   for (int row = 0; row < M; row++) {
     float sum = 0;
     float sumsq = 0;
     for (int col = 0; col < N; col++) {
-      float val = static_cast<float>(A[row * N + col]);
+      float val = AB[row * N + col];
       sum += val;
       sumsq += val * val;
     }
@@ -124,16 +132,8 @@ void addandnorm(int M, int N, const std::vector<Tin> A,
     float var = (sumsq / N) - (mean * mean);
     float denom = std::sqrt(var);
     for (int col = 0; col < N; col++) {
-      A_norm[row * N + col] = (static_cast<float>(A[row * N + col]) - mean) / denom;
-      C[row * N + col] = static_cast<Tout>(A_norm[row * N + col]);
-    }
-  }
-  // Then, add normalized A and B
-  for (int row = 0; row < M; row++) {
-    for (int col = 0; col < N; col++) {
-      float b_val = static_cast<float>(B[row * N + col]);
-      float result = A_norm[row * N + col] + b_val;
-      C[row * N + col] = static_cast<Tout>(result);
+      float normed = (AB[row * N + col] - mean) / denom;
+      C[row * N + col] = static_cast<Tout>(normed);
     }
   }
 }
@@ -141,11 +141,19 @@ void addandnorm(int M, int N, const std::vector<Tin> A,
 template <typename Tin, typename Tout, typename Tacc>
 Tout addandnorm_acc(int M, int N, int row, int col, const std::vector<Tin> A,
                     const std::vector<Tin> B, int b_col_maj) {
-  // First, compute mean and variance of the row of A
+  // First, add A and B elementwise for the row
+  std::vector<float> AB(N);
+  for (int i = 0; i < N; i++) {
+    float a_val = static_cast<float>(A[row * N + i]);
+    float b_val = static_cast<float>(B[row * N + i]);
+    AB[i] = a_val + b_val;
+  }
+
+  // Compute mean and variance of the row
   float sum = 0;
   float sumsq = 0;
   for (int i = 0; i < N; i++) {
-    float val = static_cast<float>(A[row * N + i]);
+    float val = AB[i];
     sum += val;
     sumsq += val * val;
   }
@@ -153,14 +161,10 @@ Tout addandnorm_acc(int M, int N, int row, int col, const std::vector<Tin> A,
   float var = (sumsq / N) - (mean * mean);
   float denom = std::sqrt(var);
 
-  // Normalize A[row, col]
-  float a_norm = (static_cast<float>(A[row * N + col]) - mean) / denom;
+  // Normalize the (row, col) element
+  float normed = (AB[col] - mean) / denom;
 
-  // Add normalized A and B
-  float b_val = static_cast<float>(B[row * N + col]);
-  float result = a_norm + b_val;
-
-  return static_cast<Tout>(result);
+  return static_cast<Tout>(normed);
 }
 
 // nearly_equal function adapted from Stack Overflow, License CC BY-SA 4.0
