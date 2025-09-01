@@ -53,8 +53,8 @@ def passthroughKernel(vector_size):
         ComputeTile3 = tile(0, 3)
 
         # AIE-array data movement with object fifos
-        of_in1 = object_fifo("in1", ShimTile, MemTile, [4, 4], np.ndarray[(lineWidthInBytes,), np.dtype[np.uint16]])
-        of_in2 = object_fifo("in2", MemTile, ComputeTile2, [4, 4], np.ndarray[(lineWidthInBytes,), np.dtype[np.uint16]])
+        of_in1 = object_fifo("in1", ShimTile, MemTile, [4, 4], np.ndarray[(4 * lineWidthInBytes,), np.dtype[np.uint16]])
+        of_in2 = object_fifo("in2", MemTile, ComputeTile2, [16, 4], np.ndarray[(lineWidthInBytes,), np.dtype[np.uint16]])
         of_out1 = object_fifo("out1", ComputeTile2, MemTile, [4, 4], np.ndarray[(lineWidthInBytes,), np.dtype[np.uint16]])
         of_out2 = object_fifo("out2", MemTile, ComputeTile3, [8, 4], np.ndarray[(lineWidthInBytes // 2,), np.dtype[np.uint16]])
         of_out3 = object_fifo("out3", ComputeTile3, MemTile, [4, 4], np.ndarray[(lineWidthInBytes // 2,), np.dtype[np.uint16]])
