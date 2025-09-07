@@ -342,6 +342,36 @@ int mha(xrt::device &device, xrt::xclbin &xclbin, xrt::hw_context &context,
   return 0;
 }
 
+void addandnorm_host(int M, int N, const std::vector<A_DATATYPE> A,
+                const std::vector<B_DATATYPE> B, std::vector<C_DATATYPE> &C, int b_col_maj) {
+  // First, compute layernorm of A: for each row, normalize A[row]
+  std::vector<float> A_norm(M * N);
+  for (int row = 0; row < M; row++) {
+    float sum = 0;
+    float sumsq = 0;
+    for (int col = 0; col < N; col++) {
+      float val = static_cast<float>(A[row * N + col]);
+      sum += val;
+      sumsq += val * val;
+    }
+    float mean = sum / N;
+    float var = (sumsq / N) - (mean * mean);
+    float denom = std::sqrt(var);
+    for (int col = 0; col < N; col++) {
+      A_norm[row * N + col] = (static_cast<float>(A[row * N + col]) - mean) / denom;
+      C[row * N + col] = static_cast<C_DATATYPE>(A_norm[row * N + col]);
+    }
+  }
+  // Then, add normalized A and B
+  for (int row = 0; row < M; row++) {
+    for (int col = 0; col < N; col++) {
+      float b_val = static_cast<float>(B[row * N + col]);
+      float result = A_norm[row * N + col] + b_val;
+      C[row * N + col] = static_cast<C_DATATYPE>(result);
+    }
+  }
+}
+
 int main(int argc, const char *argv[]) {
   // Program arguments parsing
   cxxopts::Options options("Matrix Matrix Multiplication Test");
@@ -377,28 +407,40 @@ int main(int argc, const char *argv[]) {
     for (int i = 0; i < 10; i++) {
       std::cout << act2Vec[i] << ",";
     }
-    // First input should be output from FFN-2 and second input should be skip connection input
-    fail |= addandnorm(device, xclbin, context, act2Vec, act1Vec, act1Vec,
-                    vm["instr_addnorm"].as<std::string>(), vm["kernel_addnorm"].as<std::string>());
+    if (vm["add_and_norm_cpu"].as<int>() == 1) {
+      addandnorm_host(SEQ_LEN, EMB_DIM, act2Vec, act1Vec, act2Vec, 0);
+    } else {
+      // First input should be output from FFN-2 and second input should be skip connection input
+      fail |= addandnorm(device, xclbin, context, act2Vec, act1Vec, act1Vec,
+                      vm["instr_addnorm"].as<std::string>(), vm["kernel_addnorm"].as<std::string>());
+    }
     std::cout << "\nAdd & Norm Output:\n";
     for (int i = 0; i < 10; i++) {
-      std::cout << act1Vec[i] << ",";
+      std::cout << act2Vec[i] << ",";
     }
-    fail |= ffn1(device, xclbin, context, act1Vec, ffn1Vec,
+
+    fail |= ffn1(device, xclbin, context, act2Vec, ffn1Vec,
                     vm["instr_ffn1"].as<std::string>(), vm["kernel_ffn1"].as<std::string>());
     std::cout << "\nFFN1 Output:\n";
     for (int i = 0; i < 10; i++) {
       std::cout << ffn1Vec[i] << ",";
     }
-    fail |= ffn2(device, xclbin, context, ffn1Vec, act2Vec,
+    fail |= ffn2(device, xclbin, context, ffn1Vec, act1Vec,
                     vm["instr_ffn2"].as<std::string>(), vm["kernel_ffn2"].as<std::string>());
     std::cout << "\nFFN2 Output:\n";
-    for (int i = 0; i < 10; i++) {
-      std::cout << act2Vec[i] << ",";
+    for (int i = 0; i < ACT_VOLUME; i++) {
+      act1Vec[i] /= 1000;
     }
-    // First input should be output from FFN-2 and second input should be skip connection input
-    fail |= addandnorm(device, xclbin, context, act2Vec, act1Vec, act1Vec,
-                    vm["instr_addnorm"].as<std::string>(), vm["kernel_addnorm"].as<std::string>());
+    for (int i = 0; i < 10; i++) {
+      std::cout << act1Vec[i] << ",";
+    }
+    if (vm["add_and_norm_cpu"].as<int>() == 1) {
+      addandnorm_host(SEQ_LEN, EMB_DIM, act1Vec, act2Vec, act1Vec, 0);
+    } else {    
+      // First input should be output from FFN-2 and second input should be skip connection input
+      fail |= addandnorm(device, xclbin, context, act2Vec, act1Vec, act1Vec,
+                      vm["instr_addnorm"].as<std::string>(), vm["kernel_addnorm"].as<std::string>());
+    }
     std::cout << "\nAdd & Norm Output:\n";
     for (int i = 0; i < 10; i++) {
       std::cout << act1Vec[i] << ",";
