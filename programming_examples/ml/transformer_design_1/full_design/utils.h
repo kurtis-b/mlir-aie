@@ -199,6 +199,8 @@ void add_default_options(cxxopts::Options &options) {
       "trace_file", "where to store trace output",
       cxxopts::value<std::string>()->default_value("trace.txt"))(
       "b_col_maj", "Is B matrix in colum-major format?",
+      cxxopts::value<int>()->default_value("0"))(
+      "add_and_norm_cpu", "Perform Add & Norm on CPU instead of AIE",
       cxxopts::value<int>()->default_value("0"));
 }
 
@@ -217,7 +219,7 @@ void parse_options(int argc, const char *argv[], cxxopts::Options &options,
         !result.count("kernel_ffn2") || !result.count("kernel_addnorm") ||
         !result.count("kernel_mha") || !result.count("instr_ffn1") || 
         !result.count("instr_ffn2") || !result.count("instr_addnorm") || 
-        !result.count("instr_mha")) {
+        !result.count("instr_mha") || !result.count("add_and_norm_cpu")) {
       std::cerr << "Error: Required options missing\n\n";
       std::cerr << "Usage:\n" << options.help() << "\n";
       std::exit(1);
