@@ -52,9 +52,9 @@ trace_size?=0
 include ${srcdir}/../makefile-common
 
 ifeq ($(devicename),npu2)
-kernels_dir=${srcdir}/../../../../aie_kernels/aie2p
-else 
-kernels_dir=${srcdir}/../../../../aie_kernels/aie2
+kernels_dir=${srcdir}/../aie_kernels/aie2p
+else
+kernels_dir=${srcdir}/../aie_kernels/aie2
 endif
 
 # Quantized layernorm will be the same as non-quantized layer norm, so output will be bfloat or float
@@ -80,8 +80,8 @@ ifeq ($(dtype_out),i8)
 endif
 
 
-add_src := ${srcdir}/../../../../aie_kernels/aie2/add.cc
-layernorm_src := ${srcdir}/../../../../aie_kernels/aie2/layernorm.cc
+add_src := ${srcdir}/../aie_kernels/aie2/add.cc
+layernorm_src := ${srcdir}/../aie_kernels/aie2/layernorm.cc
 ifeq ($(devicename),npu)
 runtime_lib := ${srcdir}/../../../../aie_runtime_lib/AIE2 
 else ifeq ($(devicename),npu2)
