@@ -95,9 +95,9 @@ aiecc_peano_flags=--no-xchesscc --no-xbridge --peano ${PEANO_INSTALL_DIR}
 endif
 
 ifeq ($(devicename),npu2)
-kernels_dir=${srcdir}/../../../../aie_kernels/aie2p
+kernels_dir=${srcdir}/../aie_kernels/aie2p
 else 
-kernels_dir=${srcdir}/../../../../aie_kernels/aie2
+kernels_dir=${srcdir}/../aie_kernels/aie2
 endif
 
 # When this flag is set to 1, optimal performance is attained

@@ -207,8 +207,8 @@ def my_matmul(
         C_l1_ty = np.ndarray[(m, n), np.dtype[dtype_out]]
 
         # AIE Core Function declarations
-        zero = external_func(f"zero_{dtype_out_str}", inputs=[C_l1_ty])
-        matmul_vectorized_func_name = f"matmul_{dtype_in_str}_{dtype_out_str}"
+        zero = external_func(f"zero_{dtype_out_str}_{m}_{k}_{n}_1", inputs=[C_l1_ty])
+        matmul_vectorized_func_name = f"matmul_{dtype_in_str}_{dtype_out_str}_{m}_{k}_{n}_1"
         matmul = external_func(
             matmul_vectorized_func_name,
             inputs=[A_l1_ty, B_l1_ty, C_l1_ty],
