@@ -52,14 +52,14 @@ trace_size?=0
 include ${srcdir}/../makefile-common
 
 ifeq ($(devicename),npu2)
-kernels_dir=${srcdir}/../../../../aie_kernels/aie2p
-else 
-kernels_dir=${srcdir}/../../../../aie_kernels/aie2
+kernels_dir=${srcdir}/../aie_kernels/aie2p
+else
+kernels_dir=${srcdir}/../aie_kernels/aie2
 endif
 aie2_runtime_dir = ${AIEOPT_DIR}/aie_runtime_lib/AIE2
 
 SKIP_KERNELS=true
-KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -I${kernels_dir} -I${srcdir}/../../../../aie_kernels 
+KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -I${kernels_dir} -I${srcdir}/../aie_kernels 
 
 # Define matmul and softmax dimension lists
 # If these values are changed, make sure to update the corresponding kernel code's
@@ -88,13 +88,12 @@ $(eval n := $(word 2,${dims}))
 endef
 
 # Have to use Phx div kernel for Strix since there's no source for it in the Strix directory
-div_src := ${srcdir}/../../../../aie_kernels/aie2/div.cc
-add_src := ${srcdir}/../../../../aie_kernels/aie2/add.cc
+div_src := ${srcdir}/../aie_kernels/aie2/div.cc
+add_src := ${srcdir}/../aie_kernels/aie2/add.cc
+mm_src := ${kernels_dir}/mm.cc
 ifeq ($(devicename),npu2)
-mm_src := ${srcdir}/mm_aie2p.cc
 zero_src := ${srcdir}/zero_aie2p.cc
 else
-mm_src := ${srcdir}/mm_aie2.cc
 zero_src := ${srcdir}/zero_aie2.cc
 endif
 
