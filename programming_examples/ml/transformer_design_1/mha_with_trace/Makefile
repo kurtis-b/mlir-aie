@@ -60,14 +60,14 @@ emulate_bfloat16_mmul_with_bfp16?=1
 include ${srcdir}/../makefile-common
 
 ifeq ($(devicename),npu2)
-kernels_dir=${srcdir}/../../../../aie_kernels/aie2p
-else 
-kernels_dir=${srcdir}/../../../../aie_kernels/aie2
+kernels_dir=${srcdir}/../aie_kernels/aie2p
+else
+kernels_dir=${srcdir}/../aie_kernels/aie2
 endif
 aie2_runtime_dir = ${AIEOPT_DIR}/aie_runtime_lib/AIE2
 
 SKIP_KERNELS=true
-KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -I${kernels_dir} -I${srcdir}/../../../../aie_kernels 
+KERNEL_DEFINES=-D${dtype_in}_${dtype_out}_ONLY -I${kernels_dir} -I${srcdir}/../aie_kernels 
 
 ifeq ($(emulate_bfloat16_mmul_with_bfp16), 1)
 KERNEL_DEFINES += -DAIE_API_EMULATE_BFLOAT16_MMUL_WITH_BFP16
@@ -99,13 +99,9 @@ $(eval n := $(word 2,${dims}))
 endef
 
 # Have to use Phx div kernel for Strix since there's no source for it in the Strix directory
-div_src := ${srcdir}/../../../../aie_kernels/aie2/div.cc
-add_src := ${srcdir}/../../../../aie_kernels/aie2/add.cc
-ifeq ($(devicename),npu2)
-mm_src := ${srcdir}/mm_aie2p.cc
-else
-mm_src := ${srcdir}/mm_aie2.cc
-endif
+div_src := ${srcdir}/../aie_kernels/aie2/div.cc
+add_src := ${srcdir}/../aie_kernels/aie2/add.cc
+mm_src := ${kernels_dir}/mm.cc
 
 build/div_%.o: ${div_src}
 	$(call extract_dims_3d)
