@@ -60,6 +60,8 @@ xrt-smi examine
 
 ### Install AIETools
 
+> You may skip this section for a Peano-only build that targets AIE2/AIE2P. Configure source builds with `-DAIE_ENABLE_VITIS=OFF` to bypass Vitis discovery. `utils/build-mlir-aie-from-wheels.sh` sets that flag automatically when `v++` is not on `PATH`.
+
 1. Install Vitis™ AIE Essentials from [Ryzen AI Software 1.3 Early Access](https://account.amd.com/en/member/ryzenai-sw-ea.html#tabs-a5e122f973-item-4757898120-tab). We will assume you use the installation directory, `/tools/ryzen_ai-1.3.0/vitis_aie_essentials`.
 
    > This is an early access lounge, you must register and be granted access at this time.
@@ -141,6 +143,8 @@ xrt-smi examine
    ```bash
    bash ./utils/build-mlir-aie-from-wheels.sh
    ```
+
+   For a manual Peano-only source build, add `-DAIE_ENABLE_VITIS=OFF` to your `cmake` invocation.
 
 1. Setup environment
    ```bash

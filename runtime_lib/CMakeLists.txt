@@ -51,10 +51,15 @@ foreach(target ${AIE_RUNTIME_TARGETS})
     message(STATUS "FOUND LibXAIE: ${LibXAIE_FOUND}, XILINX_XAIE_LIB_DIR: ${XILINX_XAIE_LIB_DIR}, XILINX_XAIE_INCLUDE_DIR: ${XILINX_XAIE_INCLUDE_DIR}")
 
   else()
-    message("LibXAIE_${target}_DIR not specified: Building xaiengine for ${target} from aietools at ${VITIS_AIETOOLS_DIR}.") 
-    set(LibXAIE_FOUND TRUE)
-    set(XILINX_XAIE_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/${target}/xaiengine/include)
-    set(XILINX_XAIE_LIBS ${CMAKE_CURRENT_BINARY_DIR}/${target}/xaiengine/lib/libxaienginecdo.so)
+    if(DEFINED VITIS_ROOT AND NOT VITIS_ROOT STREQUAL "")
+      message("LibXAIE_${target}_DIR not specified: Building xaiengine for ${target} from aietools at ${VITIS_AIETOOLS_DIR}.")
+      set(LibXAIE_FOUND TRUE)
+      set(XILINX_XAIE_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/${target}/xaiengine/include)
+      set(XILINX_XAIE_LIBS ${CMAKE_CURRENT_BINARY_DIR}/${target}/xaiengine/lib/libxaienginecdo.so)
+    else()
+      set(LibXAIE_FOUND FALSE)
+      message(STATUS "LibXAIE_${target}_DIR not specified and Vitis is unavailable. Skipping xaiengine for ${target}.")
+    endif()
 
   endif()
 
@@ -90,7 +95,7 @@ foreach(target ${AIE_RUNTIME_TARGETS})
   endif()
 
   # test_lib
-  if (DEFINED VITIS_ROOT OR DEFINED LibXAIE_${target}_DIR)
+  if ((DEFINED VITIS_ROOT AND NOT VITIS_ROOT STREQUAL "") OR DEFINED LibXAIE_${target}_DIR)
     message(STATUS "setting up test_lib")
     ExternalProject_Add(test_lib_${target}
       PREFIX ${CMAKE_CURRENT_BINARY_DIR}/test_libTmp/${target}

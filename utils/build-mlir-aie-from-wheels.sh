@@ -66,7 +66,6 @@ cd $BUILD_DIR
 CMAKE_CONFIGS="\
     -GNinja \
     -DCMAKE_PREFIX_PATH=${WHL_MLIR_DIR} \
-    -DVITIS_VPP=$(which  v++) \
     -DCMAKE_MODULE_PATH=${CMAKEMODULES_DIR}/modulesXilinx \
     -DLLVM_EXTERNAL_LIT=$(which lit) \
     -DCMAKE_INSTALL_PREFIX="../${INSTALL_DIR}" \
@@ -79,6 +78,14 @@ CMAKE_CONFIGS="\
     -DAIE_RUNTIME_TEST_TARGET=x86_64 "
 
 CMAKE_CONFIGS="${CMAKE_CONFIGS} -DPEANO_INSTALL_DIR=${PEANO_INSTALL_DIR}"
+
+VITIS_VPP=$(command -v v++ || true)
+if [ -n "${VITIS_VPP}" ]; then
+  CMAKE_CONFIGS="${CMAKE_CONFIGS} -DAIE_ENABLE_VITIS=ON -DVITIS_VPP=${VITIS_VPP}"
+else
+  echo "Vitis tools not found in PATH; configuring a Peano-only build."
+  CMAKE_CONFIGS="${CMAKE_CONFIGS} -DAIE_ENABLE_VITIS=OFF"
+fi
 
 if [ -x "$(command -v lld)" ]; then
   CMAKE_CONFIGS="${CMAKE_CONFIGS} -DLLVM_USE_LINKER=lld"
