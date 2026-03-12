@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
+#include "aie/Dialect/AIE/Transforms/AIEAssignBufferDescriptorIDs.h"
 #include "aie/Dialect/AIE/Transforms/AIEPasses.h"
 
 #include "mlir/Analysis/TopologicalSortUtils.h"
@@ -81,9 +82,11 @@ public:
 class DMAChannelAnalysis {
   DenseMap<std::tuple<Value, DMAChannelDir, int>, int> channelsPerTile;
   DenseMap<std::tuple<Value, DMAChannelDir, int>, int> aieStreamsPerTile;
+  DenseMap<Operation *, BdIdGenerator> bdGeneratorsPerTile;
+  DeviceOp device;
 
 public:
-  DMAChannelAnalysis(DeviceOp &device) {
+  DMAChannelAnalysis(DeviceOp &device) : device(device) {
     // go over the channels used for each tile and update channel map
     for (auto memOp : device.getOps<MemOp>()) {
       Region &r = memOp.getBody();
@@ -122,10 +125,43 @@ public:
     }
   }
 
+  BdIdGenerator &getBdGenerator(TileOp tileOp) {
+    Operation *tile = tileOp.getOperation();
+    auto it = bdGeneratorsPerTile.find(tile);
+    if (it == bdGeneratorsPerTile.end()) {
+      const auto &targetModel = device.getTargetModel();
+      it = bdGeneratorsPerTile
+               .insert({tile, BdIdGenerator(tileOp.getCol(), tileOp.getRow(),
+                                            targetModel)})
+               .first;
+    }
+    return it->second;
+  }
+
+  static int reserveBdIds(BdIdGenerator &gen, int channelIndex, int numBds) {
+    int reserved = 0;
+    for (; reserved < numBds; reserved++) {
+      if (!gen.nextBdId(channelIndex))
+        break;
+    }
+    return reserved;
+  }
+
+  int getRemainingBdCapacity(TileOp tileOp, int channelIndex, int numBds) {
+    BdIdGenerator gen = getBdGenerator(tileOp);
+    if (reserveBdIds(gen, channelIndex, numBds) != numBds)
+      return -1;
+    int remaining = 0;
+    while (reserveBdIds(gen, channelIndex, 1) == 1)
+      remaining++;
+    return remaining;
+  }
+
   /// Given a tile and DMAChannelDir, returns next usable channel index for
   /// that tile.
   int getDMAChannelIndex(TileOp tileOp, DMAChannelDir dir,
-                         bool requiresAdjacentTileAccessChannels) {
+                         bool requiresAdjacentTileAccessChannels,
+                         int numBds = 0) {
     int maxChannelNum = 0;
     if (dir == DMAChannelDir::MM2S)
       maxChannelNum = tileOp.getNumSourceConnections(WireBundle::DMA);
@@ -143,14 +179,39 @@ public:
       maxChannelNum = std::min(maxChannelNum, maxChannelNumForAdjacentTile);
     }
 
+    int bestChannel = -1;
+    int bestRemainingCapacity = -1;
     for (int i = 0; i < maxChannelNum; i++) {
       if (int usageCnt = channelsPerTile[{tileOp.getResult(), dir, i}];
           usageCnt == 0) {
-        channelsPerTile[{tileOp.getResult(), dir, i}] = 1;
-        return i;
+        // Memtile BD IDs are partitioned by channel parity, so prefer the free
+        // channel that can absorb this FIFO and leave the most provisional
+        // headroom for later DMA starts on the same tile.
+        if (numBds > 0) {
+          int remainingCapacity = getRemainingBdCapacity(tileOp, i, numBds);
+          if (remainingCapacity < 0)
+            continue;
+          if (remainingCapacity > bestRemainingCapacity) {
+            bestRemainingCapacity = remainingCapacity;
+            bestChannel = i;
+          }
+        } else {
+          bestChannel = i;
+          break;
+        }
       }
     }
-    return -1;
+    if (bestChannel < 0)
+      return -1;
+    channelsPerTile[{tileOp.getResult(), dir, bestChannel}] = 1;
+    if (numBds > 0) {
+      BdIdGenerator &gen = getBdGenerator(tileOp);
+      int reserved = reserveBdIds(gen, bestChannel, numBds);
+      (void)reserved;
+      assert(reserved == numBds &&
+             "validated BD reservation should succeed when committed");
+    }
+    return bestChannel;
   }
 
   /// Given a tile and DMAChannel, adds entry to aieStreamsPerTile or
@@ -1724,6 +1785,47 @@ struct AIEObjectFifoStatefulTransformPass
     return (objFifoName + "_shim_alloc").str();
   }
 
+  int estimateDMAChannelBdCount(ObjectFifoCreateOp op) {
+    TileOp tileOp = op.getProducerTileOp();
+    if (tileOp.isShimTile())
+      return externalBuffersPerFifo[op].size();
+
+    size_t numBlocks = op.size();
+    if (numBlocks == 0)
+      return 0;
+
+    int repeatCount = 1;
+    if (op.getRepeatCount().has_value())
+      repeatCount = op.getRepeatCount().value();
+
+    if (!tileOp.isMemTile())
+      return numBlocks * repeatCount;
+
+    ObjectFifoCreateOp target = op;
+    int joinDistribFactor = 1;
+    if (auto linkOp = getOptionalLinkOp(op)) {
+      if (objFifoLinks.find(*linkOp) != objFifoLinks.end()) {
+        target = objFifoLinks[*linkOp];
+        if (linkOp->getRepeatCount().has_value() &&
+            linkOp->getInputObjectFifos()[0] == op)
+          repeatCount *= linkOp->getRepeatCount().value();
+
+        if (linkOp->isJoin()) {
+          if (target == op)
+            joinDistribFactor *= linkOp->getFifoIns().size();
+        } else if (linkOp->isDistribute()) {
+          if (target == op)
+            joinDistribFactor *= linkOp->getFifoOuts().size();
+        }
+
+        if (target != op)
+          numBlocks = target.size();
+      }
+    }
+
+    return numBlocks * repeatCount * joinDistribFactor;
+  }
+
   /// Function used to verify that an objectfifo is present in at most one
   /// ObjectFifoLinkOp.
   LogicalResult verifyObjectFifoLinks(DeviceOp &device) {
@@ -1777,9 +1879,10 @@ struct AIEObjectFifoStatefulTransformPass
 
       if (shouldProcessProducer) {
         bool requiresAdjacentTileAccessChannels = crossTileInfos.at(producer);
+        int numBds = estimateDMAChannelBdCount(producer);
         int channelIndex = dmaAnalysis.getDMAChannelIndex(
             producer.getProducerTileOp(), DMAChannelDir::MM2S,
-            requiresAdjacentTileAccessChannels);
+            requiresAdjacentTileAccessChannels, numBds);
         fifo_dma_channel_index[producer] = channelIndex;
       }
 
@@ -1792,9 +1895,10 @@ struct AIEObjectFifoStatefulTransformPass
 
         if (shouldProcessConsumer) {
           bool requiresAdjacentTileAccessChannels = crossTileInfos.at(consumer);
+          int numBds = estimateDMAChannelBdCount(consumer);
           int channelIndex = dmaAnalysis.getDMAChannelIndex(
               consumer.getProducerTileOp(), DMAChannelDir::S2MM,
-              requiresAdjacentTileAccessChannels);
+              requiresAdjacentTileAccessChannels, numBds);
           fifo_dma_channel_index[consumer] = channelIndex;
         }
       }
