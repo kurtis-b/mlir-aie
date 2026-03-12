@@ -248,6 +248,22 @@ def AIEHoistVectorTransferPointers : Pass<"aie-hoist-vector-transfer-pointers", 
   let constructor = "xilinx::AIE::createAIEHoistVectorTransferPointersPass()";
 }
 
+def AIELowerMemtileRowStores
+    : Pass<"aie-lower-memtile-row-stores", "DeviceOp"> {
+  let summary = "Lower aie.memtile_row_store operations to buffers, locks, flows, and DMA";
+  let description = [{
+    Replace each `aie.memtile_row_store` declaration with explicit
+    `aie.buffer`, `aie.lock`, `aie.flow`, `aie.mem`, and `aie.memtile_dma`
+    operations, and rewrite the corresponding acquire/release operations in the
+    compute core to `aie.use_lock`.
+  }];
+
+  let constructor = "xilinx::AIE::createAIELowerMemtileRowStoresPass()";
+  let dependentDialects = [
+    "xilinx::AIE::AIEDialect",
+  ];
+}
+
 def AIEObjectFifoStatefulTransform : Pass<"aie-objectFifo-stateful-transform", "DeviceOp"> {
   let summary = "Instantiate the buffers and locks of aie.objectFifo.createObjectFifo operations";
   let description = [{

@@ -16,6 +16,7 @@ add_mlir_dialect_library(
   AIECoreToStandard.cpp
   AIECanonicalizeDevice.cpp
   AIELocalizeLocks.cpp
+  AIELowerMemtileRowStores.cpp
   AIENormalizeAddressSpaces.cpp
   AIEVectorOpt.cpp
   AIEVectorToPointerLoops.cpp

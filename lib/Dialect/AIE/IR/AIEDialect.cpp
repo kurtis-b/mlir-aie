@@ -419,6 +419,36 @@ LogicalResult HasValidDMAChannels<ConcreteType>::verifyTrait(Operation *op) {
   return success();
 }
 
+template <typename SymbolOpTy>
+static SymbolOpTy lookupNearestSymbol(Operation *op, SymbolRefAttr ref) {
+  Operation *parent = op;
+  while ((parent = parent->getParentOp())) {
+    if (parent->hasTrait<OpTrait::SymbolTable>()) {
+      if (auto *symbol = SymbolTable::lookupSymbolIn(parent, ref);
+          isa_and_nonnull<SymbolOpTy>(symbol))
+        return dyn_cast<SymbolOpTy>(symbol);
+    }
+  }
+  return {};
+}
+
+static LogicalResult verifyDMAChannelIndex(Operation *op, TileOp tile,
+                                           DMAChannelDir dir, int channel,
+                                           StringRef attrName) {
+  if (channel < 0)
+    return op->emitOpError(attrName) << " must be >= 0";
+
+  int bound = dir == DMAChannelDir::S2MM
+                  ? tile.getNumSourceConnections(WireBundle::DMA)
+                  : tile.getNumDestConnections(WireBundle::DMA);
+  if (channel >= bound)
+    return op->emitOpError(attrName)
+           << " must be less than " << bound << " for tile (" << tile.getCol()
+           << ", " << tile.getRow() << ")";
+
+  return success();
+}
+
 //===----------------------------------------------------------------------===//
 // ObjectFifoCreateOp
 //===----------------------------------------------------------------------===//
@@ -940,15 +970,120 @@ TileOp ObjectFifoRegisterExternalBuffersOp::getTileOp() {
 }
 
 ObjectFifoCreateOp ObjectFifoRegisterExternalBuffersOp::getObjectFifo() {
-  Operation *parent = getOperation();
-  while ((parent = parent->getParentOp())) {
-    if (parent->hasTrait<OpTrait::SymbolTable>()) {
-      if (auto *st = SymbolTable::lookupSymbolIn(parent, getObjFifoName());
-          isa_and_nonnull<ObjectFifoCreateOp>(st))
-        return dyn_cast<ObjectFifoCreateOp>(st);
-    }
-  }
-  return {};
+  return lookupNearestSymbol<ObjectFifoCreateOp>(
+      getOperation(), FlatSymbolRefAttr::get(getContext(), getObjFifoName()));
+}
+
+//===----------------------------------------------------------------------===//
+// MemTileRowStoreOp
+//===----------------------------------------------------------------------===//
+
+TileOp MemTileRowStoreOp::getComputeTileOp() {
+  return llvm::dyn_cast_or_null<TileOp>(getComputeTile().getDefiningOp());
+}
+
+TileOp MemTileRowStoreOp::getMemTileOp() {
+  return llvm::dyn_cast_or_null<TileOp>(getMemTile().getDefiningOp());
+}
+
+LogicalResult MemTileRowStoreOp::verify() {
+  auto computeTile = getComputeTileOp();
+  if (!computeTile)
+    return emitOpError("computeTile must be defined by an aie.tile op");
+  if (!computeTile.isCoreTile())
+    return emitOpError("computeTile must be a core tile");
+
+  auto memTile = getMemTileOp();
+  if (!memTile)
+    return emitOpError("memTile must be defined by an aie.tile op");
+  if (!memTile.isMemTile())
+    return emitOpError("memTile must be a memtile");
+
+  auto elemType = llvm::dyn_cast<MemRefType>(getElemType());
+  if (!elemType || !elemType.hasStaticShape())
+    return emitOpError("elemType must be a statically shaped memref");
+
+  if (getPartCount() < 1)
+    return emitOpError("part_count must be >= 1");
+
+  DataLayout dataLayout = DataLayout::closest(getOperation());
+  int64_t elemBytes =
+      elemType.getNumElements() * dataLayout.getTypeSize(elemType.getElementType());
+  if (elemBytes % 4 != 0)
+    return emitOpError("elemType byte size must be a multiple of 4");
+
+  if (failed(verifyDMAChannelIndex(getOperation(), computeTile,
+                                   DMAChannelDir::MM2S,
+                                   getComputeMm2sChannel(),
+                                   "compute_mm2s_channel")))
+    return failure();
+  if (failed(verifyDMAChannelIndex(getOperation(), computeTile,
+                                   DMAChannelDir::S2MM,
+                                   getComputeS2mmChannel(),
+                                   "compute_s2mm_channel")))
+    return failure();
+  if (failed(verifyDMAChannelIndex(getOperation(), memTile, DMAChannelDir::S2MM,
+                                   getMemtileIngressChannel(),
+                                   "memtile_ingress_channel")))
+    return failure();
+  if (failed(verifyDMAChannelIndex(getOperation(), memTile, DMAChannelDir::MM2S,
+                                   getMemtileEgressChannel(),
+                                   "memtile_egress_channel")))
+    return failure();
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// MemTileRowStoreAcquireOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult MemTileRowStoreAcquireOp::verify() {
+  auto parent = getOperation()->getParentOfType<CoreOp>();
+  if (parent == nullptr)
+    return emitOpError("must be called from inside a CoreOp");
+
+  auto rowStore = getRowStore();
+  if (!rowStore)
+    return emitError("cannot retrieve associated memtile row store");
+  if (parent.getTile() != rowStore.getComputeTile())
+    return parent.emitOpError(
+        "memtile row store accessed by core running on non-compute tile");
+
+  if (getBuffer().getType() != rowStore.getElemType())
+    return emitOpError(
+        "memtile row store element and acquire result type must match.");
+
+  return success();
+}
+
+MemTileRowStoreOp MemTileRowStoreAcquireOp::getRowStore() {
+  return lookupNearestSymbol<MemTileRowStoreOp>(
+      getOperation(), FlatSymbolRefAttr::get(getContext(), getStoreName()));
+}
+
+//===----------------------------------------------------------------------===//
+// MemTileRowStoreReleaseOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult MemTileRowStoreReleaseOp::verify() {
+  auto parent = getOperation()->getParentOfType<CoreOp>();
+  if (parent == nullptr)
+    return emitOpError("must be called from inside a CoreOp");
+
+  auto rowStore = getRowStore();
+  if (!rowStore)
+    return emitError("cannot retrieve associated memtile row store");
+  if (parent.getTile() != rowStore.getComputeTile())
+    return parent.emitOpError(
+        "memtile row store accessed by core running on non-compute tile");
+
+  return success();
+}
+
+MemTileRowStoreOp MemTileRowStoreReleaseOp::getRowStore() {
+  return lookupNearestSymbol<MemTileRowStoreOp>(
+      getOperation(), FlatSymbolRefAttr::get(getContext(), getStoreName()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -997,15 +1132,8 @@ LogicalResult ObjectFifoAcquireOp::verify() {
 }
 
 ObjectFifoCreateOp ObjectFifoAcquireOp::getObjectFifo() {
-  Operation *parent = getOperation();
-  while ((parent = parent->getParentOp())) {
-    if (parent->hasTrait<OpTrait::SymbolTable>()) {
-      if (auto *st = SymbolTable::lookupSymbolIn(parent, getObjFifoName());
-          isa_and_nonnull<ObjectFifoCreateOp>(st))
-        return dyn_cast<ObjectFifoCreateOp>(st);
-    }
-  }
-  return {};
+  return lookupNearestSymbol<ObjectFifoCreateOp>(
+      getOperation(), FlatSymbolRefAttr::get(getContext(), getObjFifoName()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -1044,15 +1172,8 @@ LogicalResult ObjectFifoReleaseOp::verify() {
 }
 
 ObjectFifoCreateOp ObjectFifoReleaseOp::getObjectFifo() {
-  Operation *parent = getOperation();
-  while ((parent = parent->getParentOp())) {
-    if (parent->hasTrait<OpTrait::SymbolTable>()) {
-      if (auto *st = SymbolTable::lookupSymbolIn(parent, getObjFifoName());
-          isa_and_nonnull<ObjectFifoCreateOp>(st))
-        return dyn_cast<ObjectFifoCreateOp>(st);
-    }
-  }
-  return {};
+  return lookupNearestSymbol<ObjectFifoCreateOp>(
+      getOperation(), FlatSymbolRefAttr::get(getContext(), getObjFifoName()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -1095,15 +1216,8 @@ LogicalResult ObjectFifoRegisterProcessOp::verify() {
 }
 
 ObjectFifoCreateOp ObjectFifoRegisterProcessOp::getObjectFifo() {
-  Operation *parent = getOperation();
-  while ((parent = parent->getParentOp())) {
-    if (parent->hasTrait<OpTrait::SymbolTable>()) {
-      if (auto *st = SymbolTable::lookupSymbolIn(parent, getObjFifoName());
-          isa_and_nonnull<ObjectFifoCreateOp>(st))
-        return dyn_cast<ObjectFifoCreateOp>(st);
-    }
-  }
-  return {};
+  return lookupNearestSymbol<ObjectFifoCreateOp>(
+      getOperation(), FlatSymbolRefAttr::get(getContext(), getObjFifoName()));
 }
 
 //===----------------------------------------------------------------------===//

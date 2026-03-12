@@ -55,6 +55,8 @@ public:
     // locksPerTile
     device.walk([&](LockOp lockOp) {
       auto tile = lockOp.getTile();
+      if (!lockOp.getLockID().has_value())
+        return;
       auto lockID = lockOp.getLockIDValue();
       locksPerTile[{tile, lockID}] = 1;
     });

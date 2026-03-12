@@ -2086,6 +2086,116 @@ def AIE_ObjectFifoReleaseOp: AIE_Op<"objectfifo.release", []> {
   }];
 }
 
+def AIE_MemTileRowStoreOp
+    : AIE_Op<"memtile_row_store", [HasParent<"DeviceOp">, Symbol]> {
+  let summary = "Declare a single-producer, single-consumer memtile row store";
+  let description = [{
+    The `aie.memtile_row_store` operation represents a memtile-local row store
+    accessed through one compute-visible producer scratch buffer and one
+    compute-visible consumer scratch buffer. The row store owns one compute to
+    memtile ingress stream and one memtile to compute egress stream.
+
+    The `elemType` attribute describes the compute-visible tile shape. The full
+    persistent row is composed of `part_count` such tiles stored contiguously in
+    the memtile.
+
+    Example:
+    ```
+      aie.memtile_row_store @row_store0(%core_tile, %mem_tile)
+        { part_count = 4 : i32 } : memref<32x96xbf16>
+    ```
+  }];
+
+  let arguments = (
+    ins SymbolNameAttr:$sym_name,
+        Index:$computeTile,
+        Index:$memTile,
+        AIEI32Attr:$part_count,
+        DefaultValuedAttr<AIEI32Attr, "0">:$compute_mm2s_channel,
+        DefaultValuedAttr<AIEI32Attr, "0">:$compute_s2mm_channel,
+        DefaultValuedAttr<AIEI32Attr, "0">:$memtile_ingress_channel,
+        DefaultValuedAttr<AIEI32Attr, "1">:$memtile_egress_channel,
+        TypeAttrOf<AnyMemRef>:$elemType
+  );
+
+  let assemblyFormat = [{
+    $sym_name `(` $computeTile `,` $memTile `)` attr-dict `:` $elemType
+  }];
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    TileOp getComputeTileOp();
+    TileOp getMemTileOp();
+
+    mlir::StringAttr name() {
+      return getOperation()->getAttrOfType<mlir::StringAttr>(
+          mlir::SymbolTable::getSymbolAttrName());
+    }
+  }];
+}
+
+def AIE_MemTileRowStoreAcquireOp
+    : AIE_Op<"memtile_row_store.acquire", []> {
+  let summary = "Acquire a compute-visible scratch buffer for a memtile row store";
+  let description = [{
+    Acquire the producer or consumer scratch buffer associated with an
+    `aie.memtile_row_store`.
+
+    Example:
+    ```
+      %buf = aie.memtile_row_store.acquire @row_store0(Produce)
+        : memref<32x96xbf16>
+    ```
+  }];
+
+  let arguments = (
+    ins ObjectFifoPort:$port,
+        FlatSymbolRefAttr:$store_name
+  );
+
+  let results = (outs AnyMemRef:$buffer);
+
+  let assemblyFormat = [{
+    attr-dict $store_name `(` $port `)` `:` type($buffer)
+  }];
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    MemTileRowStoreOp getRowStore();
+  }];
+}
+
+def AIE_MemTileRowStoreReleaseOp
+    : AIE_Op<"memtile_row_store.release", []> {
+  let summary = "Release a compute-visible scratch buffer for a memtile row store";
+  let description = [{
+    Release the producer or consumer scratch buffer associated with an
+    `aie.memtile_row_store`.
+
+    Example:
+    ```
+      aie.memtile_row_store.release @row_store0(Consume)
+    ```
+  }];
+
+  let arguments = (
+    ins ObjectFifoPort:$port,
+        FlatSymbolRefAttr:$store_name
+  );
+
+  let assemblyFormat = [{
+    attr-dict $store_name `(` $port `)`
+  }];
+
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    MemTileRowStoreOp getRowStore();
+  }];
+}
+
 def AIE_ObjectFifoSubviewAccessOp : AIE_Op<"objectfifo.subview.access", []> {
   let summary = "ObjectFifoSubview type accessor method";
   let description = [{
