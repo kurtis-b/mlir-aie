@@ -72,8 +72,7 @@ struct AIEAssignRuntimeSequenceBDIDsPass
           if (bd_op.getBdId().has_value()) {
             return WalkResult::advance();
           }
-          // FIXME: use correct channelIndex here
-          std::optional<int32_t> next_id = gen.nextBdId(/*channelIndex=*/0);
+          std::optional<int32_t> next_id = gen.nextBdId(op.getChannel());
           if (!next_id) {
             op.emitOpError()
                 << "Allocator exhausted available buffer descriptor IDs.";
