@@ -25,5 +25,6 @@ add_mlir_public_c_api_library(AIECAPI
   MLIRXLLVMToLLVMIRTranslation
 )
 
-target_include_directories(AIECAPI PUBLIC ${VITIS_AIETOOLS_DIR}/include)
-
+if(DEFINED VITIS_AIETOOLS_DIR AND NOT VITIS_AIETOOLS_DIR STREQUAL "")
+  target_include_directories(AIECAPI PUBLIC ${VITIS_AIETOOLS_DIR}/include)
+endif()

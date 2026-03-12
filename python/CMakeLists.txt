@@ -466,7 +466,9 @@ else ()
 
 endif ()
 
-target_include_directories(AIEPythonModules.extension._aie.dso PUBLIC ${VITIS_AIETOOLS_DIR}/include)
+if(DEFINED VITIS_AIETOOLS_DIR AND NOT VITIS_AIETOOLS_DIR STREQUAL "")
+  target_include_directories(AIEPythonModules.extension._aie.dso PUBLIC ${VITIS_AIETOOLS_DIR}/include)
+endif()
 
 # Copy the runtime libs into the _mlir_libs directory for convenience.
 set(_runtime_deps

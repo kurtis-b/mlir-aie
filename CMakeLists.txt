@@ -24,6 +24,17 @@ set(AIE_RUNTIME_TEST_TARGET
     CACHE STRING "Runtime architecture to test with.")
 
 set(AIE_VITIS_COMPONENTS "AIE;AIE2;AIE2P" CACHE STRING "Vitis components")
+find_program(AIE_VITIS_VPP_HINT NAMES v++ NO_CACHE)
+set(_aie_enable_vitis_default OFF)
+if(AIE_VITIS_VPP_HINT
+   OR DEFINED VITIS_ROOT
+   OR DEFINED ENV{VITIS_ROOT}
+   OR DEFINED ENV{AIETOOLS_ROOT})
+  set(_aie_enable_vitis_default ON)
+endif()
+option(AIE_ENABLE_VITIS "Enable Vitis/AIETools integration." ${_aie_enable_vitis_default})
+unset(_aie_enable_vitis_default)
+unset(AIE_VITIS_VPP_HINT)
 
 if(POLICY CMP0068)
   cmake_policy(SET CMP0068 NEW)
@@ -101,7 +112,45 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(AIE_TOOLS_BINARY_DIR ${AIE_BINARY_DIR}/bin)
 set(AIE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
-find_package(Vitis 2023.2 COMPONENTS ${AIE_VITIS_COMPONENTS})
+if(AIE_ENABLE_VITIS)
+  find_package(Vitis 2023.2 COMPONENTS ${AIE_VITIS_COMPONENTS})
+else()
+  set(Vitis_FOUND FALSE)
+  foreach(vitis_var
+          VITIS_ROOT
+          VITIS_VPP
+          VITIS_AIETOOLS_DIR
+          VITIS_XCHESSCC
+          VITIS_XCHESS_MAKE
+          VITIS_DSPLIB_INCLUDE_DIR
+          VITIS_AIE_INCLUDE_DIR
+          VITIS_AIE_LIBME
+          VITIS_AIE_LIBC
+          VITIS_AIE_LIBM
+          VITIS_AIE_RUNTIME_INCLUDE_DIR
+          VITIS_AIE_LIBSOFTFLOAT
+          VITIS_AIE2_INCLUDE_DIR
+          VITIS_AIE2_LIBME
+          VITIS_AIE2_LIBC
+          VITIS_AIE2_LIBM
+          VITIS_AIE2_RUNTIME_INCLUDE_DIR
+          VITIS_AIE2_LIBSOFTFLOAT
+          VITIS_AIE2P_INCLUDE_DIR
+          VITIS_AIE2P_LIBME
+          VITIS_AIE2P_LIBC
+          VITIS_AIE2P_LIBM
+          VITIS_AIE2P_RUNTIME_INCLUDE_DIR
+          VITIS_AIE2P_LIBSOFTFLOAT
+          Vitis_VERSION_MAJOR
+          Vitis_VERSION_MINOR)
+    unset(${vitis_var})
+    unset(${vitis_var} CACHE)
+  endforeach()
+  set(AIETools_AIE_FOUND FALSE)
+  set(AIETools_AIE2_FOUND FALSE)
+  set(AIETools_AIE2P_FOUND FALSE)
+  message(STATUS "Vitis/AIETools integration disabled (AIE_ENABLE_VITIS=OFF)")
+endif()
 configure_file(./utils/vitisVariables.config.in
                ${CMAKE_BINARY_DIR}/utils/vitisVariables.config @ONLY)
 find_package(XRT)
