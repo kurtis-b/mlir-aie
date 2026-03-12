@@ -8,6 +8,16 @@ The compiler support described here is implemented in-tree and covered by:
 - lowering and BD-allocation tests
 - direct CDO / AIERT regression coverage for partial BD lock pairs
 - an `npu2` roundtrip runtime test that checks output data correctness
+- an explicit `buffer_count = 2` mode with a fixed two-bank ping-pong memtile
+  lowering
+- a second `npu2` roundtrip test that exercises the overlap pattern the
+  single-row form cannot support safely
+
+Today the implementation is split by mode:
+
+- `buffer_count = 1` keeps the original per-slice memtile BD lowering
+- `buffer_count = 2` uses the compressed-bank memtile lowering described later
+  in this note
 
 ## Goal
 
@@ -106,7 +116,9 @@ Do not route that schedule through the current single-row-store lowering. The
 compiler/backend fixes already landed here are necessary, but they do not
 change the single-live-row contract.
 
-### Phase 1: Add an explicit double-buffered row-store mode
+### Phase 1: Explicit double-buffered row-store mode
+
+This phase is implemented in-tree.
 
 The compiler-side fix should be an explicit IR extension, not a silent change
 to the semantics of the current op. The recommended form is:
@@ -132,6 +144,8 @@ banking remains an implementation detail of the lowering. What changes is the
 resource contract and the memtile-side schedule.
 
 ### Phase 2a: Lower `buffer_count = 2` as fixed ping-pong banks
+
+This phase is implemented in-tree.
 
 The simplest correct lowering is a fixed two-bank alternation on the memtile.
 
@@ -211,10 +225,18 @@ This changes the scaling behavior:
 - Phase 2a block usage is `O(part_count)`
 - compressed-bank lowering is `O(buffer_count)`
 
-In practical terms, the straightforward double-buffered CFG has a current
-budget of `4 * part_count + 3` memtile DMA blocks. A compressed-bank lowering
-should reduce that to a small constant number of bank blocks, so `part_count`
-stops being the dominant term in the memtile block budget.
+In practical terms, the straightforward double-buffered CFG currently materializes
+`4 * part_count` BD blocks in the memtile DMA body. Under the current resource
+model, `part_count = 12` is the largest value that still fits, while
+`part_count = 13` is rejected with:
+
+```text
+'aie.memtile_dma' op has more than 48 blocks
+```
+
+A compressed-bank lowering should reduce that to a small constant number of
+bank blocks, so `part_count` stops being the dominant term in the memtile block
+budget.
 
 This does not require the compute side to stop operating one tile at a time.
 The intended execution model is:
@@ -705,14 +727,15 @@ No changes are required in `aie-assign-bd-ids` if the lowering emits standard
 `aie.dma_bd` ops. The existing pass will allocate BD IDs correctly.
 
 For the double-buffered extension, the same files remain the main
-implementation surface. The expected incremental changes are:
+implementation surface. The implemented incremental changes are:
 
 - add `buffer_count` to `AIE_MemTileRowStoreOp`
 - extend verification to accept only the initial supported set, ideally
   `{1, 2}`
 - extend `AIELowerMemtileRowStores.cpp` with the two-bank lowering path
-- teach `AIELowerMemtileRowStores.cpp` to choose the compressed-bank lowering
-  whenever the row access pattern is contiguous and in-order
+- use the compressed-bank lowering for the currently supported
+  `buffer_count = 2` path, whose access pattern is always contiguous and
+  in-order
 - add overlap-specific lowering, BD, and runtime tests
 
 ## Why The Default Memtile Channels Should Be `0` / `1`
@@ -843,11 +866,12 @@ is:
 This ensures the new lowering is accounted for correctly by the current region
 and BD resource model.
 
-For the double-buffered extension, add:
+The double-buffered extension now has:
 
-- `test/Passes/lower-memtile-row-stores/double_buffered_basic.mlir`
-- `test/Passes/assign-bd-ids/memtile_row_store_double_buffered_basic.mlir`
-- `test/Passes/assign-bd-ids/memtile_row_store_double_buffered_exhausted.mlir`
+- `test/Passes/lower-memtile-row-stores/double_buffered.mlir`
+- `test/Passes/assign-bd-ids/memtile_row_store_double_buffered.mlir`
+- `test/Passes/lower-memtile-row-stores/double_buffered_finer_tiles.mlir`
+- `test/Passes/assign-bd-ids/memtile_row_store_double_buffered_finer_tiles.mlir`
 
 Coverage should include:
 
@@ -855,14 +879,6 @@ Coverage should include:
 - ingress bank order `0 -> 1 -> 0`
 - egress bank order `0 -> 1 -> 0`
 - unchanged compute-side scratch-buffer contract
-- the current straightforward CFG shape uses `4 * part_count + 3` memtile DMA
-  blocks
-- with the current 48-block limit, `buffer_count = 2` therefore fits up to
-  `part_count = 11` and should be rejected at `part_count = 12`
-
-For the compressed-bank lowering, add another focused lowering/BD test that
-checks:
-
 - one ingress BD per bank instead of one per row slice
 - one egress BD per bank instead of one per row slice
 - memtile block usage no longer scales linearly with `part_count`
@@ -903,9 +919,9 @@ Coverage:
 - actual data correctness, not just structural lowering
 - a concrete `npu2` roundtrip that checks output equals `input + 101`
 
-For the double-buffered extension, add a second runtime test that proves the
-overlap case instead of only the fill-then-drain case. The kernel structure
-should be:
+For the double-buffered extension, the second runtime test now exists and
+proves the overlap case instead of only the fill-then-drain case. Its kernel
+structure is:
 
 1. produce one full row
 2. start consuming that row
@@ -915,10 +931,10 @@ should be:
 That test is the key proof that the v2 semantics actually solve the motivating
 schedule.
 
-For the compressed-bank lowering, add a third runtime-oriented test whose total
-row footprint stays constant while `part_count` increases. That test should
-demonstrate that the client no longer needs to widen off-chip traffic simply to
-fit the memtile BD-block budget.
+The remaining optional follow-on here is a third runtime-oriented test whose
+total row footprint stays constant while `part_count` increases. That test
+would demonstrate the performance effect directly, not just the structural
+lowering behavior.
 
 ### 6. Optional NPU lowering smoke test
 
@@ -965,32 +981,29 @@ Suggested v2 scope should also stay narrow:
 - implement `buffer_count = 2` only as fixed two-bank alternation
 - no dynamic bank selection
 - no multi-consumer broadcast semantics
-- add compressed-bank lowering only after Phase 2a runtime correctness is
-  proven
+- keep the compressed-bank lowering restricted to the explicit two-bank mode
 
 ## Expected Outcome
 
-This patch is aimed at the compiler-side representation problem:
+This patch set is aimed at the compiler-side representation problem:
 
 - the row-store becomes a compiler-level construct
 - the generated design uses a constant number of compute-side endpoints
-- memtile BD usage scales with `2 * part_count`, not with a deep replay ring
+- for `buffer_count = 1`, memtile BD usage still scales with `2 * part_count`
+- for `buffer_count = 2`, memtile BD usage now tracks row banks rather than
+  row slices
 - the lowering is testable with existing `aie-opt` and FileCheck coverage
 
-For the planned v2 extension, the expected outcome is:
+For the implemented v2 extension, the expected outcome is:
 
 - overlapping consume/write schedules become representable without changing the
   core-side programming model
 - clients with FIFO fallbacks can migrate back selectively where the doubled
-  memtile storage and block budget still fit
-- the extra cost is explicit: roughly `2x` memtile row storage and a memtile DMA
-  CFG that scales as `4 * part_count + 3` blocks in the straightforward
-  implementation
+  memtile storage fits
+- the extra cost is explicit: roughly `2x` memtile row storage
+- the memtile DMA CFG for `buffer_count = 2` now tracks row banks rather than
+  row slices
 
-For the deployment-ready compressed-bank form, the additional expected outcome
-is:
-
-- the memtile DMA block budget tracks row banks rather than row slices
 - `part_count` is no longer the main limiter when total row bytes stay fixed
 - clients can keep replay traffic on-chip instead of reshaping the design
   around avoidable DDR rereads
