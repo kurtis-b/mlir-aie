@@ -278,47 +278,45 @@ LogicalResult configureLocksInBdBlock(const AIE::AIETargetModel &targetModel,
   LLVM_DEBUG(llvm::dbgs() << "\nstart configuring bds\n");
   std::optional<int> acqValue, relValue, acqLockId, relLockId;
   bool acqEn = false;
+  bool relEn = false;
 
-  // switch (lock->getAc)
-  AIE::LockOp lock;
   for (auto op : block.getOps<AIE::UseLockOp>()) {
     // Only dyn_cast if you are going to check if it was of the type
     // expected; if you aren't checking use cast instead as it will at
     // least assert in debug mode with an easier to understand error than
     // dereferencing.
-    lock = cast<AIE::LockOp>(op.getLock().getDefiningOp());
+    auto lock = cast<AIE::LockOp>(op.getLock().getDefiningOp());
+    int lockId = lock.getLockIDValue();
+    if (targetModel.isMemTile(col, row)) {
+      auto lockOffset = targetModel.getLockLocalBaseIndex(
+          col, row, lock.colIndex(), lock.rowIndex());
+      if (lockOffset)
+        lockId += lockOffset.value();
+    }
     switch (op.getAction()) {
     case AIE::LockAction::Acquire:
     case AIE::LockAction::AcquireGreaterEqual:
       acqEn = op.getAcqEn();
-      acqLockId = lock.getLockIDValue();
+      acqLockId = lockId;
       acqValue = op.getLockValue();
       if (op.acquireGE())
         acqValue.value() = -acqValue.value();
       break;
     case AIE::LockAction::Release:
-      relLockId = lock.getLockIDValue();
+      relEn = true;
+      relLockId = lockId;
       relValue = op.getLockValue();
       break;
     }
   }
 
-  assert(acqValue && relValue && acqLockId && relLockId &&
-         "expected both use_lock(acquire) and use_lock(release) with bd");
+  if (!acqValue && !relValue && !acqLockId && !relLockId)
+    return success();
 
-  if (targetModel.isMemTile(col, row)) {
-    auto lockOffset = targetModel.getLockLocalBaseIndex(
-        col, row, lock.colIndex(), lock.rowIndex());
-    if (lockOffset && acqLockId)
-      acqLockId.value() += lockOffset.value();
-    if (lockOffset && relLockId)
-      relLockId.value() += lockOffset.value();
-  }
-
-  // no RelEn in the arch spec even though the API requires you to set it?
-  bool relEn = false;
-  XAie_Lock acqLock = XAie_LockInit(acqLockId.value(), acqValue.value());
-  XAie_Lock relLock = XAie_LockInit(relLockId.value(), relValue.value());
+  XAie_Lock acqLock =
+      XAie_LockInit(acqLockId.value_or(0), acqValue.value_or(0));
+  XAie_Lock relLock =
+      XAie_LockInit(relLockId.value_or(0), relValue.value_or(0));
   TRY_XAIE_API_EMIT_ERROR((*block.getOps<AIE::UseLockOp>().begin()),
                           dmaTileBd.DmaMod->SetLock, &dmaTileBd, acqLock,
                           relLock, acqEn, relEn);
