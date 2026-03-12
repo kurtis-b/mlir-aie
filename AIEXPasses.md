@@ -75,6 +75,17 @@ _Lowering herds with place and route ops to AIE cores, mems, and switchboxes_
 An experimental pass which elaborates herd operations (e.g. aie.herd, aie.iter, aie.select)
 into an explicit representation (e.g. aie.core, aie.mem, etc.).
 
+### `-aie-inline-trace-config`
+
+_Inline trace configuration and generate NPU writes_
+
+Replaces aie.trace.start_config operations by:
+1. Looking up the referenced trace.config symbol
+2. Resolving register/field names using RegisterDatabase
+3. Encoding bitfield values
+4. Merging multiple field writes to same register
+5. Generating aiex.npu.write32 operations with col/row preserved
+
 ### `-aie-legalize-ctrl-packet`
 
 _Legalize control packet operations for target_
@@ -121,6 +132,15 @@ Inlines calls to other runtime sequences using `aiex.run` into the calling runti
 
 This pass requires ObjectFIFOs to be lowered first; apply the ObjectFIFO stateful transform before applying this pass.
 
+### `-aie-npu-to-cert`
+
+_Transform aiex.npu operations to aiex.cert operations_
+
+This pass transforms low level aiex.npu operations contained in
+aie.runtime_sequence operations into aiex.cert operations enclosed in
+aiex.cert.job operations. The write32, maskwrite32, blockwrite and sync
+operations are supported.
+
 ### `-aie-substitute-shim-dma-allocations`
 
 _Replace symbolic references to `aie.shim_dma_allocation` ops with their `(tile, direction, channel)` triple_
@@ -142,3 +162,11 @@ _Lower AIEX operations_
 
 AIEX Npu Ops are removed.
 
+
+### `-cert-legalize-pages`
+
+_Split cert jobs to fit into 8k pages_
+
+This pass splits cert jobs into smaller jobs that fit into 8k pages.
+It is used to ensure that the generated code does not exceed the page size
+limit of the aiebu tools and cert firmware.

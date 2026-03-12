@@ -511,6 +511,42 @@ Effects: `MemoryEffects::Effect{}`
 
 
 
+### `aievec.inv` (::xilinx::aievec::InvOp)
+
+_AIE inverse_
+
+Syntax:
+
+```
+operation ::= `aievec.inv` $source attr-dict `:` type($result)
+```
+
+AMD-specific intrinsic that computes the inverse (1/x) of a scalar f32
+or a vector of f32 elements.
+For AIE2P, scalar f32 is lowered to the inv intrinsic, and vector f32
+is unrolled into scalar inv intrinsic calls.
+`$result = inv(`$source`) = 1.0 / $source`.
+
+Traits: `AlwaysSpeculatableImplTrait`
+
+Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `NoMemoryEffect (MemoryEffectOpInterface)`
+
+Effects: `MemoryEffects::Effect{}`
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `source` | 32-bit float or vector of 32-bit float values of length 16/32 |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | 32-bit float or vector of 32-bit float values of length 16/32 |
+
+
+
 ### `aievec.legacyshuffle` (::xilinx::aievec::LegacyShuffleOp)
 
 _AIE2 shuffle_
@@ -1136,14 +1172,22 @@ _AIE srs_
 
 AMD-specific shift-round-saturate intrinsic. Moves values from
 accumulator data type to AIE vector data types. The adjustment in
-precision is controlled by the shift parameter.
-`$result = srs($source, $shift)`
+precision is controlled by the shift parameter. The sign parameter
+controls signed (1) vs unsigned (0) saturation.
+`$result = srs($source, $shift, $sign)`
 
 Traits: `AlwaysSpeculatableImplTrait`
 
 Interfaces: `ConditionallySpeculatable`, `NoMemoryEffect (MemoryEffectOpInterface)`
 
 Effects: `MemoryEffects::Effect{}`
+
+#### Attributes:
+
+<table>
+<tr><th>Attribute</th><th>MLIR Type</th><th>Description</th></tr>
+<tr><td><code>sign</code></td><td>::mlir::IntegerAttr</td><td>32-bit signless integer attribute whose minimum value is 0 whose maximum value is 1</td></tr>
+</table>
 
 #### Operands:
 
@@ -1185,6 +1229,40 @@ Effects: `MemoryEffects::Effect{}`
 | :-----: | ----------- |
 | `lhs` | vector of any type values |
 | `rhs` | vector of any type values |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `result` | vector of any type values |
+
+
+
+### `aievec.tanh` (::xilinx::aievec::TanhOp)
+
+_AIE vector hyperbolic tangent_
+
+Syntax:
+
+```
+operation ::= `aievec.tanh` $source attr-dict `:` type($result)
+```
+
+AMD-specific intrinsic that computes the hyperbolic tangent of the input
+vector. For AIE2P, this is lowered to the hardware tanh intrinsic.
+`$result = tanh(`$source`).
+
+Traits: `AlwaysSpeculatableImplTrait`
+
+Interfaces: `ConditionallySpeculatable`, `InferTypeOpInterface`, `NoMemoryEffect (MemoryEffectOpInterface)`
+
+Effects: `MemoryEffects::Effect{}`
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `source` | vector of any type values |
 
 #### Results:
 
@@ -1356,6 +1434,19 @@ _AIE Device_
 | npu2_6col | `14` | npu2_6col |
 | npu2_7col | `15` | npu2_7col |
 
+### AIETileType
+
+_Type of AIE Tile_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| CoreTile | `0` | CoreTile |
+| MemTile | `1` | MemTile |
+| ShimNOCTile | `2` | ShimNOCTile |
+| ShimPLTile | `3` | ShimPLTile |
+
 ### CascadeDir
 
 _Directions for cascade_
@@ -1369,7 +1460,20 @@ _Directions for cascade_
 | North | `5` | North |
 | East | `6` | East |
 
-### CoreEvent
+### ComboLogic
+
+_Combo event logic function_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| AND | `0` | AND |
+| AND_NOT | `1` | AND_NOT |
+| OR | `2` | OR |
+| OR_NOT | `3` | OR_NOT |
+
+### CoreEventAIE
 
 _Core module event enumeration for AIE_
 
@@ -1784,6 +1888,18 @@ _DMA Channel direction_
 | S2MM | `0` | S2MM |
 | MM2S | `1` | MM2S |
 
+### EdgeTrigger
+
+_Edge detection trigger mode_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| RISING | `1` | RISING |
+| FALLING | `2` | FALLING |
+| BOTH | `3` | BOTH |
+
 ### LockAction
 
 _Lock acquire/release_
@@ -1807,7 +1923,7 @@ _Lock operation is blocking_
 | NonBlocking | `0` | NonBlocking |
 | Blocking | `1` | Blocking |
 
-### MemEvent
+### MemEventAIE
 
 _Memory module event enumeration for AIE_
 
@@ -2192,7 +2308,7 @@ _Memory module event enumeration for AIE2P_
 | USER_EVENT_2 | `126` | USER_EVENT_2 |
 | USER_EVENT_3 | `127` | USER_EVENT_3 |
 
-### MemTileEvent
+### MemTileEventAIE
 
 _Memory tile event enumeration for AIE_
 
@@ -2552,7 +2668,7 @@ _Ports of an object FIFO_
 | Produce | `0` | Produce |
 | Consume | `1` | Consume |
 
-### ShimTileEvent
+### ShimTileEventAIE
 
 _Shim tile event enumeration for AIE_
 
@@ -3019,6 +3135,31 @@ _Shuffle mode for AIEVec shuffle operations_
 | T16_2X16 | `45` | t16_2x16 |
 | T8_8X4 | `46` | t8_8x4 |
 | T8_4X8 | `47` | t8_4x8 |
+
+### TraceMode
+
+_Trace capture mode_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| EventTime | `0` | Event-Time |
+| EventPC | `1` | Event-PC |
+| Execution | `2` | Execution |
+
+### TracePacketType
+
+_Packet type identifier for parsing_
+
+#### Cases:
+
+| Symbol | Value | String |
+| :----: | :---: | ------ |
+| Core | `0` | core |
+| Mem | `1` | mem |
+| ShimTile | `2` | shimtile |
+| MemTile | `3` | memtile |
 
 ### WireBundle
 

@@ -958,6 +958,42 @@ Effects: `MemoryEffects::Effect{}`
 
 
 
+### `xllvm.intr.aie2.vsel16` (::xilinx::xllvm::VectorSel16IntrOp)
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `lhs` | vector of 16-bit signless integer values of length 32 |
+| `rhs` | vector of 16-bit signless integer values of length 32 |
+| `sel` | 32-bit signless integer |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `res` | LLVM dialect-compatible type |
+
+
+
+### `xllvm.intr.aie2.vsel32` (::xilinx::xllvm::VectorSel32IntrOp)
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `lhs` | vector of 32-bit signless integer values of length 16 |
+| `rhs` | vector of 32-bit signless integer values of length 16 |
+| `sel` | 32-bit signless integer |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `res` | LLVM dialect-compatible type |
+
+
+
 ### `xllvm.intr.aie2.vshift.bf512.bf512` (::xilinx::xllvm::VectorShiftBF512BF512IntrOp)
 
 #### Operands:
@@ -1549,6 +1585,28 @@ Effects: `MemoryEffects::Effect{}`
 
 
 
+### `xllvm.intr.aie2p.inv` (::xilinx::xllvm::InvAIE2pIntrOp)
+
+Traits: `AlwaysSpeculatableImplTrait`
+
+Interfaces: `ConditionallySpeculatable`, `NoMemoryEffect (MemoryEffectOpInterface)`
+
+Effects: `MemoryEffects::Effect{}`
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `src` | 32-bit float |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `res` | LLVM dialect-compatible type |
+
+
+
 ### `xllvm.intr.aie2p.invsqrt` (::xilinx::xllvm::InvsqrtAIE2pIntrOp)
 
 Traits: `AlwaysSpeculatableImplTrait`
@@ -1562,6 +1620,22 @@ Effects: `MemoryEffects::Effect{}`
 | Operand | Description |
 | :-----: | ----------- |
 | `src` | 32-bit float |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `res` | LLVM dialect-compatible type |
+
+
+
+### `xllvm.intr.aie2p.tanh` (::xilinx::xllvm::TanhAIE2pIntrOp)
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `src` | vector of 32-bit float values of length 16 |
 
 #### Results:
 
@@ -1814,6 +1888,42 @@ Effects: `MemoryEffects::Effect{}`
 | :-----: | ----------- |
 | `lhs` | vector of bfloat16 type values of length 32 |
 | `rhs` | vector of bfloat16 type values of length 32 |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `res` | LLVM dialect-compatible type |
+
+
+
+### `xllvm.intr.aie2p.vsel16` (::xilinx::xllvm::VectorSel16AIE2pIntrOp)
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `lhs` | vector of 16-bit signless integer values of length 32 |
+| `rhs` | vector of 16-bit signless integer values of length 32 |
+| `sel` | 32-bit signless integer |
+
+#### Results:
+
+| Result | Description |
+| :----: | ----------- |
+| `res` | LLVM dialect-compatible type |
+
+
+
+### `xllvm.intr.aie2p.vsel32` (::xilinx::xllvm::VectorSel32AIE2pIntrOp)
+
+#### Operands:
+
+| Operand | Description |
+| :-----: | ----------- |
+| `lhs` | vector of 32-bit signless integer values of length 16 |
+| `rhs` | vector of 32-bit signless integer values of length 16 |
+| `sel` | 32-bit signless integer |
 
 #### Results:
 
