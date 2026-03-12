@@ -372,6 +372,205 @@ After the compiler work lands, validate it in this order:
 This keeps the client rollback simple if the v2 lowering still hits an
 unexpected channel, block, or runtime issue.
 
+### Phase 4: Extend the single-consumer op to separate producer and consumer tiles
+
+The current op is intentionally narrower than the underlying abstraction. Today
+it assumes the same compute tile both fills and rereads the row. If we need a
+single-producer / single-consumer row store that bridges two different core
+tiles, that should be an extension of `aie.memtile_row_store`, not a brand new
+op.
+
+Recommended IR shape:
+
+```mlir
+aie.memtile_row_store @row_store0(
+  %producer_tile,
+  %consumer_tile,
+  %mem_tile
+) {
+  part_count = 8 : i32,
+  buffer_count = 2 : i32
+} : memref<32x96xbf16>
+```
+
+Why this should be an extension of the current op:
+
+- the abstraction is still one producer, one consumer, and one persistent
+  memtile row store
+- `buffer_count = 1` and `buffer_count = 2` keep the same meaning
+- the memtile-side bank buffers and compressed-bank lowering remain valid
+- only the compute-visible endpoints move from one core tile to two
+
+Recommended compatibility plan:
+
+- keep the existing two-operand syntax as sugar for
+  `(%compute_tile, %compute_tile, %mem_tile)`
+- canonicalize the op internally to
+  `(%producer_tile, %consumer_tile, %mem_tile)`
+- keep the current same-tile form valid for existing tests and clients
+
+Verifier changes:
+
+- `producerTile` must be a core tile
+- `consumerTile` must be a core tile
+- `memTile` must be a memtile
+- `aie.memtile_row_store.acquire @S(Produce)` and
+  `aie.memtile_row_store.release @S(Produce)` must appear only inside the core
+  bound to `producerTile`
+- `aie.memtile_row_store.acquire @S(Consume)` and
+  `aie.memtile_row_store.release @S(Consume)` must appear only inside the core
+  bound to `consumerTile`
+
+Lowering changes:
+
+- create producer scratch buffer and producer locks on `producerTile`
+- create consumer scratch buffer and consumer locks on `consumerTile`
+- build producer MM2S DMA on `producerTile`
+- build consumer S2MM DMA on `consumerTile`
+- create one flow from `producerTile` to `memTile`
+- create one flow from `memTile` to `consumerTile`
+- keep the memtile bank buffers, locks, and bank alternation exactly as in the
+  current single-consumer lowering
+
+Expected tests:
+
+- parser and verifier coverage for same-tile and split-tile forms
+- lowering/FileCheck coverage that proves distinct producer and consumer flows
+- runtime roundtrip coverage for
+  host/NPU -> producer core -> memtile -> consumer core -> host/NPU
+
+This extension is the right next step when the only missing capability is
+"write on core A, replay on core B."
+
+### Phase 5: Add a separate op for true multi-consumer replay
+
+Multiple consumers should not be modeled by stretching
+`aie.memtile_row_store` further. Once there is more than one consumer, the
+resource contract changes materially:
+
+- each consumer needs its own compute-visible scratch buffer
+- each consumer needs its own consume-side locks
+- each consumer needs its own egress DMA channel assignment
+- the memtile must track replay progress for more than one consumer
+
+That is a different abstraction. The recommended direction is a new op, for
+example:
+
+```mlir
+aie.memtile_row_replay @row_replay0(
+  %producer_tile,
+  [%consumer_tile0, %consumer_tile1],
+  %mem_tile
+) {
+  part_count = 8 : i32,
+  buffer_count = 2 : i32
+} : memref<32x96xbf16>
+```
+
+Recommended semantics for the first version:
+
+- one producer
+- two or more consumers
+- each consumer rereads every logical row
+- replay is independent per consumer, not lockstep broadcast
+- the producer cannot recycle a bank until every consumer has finished that
+  bank
+
+Recommended lowering shape:
+
+- one producer scratch buffer on `producerTile`
+- one consumer scratch buffer per consumer tile
+- one producer MM2S chain
+- one consumer S2MM chain per consumer tile
+- one memtile ingress path shared by all consumers
+- one memtile bank buffer set shared by all consumers
+- one empty/full lock pair per bank
+- one per-consumer replay-credit or done lock per bank
+
+In other words, bank ownership becomes:
+
+1. producer fills bank `i`
+2. bank `i` becomes visible to all consumers
+3. each consumer drains bank `i` through its own egress path
+4. bank `i` becomes reusable only after the last consumer releases it
+
+Why this should be a new op instead of an extension:
+
+- the acquire/release contract is no longer "one Produce port, one Consume
+  port"
+- the verifier must reason about multiple consumer tiles, not just one
+- the lowering needs per-consumer egress state and completion tracking
+- resource scaling is now a function of consumer count as well as bank count
+
+Suggested v1 scope for the new op:
+
+- one producer tile
+- two or more consumer tiles
+- one memtile
+- identical consumer element type and replay order for all consumers
+- `buffer_count in {1, 2}`
+- no packet-switch broadcast or lockstep semantics in v1
+
+### Phase 6: Use a dedicated op for broadcast replay
+
+Broadcast replay should be treated as another new abstraction, not just an
+attribute on the independent multi-consumer replay op.
+
+The reason is semantic, not just syntactic:
+
+- independent multi-consumer replay means each consumer may lag or advance
+  relative to the others
+- broadcast replay means all consumers observe the same row slices in the same
+  order, under one shared backpressure contract
+- independent replay is limited by the slowest consumer only at bank recycle
+  time
+- broadcast replay is limited by the slowest consumer on every slice
+
+That difference affects:
+
+- lock design
+- DMA/stream scheduling
+- packet-routing requirements
+- performance behavior under consumer skew
+
+Recommended future op shape:
+
+```mlir
+aie.memtile_row_broadcast @row_bcast0(
+  %producer_tile,
+  [%consumer_tile0, %consumer_tile1],
+  %mem_tile
+) {
+  part_count = 8 : i32,
+  buffer_count = 2 : i32
+} : memref<32x96xbf16>
+```
+
+Recommended semantics:
+
+- one producer fills a bank once
+- the memtile replays each row slice in lockstep to all consumers
+- a slice advances only when every consumer path is ready
+- a bank is released only after the final broadcast slice has been accepted by
+  all consumers
+
+Recommended lowering directions to evaluate:
+
+- packet-switch fanout if the target/runtime path supports it cleanly
+- or duplicated memtile egress DMAs if hardware broadcast is not available
+
+Required proof obligations before implementing it:
+
+- demonstrate that broadcast fanout is materially cheaper than independent
+  replay for the target design
+- prove that the packet/broadcast path preserves row order and backpressure
+  correctly
+- measure whether lockstep consumers are realistic for the intended clients
+
+If those points do not hold, the independent multi-consumer replay op should
+remain the default design and broadcast replay should stay a specialized
+follow-on.
+
 ## Why This Should Not Be Another `aie.objectfifo` Mode
 
 The existing `aie.objectfifo` lowering is built around queue semantics on FIFO
@@ -983,6 +1182,13 @@ Suggested v2 scope should also stay narrow:
 - no multi-consumer broadcast semantics
 - keep the compressed-bank lowering restricted to the explicit two-bank mode
 
+Suggested future scopes should stay split:
+
+- extend `aie.memtile_row_store` only for separate producer and consumer tiles
+- add a separate op for independent multi-consumer replay
+- add a separate op for broadcast replay only if lockstep fanout is worth its
+  complexity
+
 ## Expected Outcome
 
 This patch set is aimed at the compiler-side representation problem:
@@ -1007,3 +1213,13 @@ For the implemented v2 extension, the expected outcome is:
 - `part_count` is no longer the main limiter when total row bytes stay fixed
 - clients can keep replay traffic on-chip instead of reshaping the design
   around avoidable DDR rereads
+
+For the planned future extensions, the expected split is:
+
+- single-producer / single-consumer on different core tiles remains one row
+  store abstraction and should reuse the current memtile lowering strategy
+- true multi-consumer replay introduces a new resource contract and should have
+  its own op
+- broadcast replay is different again because it changes backpressure and
+  scheduling semantics, so it should not be hidden inside the independent
+  multi-consumer model
