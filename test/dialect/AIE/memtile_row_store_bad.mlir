@@ -37,6 +37,16 @@ aie.device(xcve2302) {
 
 // -----
 
+// CHECK: 'aie.memtile_row_store' op buffer_count must be 1 or 2
+
+aie.device(xcve2302) {
+  %mem = aie.tile(2, 1)
+  %core = aie.tile(2, 2)
+  aie.memtile_row_store @row_store0(%core, %mem) {part_count = 4 : i32, buffer_count = 3 : i32} : memref<32x96xbf16>
+}
+
+// -----
+
 // CHECK: 'aie.memtile_row_store.acquire' op must be called from inside a CoreOp
 
 aie.device(xcve2302) {

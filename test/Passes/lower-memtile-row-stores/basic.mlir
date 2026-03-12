@@ -30,15 +30,15 @@ module {
 // CHECK: %[[MEM:.*]] = aie.tile(2, 1)
 // CHECK: %[[CORE:.*]] = aie.tile(2, 2)
 // CHECK-NOT: aie.memtile_row_store
-// CHECK: %[[SRC:.*]] = aie.buffer(%[[CORE]]) {sym_name = "row_store0_src"} : memref<32x96xbf16>
-// CHECK: %[[DST:.*]] = aie.buffer(%[[CORE]]) {sym_name = "row_store0_dst"} : memref<32x96xbf16>
-// CHECK: %[[ROW:.*]] = aie.buffer(%[[MEM]]) {sym_name = "row_store0_row"} : memref<12288xbf16>
-// CHECK: %[[SRC_EMPTY:.*]] = aie.lock(%[[CORE]]) {init = 1 : i32, sym_name = "row_store0_src_empty"}
-// CHECK: %[[SRC_FULL:.*]] = aie.lock(%[[CORE]]) {init = 0 : i32, sym_name = "row_store0_src_full"}
-// CHECK: %[[DST_EMPTY:.*]] = aie.lock(%[[CORE]]) {init = 1 : i32, sym_name = "row_store0_dst_empty"}
-// CHECK: %[[DST_FULL:.*]] = aie.lock(%[[CORE]]) {init = 0 : i32, sym_name = "row_store0_dst_full"}
-// CHECK: %[[ROW_EMPTY:.*]] = aie.lock(%[[MEM]]) {init = 1 : i32, sym_name = "row_store0_row_empty"}
-// CHECK: %[[ROW_FULL:.*]] = aie.lock(%[[MEM]]) {init = 0 : i32, sym_name = "row_store0_row_full"}
+// CHECK-DAG: %[[SRC:.*]] = aie.buffer(%[[CORE]]) {sym_name = "row_store0_src"} : memref<32x96xbf16>
+// CHECK-DAG: %[[DST:.*]] = aie.buffer(%[[CORE]]) {sym_name = "row_store0_dst"} : memref<32x96xbf16>
+// CHECK-DAG: %[[ROW:.*]] = aie.buffer(%[[MEM]]) {sym_name = "row_store0_row"} : memref<12288xbf16>
+// CHECK-DAG: %[[SRC_EMPTY:.*]] = aie.lock(%[[CORE]]) {init = 1 : i32, sym_name = "row_store0_src_empty"}
+// CHECK-DAG: %[[SRC_FULL:.*]] = aie.lock(%[[CORE]]) {init = 0 : i32, sym_name = "row_store0_src_full"}
+// CHECK-DAG: %[[DST_EMPTY:.*]] = aie.lock(%[[CORE]]) {init = 1 : i32, sym_name = "row_store0_dst_empty"}
+// CHECK-DAG: %[[DST_FULL:.*]] = aie.lock(%[[CORE]]) {init = 0 : i32, sym_name = "row_store0_dst_full"}
+// CHECK-DAG: %[[ROW_EMPTY:.*]] = aie.lock(%[[MEM]]) {init = 1 : i32, sym_name = "row_store0_row_empty"}
+// CHECK-DAG: %[[ROW_FULL:.*]] = aie.lock(%[[MEM]]) {init = 0 : i32, sym_name = "row_store0_row_full"}
 // CHECK: aie.flow(%[[CORE]], DMA : 0, %[[MEM]], DMA : 0)
 // CHECK: aie.flow(%[[MEM]], DMA : 1, %[[CORE]], DMA : 0)
 // CHECK: aie.core(%[[CORE]]) {

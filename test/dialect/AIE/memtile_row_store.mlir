@@ -12,7 +12,7 @@ aie.device(xcve2302) {
   %mem = aie.tile(2, 1)
   %core = aie.tile(2, 2)
 
-  aie.memtile_row_store @row_store0(%core, %mem) {part_count = 4 : i32} : memref<32x96xbf16>
+  aie.memtile_row_store @row_store0(%core, %mem) {part_count = 4 : i32, buffer_count = 2 : i32} : memref<32x96xbf16>
 
   aie.core(%core) {
     %src = aie.memtile_row_store.acquire @row_store0(Produce) : memref<32x96xbf16>
@@ -23,7 +23,7 @@ aie.device(xcve2302) {
   }
 }
 
-// CHECK: aie.memtile_row_store @row_store0(%[[CORE:.*]], %[[MEM:.*]]) {part_count = 4 : i32} : memref<32x96xbf16>
+// CHECK: aie.memtile_row_store @row_store0(%[[CORE:.*]], %[[MEM:.*]]) {buffer_count = 2 : i32, part_count = 4 : i32} : memref<32x96xbf16>
 // CHECK: %[[SRC:.*]] = aie.memtile_row_store.acquire @row_store0(Produce) : memref<32x96xbf16>
 // CHECK: %[[DST:.*]] = aie.memtile_row_store.acquire @row_store0(Consume) : memref<32x96xbf16>
 // CHECK: aie.memtile_row_store.release @row_store0(Consume)

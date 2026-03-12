@@ -1005,10 +1005,13 @@ LogicalResult MemTileRowStoreOp::verify() {
 
   if (getPartCount() < 1)
     return emitOpError("part_count must be >= 1");
+  if (getBufferCount() < 1 || getBufferCount() > 2)
+    return emitOpError("buffer_count must be 1 or 2");
 
   DataLayout dataLayout = DataLayout::closest(getOperation());
   int64_t elemBytes =
-      elemType.getNumElements() * dataLayout.getTypeSize(elemType.getElementType());
+      elemType.getNumElements() *
+      dataLayout.getTypeSize(elemType.getElementType());
   if (elemBytes % 4 != 0)
     return emitOpError("elemType byte size must be a multiple of 4");
 

@@ -34,13 +34,17 @@ struct LockPair {
   LockOp full;
 };
 
+struct RowBankResources {
+  BufferOp buffer;
+  LockPair locks;
+};
+
 struct RowStoreResources {
   BufferOp srcBuffer;
   BufferOp dstBuffer;
-  BufferOp rowBuffer;
   LockPair srcLocks;
   LockPair dstLocks;
-  LockPair rowLocks;
+  SmallVector<RowBankResources, 2> rowBanks;
 };
 
 using ChannelKey = std::tuple<int, int, int, int>;
@@ -110,6 +114,23 @@ static LockOp createNamedLock(OpBuilder &builder, Location loc, TileOp tile,
                         builder.getStringAttr(name));
 }
 
+static SmallVector<RowBankResources, 2>
+createRowBanks(OpBuilder &builder, Location loc, TileOp tile, Type rowType,
+               StringRef prefix, int bufferCount) {
+  SmallVector<RowBankResources, 2> rowBanks;
+  rowBanks.reserve(bufferCount);
+  for (int i = 0; i < bufferCount; ++i) {
+    std::string bankName = prefix.str() + "_row";
+    if (bufferCount != 1)
+      bankName += "_" + std::to_string(i);
+    rowBanks.push_back(
+        {createNamedBuffer(builder, loc, rowType, tile, bankName),
+         {createNamedLock(builder, loc, tile, 1, bankName + "_empty"),
+          createNamedLock(builder, loc, tile, 0, bankName + "_full")}});
+  }
+  return rowBanks;
+}
+
 static RowStoreResources createResources(DeviceOp device, MemTileRowStoreOp op,
                                          OpBuilder &builder) {
   OpBuilder::InsertionGuard guard(builder);
@@ -126,8 +147,6 @@ static RowStoreResources createResources(DeviceOp device, MemTileRowStoreOp op,
                         prefix + "_src"),
       createNamedBuffer(builder, op.getLoc(), elemType, op.getComputeTileOp(),
                         prefix + "_dst"),
-      createNamedBuffer(builder, op.getLoc(), rowType, op.getMemTileOp(),
-                        prefix + "_row"),
       {createNamedLock(builder, op.getLoc(), op.getComputeTileOp(), 1,
                        prefix + "_src_empty"),
        createNamedLock(builder, op.getLoc(), op.getComputeTileOp(), 0,
@@ -136,10 +155,8 @@ static RowStoreResources createResources(DeviceOp device, MemTileRowStoreOp op,
                        prefix + "_dst_empty"),
        createNamedLock(builder, op.getLoc(), op.getComputeTileOp(), 0,
                        prefix + "_dst_full")},
-      {createNamedLock(builder, op.getLoc(), op.getMemTileOp(), 1,
-                       prefix + "_row_empty"),
-       createNamedLock(builder, op.getLoc(), op.getMemTileOp(), 0,
-                       prefix + "_row_full")}};
+      createRowBanks(builder, op.getLoc(), op.getMemTileOp(), rowType, prefix,
+                     op.getBufferCount())};
 
   FlowOp::create(builder, op.getLoc(), op.getComputeTile(), WireBundle::DMA,
                  op.getComputeMm2sChannel(), op.getMemTile(), WireBundle::DMA,
@@ -215,6 +232,98 @@ static void createComputeDMA(DeviceOp device, MemTileRowStoreOp op,
   }
 }
 
+static void createMemTileDMAChannel(MemTileDMAOp dmaOp, MemTileRowStoreOp op,
+                                    SmallVectorImpl<RowBankResources> &rowBanks,
+                                    DMAChannelDir dir, int channel, int partCount,
+                                    int elemCount) {
+  Region &body = dmaOp.getBody();
+  Block *endBlock = findEndBlock(body);
+  assert(endBlock && "expected aie.end block");
+  assert(!rowBanks.empty() && "expected at least one row bank");
+
+  OpBuilder dmaBuilder(dmaOp.getContext());
+  Block *lastStartBlock = findLastDMAStartBlock(body, endBlock);
+  Block *dmaBlock = dmaBuilder.createBlock(endBlock);
+  int rowLen = partCount * elemCount;
+
+  if (!lastStartBlock && &body.front() != dmaBlock)
+    dmaBlock->moveBefore(&body.front());
+
+  if (op.getBufferCount() == 2) {
+    SmallVector<Block *, 2> bankBlocks;
+    bankBlocks.reserve(rowBanks.size());
+    for (auto [bankIdx, bank] : llvm::enumerate(rowBanks)) {
+      (void)bankIdx;
+      (void)bank;
+      bankBlocks.push_back(dmaBuilder.createBlock(endBlock));
+    }
+    dmaBuilder.setInsertionPointToStart(dmaBlock);
+    DMAStartOp::create(dmaBuilder, op.getLoc(), dir, channel,
+                       /*repeat_count=*/0, bankBlocks.front(), endBlock);
+    if (lastStartBlock)
+      lastStartBlock->getTerminator()->setSuccessor(dmaBlock, 1);
+
+    for (auto [bankIdx, bank] : llvm::enumerate(rowBanks)) {
+      dmaBuilder.setInsertionPointToStart(bankBlocks[bankIdx]);
+      UseLockOp::create(
+          dmaBuilder, op.getLoc(),
+          (dir == DMAChannelDir::S2MM ? bank.locks.empty : bank.locks.full)
+              .getResult(),
+          LockAction::AcquireGreaterEqual, 1);
+      DMABDOp::create(dmaBuilder, op.getLoc(), bank.buffer.getResult(), 0,
+                      rowLen);
+      UseLockOp::create(
+          dmaBuilder, op.getLoc(),
+          (dir == DMAChannelDir::S2MM ? bank.locks.full : bank.locks.empty)
+              .getResult(),
+          LockAction::Release, 1);
+      NextBDOp::create(dmaBuilder, op.getLoc(),
+                       bankBlocks[(bankIdx + 1) % rowBanks.size()]);
+    }
+    return;
+  }
+
+  SmallVector<SmallVector<Block *>, 2> bankBlocks(rowBanks.size());
+  for (auto [bankIdx, bank] : llvm::enumerate(rowBanks)) {
+    (void)bank;
+    bankBlocks[bankIdx].reserve(partCount);
+    for (int i = 0; i < partCount; ++i)
+      bankBlocks[bankIdx].push_back(dmaBuilder.createBlock(endBlock));
+  }
+  dmaBuilder.setInsertionPointToStart(dmaBlock);
+  DMAStartOp::create(dmaBuilder, op.getLoc(), dir, channel,
+                     /*repeat_count=*/0, bankBlocks.front().front(), endBlock);
+  if (lastStartBlock)
+    lastStartBlock->getTerminator()->setSuccessor(dmaBlock, 1);
+
+  for (auto [bankIdx, bank] : llvm::enumerate(rowBanks)) {
+    for (int partIdx = 0; partIdx < partCount; ++partIdx) {
+      dmaBuilder.setInsertionPointToStart(bankBlocks[bankIdx][partIdx]);
+      if (partIdx == 0) {
+        UseLockOp::create(
+            dmaBuilder, op.getLoc(),
+            (dir == DMAChannelDir::S2MM ? bank.locks.empty : bank.locks.full)
+                .getResult(),
+            LockAction::AcquireGreaterEqual, 1);
+      }
+      DMABDOp::create(dmaBuilder, op.getLoc(), bank.buffer.getResult(),
+                      partIdx * elemCount, elemCount);
+      if (partIdx == partCount - 1) {
+        UseLockOp::create(
+            dmaBuilder, op.getLoc(),
+            (dir == DMAChannelDir::S2MM ? bank.locks.full : bank.locks.empty)
+                .getResult(),
+            LockAction::Release, 1);
+      }
+      Block *nextBlock =
+          partIdx + 1 < partCount
+              ? bankBlocks[bankIdx][partIdx + 1]
+              : bankBlocks[(bankIdx + 1) % rowBanks.size()].front();
+      NextBDOp::create(dmaBuilder, op.getLoc(), nextBlock);
+    }
+  }
+}
+
 static void createMemTileDMA(DeviceOp device, MemTileRowStoreOp op,
                              RowStoreResources &resources,
                              OpBuilder &builder) {
@@ -222,86 +331,10 @@ static void createMemTileDMA(DeviceOp device, MemTileRowStoreOp op,
   auto elemType = cast<MemRefType>(op.getElemType());
   int partCount = op.getPartCount();
   int elemCount = elemType.getNumElements();
-
-  {
-    Region &body = dmaOp.getBody();
-    Block *endBlock = findEndBlock(body);
-    assert(endBlock && "expected aie.end block");
-
-    OpBuilder dmaBuilder(dmaOp.getContext());
-    Block *lastStartBlock = findLastDMAStartBlock(body, endBlock);
-    Block *dmaBlock = dmaBuilder.createBlock(endBlock);
-    SmallVector<Block *> bdBlocks;
-    bdBlocks.reserve(partCount);
-    for (int i = 0; i < partCount; ++i)
-      bdBlocks.push_back(dmaBuilder.createBlock(endBlock));
-    if (!lastStartBlock && &body.front() != dmaBlock)
-      dmaBlock->moveBefore(&body.front());
-    dmaBuilder.setInsertionPointToStart(dmaBlock);
-    DMAStartOp::create(dmaBuilder, op.getLoc(), DMAChannelDir::S2MM,
-                       op.getMemtileIngressChannel(), /*repeat_count=*/0,
-                       bdBlocks.front(), endBlock);
-    if (lastStartBlock)
-      lastStartBlock->getTerminator()->setSuccessor(dmaBlock, 1);
-
-    for (int i = 0; i < partCount; ++i) {
-      dmaBuilder.setInsertionPointToStart(bdBlocks[i]);
-      if (i == 0) {
-        UseLockOp::create(dmaBuilder, op.getLoc(),
-                          resources.rowLocks.empty.getResult(),
-                          LockAction::AcquireGreaterEqual, 1);
-      }
-      DMABDOp::create(dmaBuilder, op.getLoc(), resources.rowBuffer.getResult(),
-                      i * elemCount, elemCount);
-      if (i == partCount - 1) {
-        UseLockOp::create(dmaBuilder, op.getLoc(),
-                          resources.rowLocks.full.getResult(),
-                          LockAction::Release, 1);
-      }
-      NextBDOp::create(dmaBuilder, op.getLoc(),
-                       i + 1 < partCount ? bdBlocks[i + 1] : bdBlocks.front());
-    }
-  }
-
-  {
-    Region &body = dmaOp.getBody();
-    Block *endBlock = findEndBlock(body);
-    assert(endBlock && "expected aie.end block");
-
-    OpBuilder dmaBuilder(dmaOp.getContext());
-    Block *lastStartBlock = findLastDMAStartBlock(body, endBlock);
-    Block *dmaBlock = dmaBuilder.createBlock(endBlock);
-    SmallVector<Block *> bdBlocks;
-    bdBlocks.reserve(partCount);
-    for (int i = 0; i < partCount; ++i)
-      bdBlocks.push_back(dmaBuilder.createBlock(endBlock));
-    if (!lastStartBlock && &body.front() != dmaBlock)
-      dmaBlock->moveBefore(&body.front());
-    dmaBuilder.setInsertionPointToStart(dmaBlock);
-    DMAStartOp::create(dmaBuilder, op.getLoc(), DMAChannelDir::MM2S,
-                       op.getMemtileEgressChannel(), /*repeat_count=*/0,
-                       bdBlocks.front(), endBlock);
-    if (lastStartBlock)
-      lastStartBlock->getTerminator()->setSuccessor(dmaBlock, 1);
-
-    for (int i = 0; i < partCount; ++i) {
-      dmaBuilder.setInsertionPointToStart(bdBlocks[i]);
-      if (i == 0) {
-        UseLockOp::create(dmaBuilder, op.getLoc(),
-                          resources.rowLocks.full.getResult(),
-                          LockAction::AcquireGreaterEqual, 1);
-      }
-      DMABDOp::create(dmaBuilder, op.getLoc(), resources.rowBuffer.getResult(),
-                      i * elemCount, elemCount);
-      if (i == partCount - 1) {
-        UseLockOp::create(dmaBuilder, op.getLoc(),
-                          resources.rowLocks.empty.getResult(),
-                          LockAction::Release, 1);
-      }
-      NextBDOp::create(dmaBuilder, op.getLoc(),
-                       i + 1 < partCount ? bdBlocks[i + 1] : bdBlocks.front());
-    }
-  }
+  createMemTileDMAChannel(dmaOp, op, resources.rowBanks, DMAChannelDir::S2MM,
+                          op.getMemtileIngressChannel(), partCount, elemCount);
+  createMemTileDMAChannel(dmaOp, op, resources.rowBanks, DMAChannelDir::MM2S,
+                          op.getMemtileEgressChannel(), partCount, elemCount);
 }
 
 static void rewriteCoreAccesses(DeviceOp device, MemTileRowStoreOp rowStore,

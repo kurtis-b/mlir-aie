@@ -2097,12 +2097,14 @@ def AIE_MemTileRowStoreOp
 
     The `elemType` attribute describes the compute-visible tile shape. The full
     persistent row is composed of `part_count` such tiles stored contiguously in
-    the memtile.
+    the memtile. `buffer_count` controls how many logical rows may be live in
+    the memtile at once. `buffer_count = 1` is the single-row form, while
+    `buffer_count = 2` enables a fixed two-bank ping-pong schedule.
 
     Example:
     ```
       aie.memtile_row_store @row_store0(%core_tile, %mem_tile)
-        { part_count = 4 : i32 } : memref<32x96xbf16>
+        { part_count = 4 : i32, buffer_count = 2 : i32 } : memref<32x96xbf16>
     ```
   }];
 
@@ -2111,6 +2113,7 @@ def AIE_MemTileRowStoreOp
         Index:$computeTile,
         Index:$memTile,
         AIEI32Attr:$part_count,
+        DefaultValuedAttr<AIEI32Attr, "1">:$buffer_count,
         DefaultValuedAttr<AIEI32Attr, "0">:$compute_mm2s_channel,
         DefaultValuedAttr<AIEI32Attr, "0">:$compute_s2mm_channel,
         DefaultValuedAttr<AIEI32Attr, "0">:$memtile_ingress_channel,
