@@ -25,8 +25,8 @@ Add a first-class AIE lowering for a single-stream memtile row-store pattern:
 
 - one compute-tile producer stream into a memtile row store
 - one compute-tile consumer stream out of the same memtile row store
-- one compute-visible producer scratch buffer
-- one compute-visible consumer scratch buffer
+- one or two compute-visible producer scratch buffers
+- one or two compute-visible consumer scratch buffers
 - memtile-local aggregation over `part_count` contiguous slices
 - no explosion of `aie.objectfifo` endpoints on the compute tile
 
@@ -58,8 +58,8 @@ abstraction keeps the compute side constant:
 
 - one outgoing producer stream
 - one incoming consumer stream
-- one producer scratch buffer
-- one consumer scratch buffer
+- a small fixed producer scratch ring
+- a small fixed consumer scratch ring
 
 while moving the row assembly and replay state into the memtile-local storage
 that actually owns the persistent row.
@@ -161,12 +161,15 @@ with initial state:
 - both `row_*_empty = 1`
 - both `row_*_full = 0`
 
-The compute side stays unchanged:
+The compute-side DMA channels stay unchanged:
 
-- one producer scratch buffer
-- one consumer scratch buffer
 - one compute MM2S chain
 - one compute S2MM chain
+
+The current implementation may also materialize a fixed two-slot compute-side
+scratch ring with `compute_buffer_count = 2`, so the core can alternate across
+two producer buffers and two consumer buffers while the DMA chains keep the same
+channel assignment.
 
 Ingress on the memtile alternates banks in fixed order:
 
@@ -1154,33 +1157,46 @@ Check only for:
 - the memtile ingress and egress channel numbers that came from the row-store
   lowering
 
-## Suggested First Implementation Scope
+## Current Implementation Scope
 
-Keep v1 intentionally narrow:
+The landed implementation keeps the surface area intentionally narrow:
 
 - one compute tile
 - one memtile
-- one producer scratch buffer
-- one consumer scratch buffer
-- one row buffer
+- one ingress DMA channel on the compute tile
+- one egress DMA channel on the compute tile
+- `buffer_count in {1, 2}`
+- `compute_buffer_count >= 1`
+- `compute_produce_buffer_count >= 0`
+- `compute_consume_buffer_count >= 0`
 - `part_count >= 1`
-- no double-buffered compute scratch in v1
 - no multi-consumer broadcast semantics
 - no sharing of the selected DMA channels with pre-existing DMA starts on the
   same tile and direction
 
-That scope is enough to cover common single-producer / single-consumer row-store
-use cases.
+Within that envelope, the implemented cases are:
 
-Suggested v2 scope should also stay narrow:
+- `buffer_count = 1`, `compute_buffer_count = 1`
+- `buffer_count = 2`, `compute_buffer_count = 1`
+- `buffer_count = 2`, `compute_buffer_count = 2`
+- `buffer_count = 2`, `compute_buffer_count > 2`
 
-- still one compute tile and one memtile
-- still one producer scratch buffer and one consumer scratch buffer
-- support only `buffer_count in {1, 2}`
-- implement `buffer_count = 2` only as fixed two-bank alternation
-- no dynamic bank selection
+The current `compute_buffer_count` path is intentionally still narrow on the
+memtile side:
+
+- fixed producer scratch ring on the compute tile
+- fixed consumer scratch ring on the compute tile
+- fixed two-bank alternation on the memtile
 - no multi-consumer broadcast semantics
-- keep the compressed-bank lowering restricted to the explicit two-bank mode
+
+Only the compute-side ring depth scales. `buffer_count` still controls memtile
+banking and remains capped at `2`. The side-specific compute counts are
+overrides on top of the shared `compute_buffer_count` default:
+
+- effective producer ring depth =
+  `compute_produce_buffer_count > 0 ? compute_produce_buffer_count : compute_buffer_count`
+- effective consumer ring depth =
+  `compute_consume_buffer_count > 0 ? compute_consume_buffer_count : compute_buffer_count`
 
 Suggested future scopes should stay split:
 
@@ -1213,6 +1229,120 @@ For the implemented v2 extension, the expected outcome is:
 - `part_count` is no longer the main limiter when total row bytes stay fixed
 - clients can keep replay traffic on-chip instead of reshaping the design
   around avoidable DDR rereads
+
+One important caveat from the current implementation is that increasing
+`compute_buffer_count` only adds more fixed compute-visible scratch buffers. It
+does not recreate the full semantics of an arbitrarily deep forwarded
+`aie.objectfifo`.
+
+For replay-heavy same-core kernels, that tradeoff can matter. In particular,
+clients whose old `objectfifo` lowering relied on queue depth proportional to
+the number of row parts may see lower throughput after migrating to
+`aie.memtile_row_store`, even when the new lowering is correct and the memtile
+BD shape is improved. The likely symptom is repeated core-side blocking on the
+same small producer/consumer scratch ring rather than a failure of the memtile
+bank schedule itself.
+
+For those kernels, the intended performance lever is larger
+compute-side buffering, not more memtile banks. In other words:
+
+- `buffer_count = 2` solves overlapping row ownership on the memtile
+- `compute_buffer_count > 1` restores compute-side queue depth symmetrically
+- `compute_produce_buffer_count > 1` or `compute_consume_buffer_count > 1`
+  restores queue depth only on the hot side
+- high-`part_count` same-core kernels should treat `compute_buffer_count` as a
+  default, then use the side-specific overrides to spend local L1 more
+  selectively
+
+For the encoder-style replay use case that motivated this extension, the
+recommended starting point is:
+
+- keep `buffer_count = 2`
+- raise `compute_buffer_count` on replay-heavy row stores first
+- for accumulation-style row stores, start by overriding only the hot side with
+  `compute_produce_buffer_count = 2` or `compute_consume_buffer_count = 2`
+- for replay-heavy row stores whose previous FIFO depth tracked `part_count`,
+  benchmark deeper rings such as `4` before falling back to `aie.objectfifo`
+
+That local split-ring tuning path is useful for diagnosing the current
+bottleneck, but it is not the preferred end state for same-core row-store
+clients. The deeper split-ring path restores queue depth by allocating *two*
+compute-visible rings, one for `Produce` and one for `Consume`, so local L1
+still scales linearly with queue depth:
+
+```text
+2 * compute_buffer_count * tile_bytes
+```
+
+## Better Long-Term Fix: Asymmetric Compute-Side Double Buffering
+
+The better generic fix is still to keep the memtile side exactly as it is today
+and improve only the compute-side contract, but without reinterpreting the
+current `Produce` / `Consume` semantics.
+
+Instead of forcing the producer and consumer rings to use the same depth,
+allow them to be sized independently:
+
+- producer ring depth =
+  `compute_produce_buffer_count > 0 ? compute_produce_buffer_count : compute_buffer_count`
+- consumer ring depth =
+  `compute_consume_buffer_count > 0 ? compute_consume_buffer_count : compute_buffer_count`
+
+That gives the scheduler a safer form of double buffering:
+
+- keep one side at depth `1`
+- raise only the side that is causing the steady-state stalls to depth `2`
+
+### Why This Is Better
+
+For the common “only one side is hot” case:
+
+- symmetric split-ring `2/2` local memory = `4 * tile_bytes`
+- asymmetric split-ring `2/1` or `1/2` local memory = `3 * tile_bytes`
+
+So asymmetric buffering recovers overlap with only a `50%` increase over the
+single-slot baseline, instead of the `100%` increase from symmetric double
+buffering.
+
+This is the right direction if the goal is:
+
+- recover queue depth for high-`part_count` row-store clients
+- keep compute-tile L1 utilization below the symmetric split-ring path
+- stay compatible with kernels that legitimately need separate input and output
+  tile buffers live at the same time
+
+### IR Direction
+
+This should stay explicit inside the existing op. Do not silently reinterpret
+the current op and do not introduce aliasing between `Produce` and `Consume`.
+
+Use:
+
+- `compute_buffer_count` as the shared default
+- `compute_produce_buffer_count` to override only the producer side
+- `compute_consume_buffer_count` to override only the consumer side
+
+### Lowering Notes
+
+- keep `buffer_count = 2` and the compressed memtile bank lowering
+- keep the same compute MM2S and S2MM channel counts
+- allocate only as many `src` and `dst` buffers as each side actually needs
+- keep the existing per-port queue-index state on the compute tile
+
+This keeps the current acquire/release API intact while reducing the L1 cost of
+the performance fix.
+
+### Expected Outcome
+
+Compared to the current local split-ring extension:
+
+- queue depth can increase
+- local memory grows at half the previous rate
+- the row-store remains attractive for lower-`emb_tile`, higher-`part_count`
+  designs whose main value is reducing continuous DDR transfer size
+
+This is the preferred long-term performance fix for encoder-style same-core
+row-store clients.
 
 For the planned future extensions, the expected split is:
 
