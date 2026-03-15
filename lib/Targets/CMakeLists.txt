@@ -51,6 +51,7 @@ add_mlir_library(AIETargets
   AIETargetSimulationFiles.cpp
   ADFGenerateCppGraph.cpp
   AIEFlowsToJSON.cpp
+  AIEDesignToJSON.cpp
   AIELLVMLink.cpp
 
   PARTIAL_SOURCES_INTENDED

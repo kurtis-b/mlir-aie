@@ -329,6 +329,12 @@ void registerAIETranslations() {
         return AIEFlowsToJSON(module, output, deviceName);
       },
       registerDialects);
+  TranslateFromMLIRRegistration registrationDesignJSON(
+      "aie-design-to-json", "Translate AIE design to visualization JSON",
+      [](ModuleOp module, raw_ostream &output) {
+        return AIEDesignToJSON(module, output, deviceName);
+      },
+      registerDialects);
   TranslateFromMLIRRegistration registrationXPE(
       "aie-mlir-to-xpe", "Translate AIE design to XPE file for simulation",
       [](ModuleOp module, raw_ostream &output) {
