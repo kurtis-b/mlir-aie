@@ -2091,20 +2091,32 @@ def AIE_MemTileRowStoreOp
   let summary = "Declare a single-producer, single-consumer memtile row store";
   let description = [{
     The `aie.memtile_row_store` operation represents a memtile-local row store
-    accessed through one compute-visible producer scratch buffer and one
-    compute-visible consumer scratch buffer. The row store owns one compute to
-    memtile ingress stream and one memtile to compute egress stream.
+    accessed through one or more compute-visible producer scratch buffers and
+    one or more compute-visible consumer scratch buffers. The row store owns
+    one compute to memtile ingress stream and one memtile to compute egress
+    stream.
 
     The `elemType` attribute describes the compute-visible tile shape. The full
     persistent row is composed of `part_count` such tiles stored contiguously in
     the memtile. `buffer_count` controls how many logical rows may be live in
     the memtile at once. `buffer_count = 1` is the single-row form, while
     `buffer_count = 2` enables a fixed two-bank ping-pong schedule.
+    `compute_buffer_count` controls the default number of producer and consumer
+    scratch buffers visible on the compute side. The optional
+    `compute_produce_buffer_count` and `compute_consume_buffer_count`
+    attributes override that default per direction. Larger values enable a
+    fixed compute-side ring without changing the memtile bank count.
 
     Example:
     ```
       aie.memtile_row_store @row_store0(%core_tile, %mem_tile)
-        { part_count = 4 : i32, buffer_count = 2 : i32 } : memref<32x96xbf16>
+        {
+          part_count = 4 : i32,
+          buffer_count = 2 : i32,
+          compute_buffer_count = 1 : i32,
+          compute_produce_buffer_count = 2 : i32,
+          compute_consume_buffer_count = 1 : i32
+        } : memref<32x96xbf16>
     ```
   }];
 
@@ -2114,6 +2126,9 @@ def AIE_MemTileRowStoreOp
         Index:$memTile,
         AIEI32Attr:$part_count,
         DefaultValuedAttr<AIEI32Attr, "1">:$buffer_count,
+        DefaultValuedAttr<AIEI32Attr, "1">:$compute_buffer_count,
+        DefaultValuedAttr<AIEI32Attr, "0">:$compute_produce_buffer_count,
+        DefaultValuedAttr<AIEI32Attr, "0">:$compute_consume_buffer_count,
         DefaultValuedAttr<AIEI32Attr, "0">:$compute_mm2s_channel,
         DefaultValuedAttr<AIEI32Attr, "0">:$compute_s2mm_channel,
         DefaultValuedAttr<AIEI32Attr, "0">:$memtile_ingress_channel,

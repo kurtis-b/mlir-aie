@@ -1007,6 +1007,12 @@ LogicalResult MemTileRowStoreOp::verify() {
     return emitOpError("part_count must be >= 1");
   if (getBufferCount() < 1 || getBufferCount() > 2)
     return emitOpError("buffer_count must be 1 or 2");
+  if (getComputeBufferCount() < 1)
+    return emitOpError("compute_buffer_count must be >= 1");
+  if (getComputeProduceBufferCount() < 0)
+    return emitOpError("compute_produce_buffer_count must be >= 0");
+  if (getComputeConsumeBufferCount() < 0)
+    return emitOpError("compute_consume_buffer_count must be >= 0");
 
   DataLayout dataLayout = DataLayout::closest(getOperation());
   int64_t elemBytes =

@@ -25,6 +25,7 @@ module {
     aie.memtile_row_store @row_store(%tile_0_2, %tile_0_1) {
       part_count = 4 : i32,
       buffer_count = 2 : i32,
+      compute_buffer_count = 2 : i32,
       compute_mm2s_channel = 1 : i32,
       compute_s2mm_channel = 1 : i32
     } : memref<1xi32>

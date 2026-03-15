@@ -47,6 +47,36 @@ aie.device(xcve2302) {
 
 // -----
 
+// CHECK: 'aie.memtile_row_store' op compute_buffer_count must be >= 1
+
+aie.device(xcve2302) {
+  %mem = aie.tile(2, 1)
+  %core = aie.tile(2, 2)
+  aie.memtile_row_store @row_store0(%core, %mem) {part_count = 4 : i32, compute_buffer_count = 0 : i32} : memref<32x96xbf16>
+}
+
+// -----
+
+// CHECK: 'aie.memtile_row_store' op compute_produce_buffer_count must be >= 0
+
+aie.device(xcve2302) {
+  %mem = aie.tile(2, 1)
+  %core = aie.tile(2, 2)
+  aie.memtile_row_store @row_store0(%core, %mem) {part_count = 4 : i32, compute_produce_buffer_count = -1 : i32} : memref<32x96xbf16>
+}
+
+// -----
+
+// CHECK: 'aie.memtile_row_store' op compute_consume_buffer_count must be >= 0
+
+aie.device(xcve2302) {
+  %mem = aie.tile(2, 1)
+  %core = aie.tile(2, 2)
+  aie.memtile_row_store @row_store0(%core, %mem) {part_count = 4 : i32, compute_consume_buffer_count = -1 : i32} : memref<32x96xbf16>
+}
+
+// -----
+
 // CHECK: 'aie.memtile_row_store.acquire' op must be called from inside a CoreOp
 
 aie.device(xcve2302) {

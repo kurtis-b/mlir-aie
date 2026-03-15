@@ -9,8 +9,12 @@
 #include "aie/Dialect/AIE/IR/AIEDialect.h"
 #include "aie/Dialect/AIE/Transforms/AIEPasses.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Pass/Pass.h"
 
+#include <optional>
 #include <set>
 #include <tuple>
 
@@ -39,12 +43,16 @@ struct RowBankResources {
   LockPair locks;
 };
 
+struct ComputeBufferResources {
+  BufferOp buffer;
+  LockPair locks;
+};
+
 struct RowStoreResources {
-  BufferOp srcBuffer;
-  BufferOp dstBuffer;
-  LockPair srcLocks;
-  LockPair dstLocks;
+  SmallVector<ComputeBufferResources, 2> srcBuffers;
+  SmallVector<ComputeBufferResources, 2> dstBuffers;
   SmallVector<RowBankResources, 2> rowBanks;
+  std::optional<BufferOp> nextIndices;
 };
 
 using ChannelKey = std::tuple<int, int, int, int>;
@@ -131,6 +139,43 @@ createRowBanks(OpBuilder &builder, Location loc, TileOp tile, Type rowType,
   return rowBanks;
 }
 
+static SmallVector<ComputeBufferResources, 2>
+createComputeBuffers(OpBuilder &builder, Location loc, Type elemType, TileOp tile,
+                     StringRef prefix, StringRef role, int bufferCount) {
+  SmallVector<ComputeBufferResources, 2> buffers;
+  buffers.reserve(bufferCount);
+  for (int i = 0; i < bufferCount; ++i) {
+    std::string bufferName = prefix.str() + "_" + role.str();
+    if (bufferCount != 1)
+      bufferName += "_" + std::to_string(i);
+    buffers.push_back(
+        {createNamedBuffer(builder, loc, elemType, tile, bufferName),
+         {createNamedLock(builder, loc, tile, 1, bufferName + "_empty"),
+          createNamedLock(builder, loc, tile, 0, bufferName + "_full")}});
+  }
+  return buffers;
+}
+
+static int getEffectiveProduceBufferCount(MemTileRowStoreOp op) {
+  return op.getComputeProduceBufferCount() > 0
+             ? op.getComputeProduceBufferCount()
+             : op.getComputeBufferCount();
+}
+
+static int getEffectiveConsumeBufferCount(MemTileRowStoreOp op) {
+  return op.getComputeConsumeBufferCount() > 0
+             ? op.getComputeConsumeBufferCount()
+             : op.getComputeBufferCount();
+}
+
+static Value getBufferResult(const ComputeBufferResources &buffer) {
+  return buffer.buffer->getResult(0);
+}
+
+static Value getLockResult(const LockOp &lock) {
+  return lock->getResult(0);
+}
+
 static RowStoreResources createResources(DeviceOp device, MemTileRowStoreOp op,
                                          OpBuilder &builder) {
   OpBuilder::InsertionGuard guard(builder);
@@ -141,22 +186,22 @@ static RowStoreResources createResources(DeviceOp device, MemTileRowStoreOp op,
   int64_t rowCount = static_cast<int64_t>(op.getPartCount()) * elemCount;
   auto rowType = MemRefType::get({rowCount}, elemType.getElementType());
   std::string prefix = op.name().str();
+  int produceBufferCount = getEffectiveProduceBufferCount(op);
+  int consumeBufferCount = getEffectiveConsumeBufferCount(op);
 
   RowStoreResources resources{
-      createNamedBuffer(builder, op.getLoc(), elemType, op.getComputeTileOp(),
-                        prefix + "_src"),
-      createNamedBuffer(builder, op.getLoc(), elemType, op.getComputeTileOp(),
-                        prefix + "_dst"),
-      {createNamedLock(builder, op.getLoc(), op.getComputeTileOp(), 1,
-                       prefix + "_src_empty"),
-       createNamedLock(builder, op.getLoc(), op.getComputeTileOp(), 0,
-                       prefix + "_src_full")},
-      {createNamedLock(builder, op.getLoc(), op.getComputeTileOp(), 1,
-                       prefix + "_dst_empty"),
-       createNamedLock(builder, op.getLoc(), op.getComputeTileOp(), 0,
-                       prefix + "_dst_full")},
+      createComputeBuffers(builder, op.getLoc(), elemType, op.getComputeTileOp(),
+                           prefix, "src", produceBufferCount),
+      createComputeBuffers(builder, op.getLoc(), elemType, op.getComputeTileOp(),
+                           prefix, "dst", consumeBufferCount),
       createRowBanks(builder, op.getLoc(), op.getMemTileOp(), rowType, prefix,
-                     op.getBufferCount())};
+                     op.getBufferCount()),
+      std::nullopt};
+  if (produceBufferCount > 1 || consumeBufferCount > 1) {
+    resources.nextIndices = createNamedBuffer(
+        builder, op.getLoc(), MemRefType::get({2}, builder.getI32Type()),
+        op.getComputeTileOp(), prefix + "_next_index");
+  }
 
   FlowOp::create(builder, op.getLoc(), op.getComputeTile(), WireBundle::DMA,
                  op.getComputeMm2sChannel(), op.getMemTile(), WireBundle::DMA,
@@ -168,6 +213,52 @@ static RowStoreResources createResources(DeviceOp device, MemTileRowStoreOp op,
   return resources;
 }
 
+static void createComputeDMAChannel(MemOp memOp, MemTileRowStoreOp op,
+                                    ArrayRef<ComputeBufferResources> buffers,
+                                    DMAChannelDir dir, int channel, int len) {
+  Region &body = memOp.getBody();
+  Block *endBlock = findEndBlock(body);
+  assert(endBlock && "expected aie.end block");
+  assert(!buffers.empty() && "expected at least one compute buffer");
+
+  OpBuilder dmaBuilder(memOp.getContext());
+  Block *lastStartBlock = findLastDMAStartBlock(body, endBlock);
+  Block *dmaBlock = dmaBuilder.createBlock(endBlock);
+  SmallVector<Block *, 2> bdBlocks;
+  bdBlocks.reserve(buffers.size());
+  for (auto [index, buffer] : llvm::enumerate(buffers)) {
+    (void)index;
+    (void)buffer;
+    bdBlocks.push_back(dmaBuilder.createBlock(endBlock));
+  }
+
+  if (!lastStartBlock && &body.front() != dmaBlock)
+    dmaBlock->moveBefore(&body.front());
+
+  dmaBuilder.setInsertionPointToStart(dmaBlock);
+  DMAStartOp::create(dmaBuilder, op.getLoc(), dir, channel, /*repeat_count=*/0,
+                     bdBlocks.front(), endBlock);
+  if (lastStartBlock)
+    lastStartBlock->getTerminator()->setSuccessor(dmaBlock, 1);
+
+  for (auto [index, buffer] : llvm::enumerate(buffers)) {
+    dmaBuilder.setInsertionPointToStart(bdBlocks[index]);
+    UseLockOp::create(
+        dmaBuilder, op.getLoc(),
+        dir == DMAChannelDir::MM2S ? getLockResult(buffer.locks.full)
+                                   : getLockResult(buffer.locks.empty),
+        LockAction::AcquireGreaterEqual, 1);
+    DMABDOp::create(dmaBuilder, op.getLoc(), getBufferResult(buffer), 0, len);
+    UseLockOp::create(
+        dmaBuilder, op.getLoc(),
+        dir == DMAChannelDir::MM2S ? getLockResult(buffer.locks.empty)
+                                   : getLockResult(buffer.locks.full),
+        LockAction::Release, 1);
+    NextBDOp::create(dmaBuilder, op.getLoc(),
+                     bdBlocks[(index + 1) % buffers.size()]);
+  }
+}
+
 static void createComputeDMA(DeviceOp device, MemTileRowStoreOp op,
                              RowStoreResources &resources,
                              OpBuilder &builder) {
@@ -175,61 +266,10 @@ static void createComputeDMA(DeviceOp device, MemTileRowStoreOp op,
   auto elemType = cast<MemRefType>(op.getElemType());
   int len = elemType.getNumElements();
 
-  {
-    Region &body = memOp.getBody();
-    Block *endBlock = findEndBlock(body);
-    assert(endBlock && "expected aie.end block");
-
-    OpBuilder dmaBuilder(memOp.getContext());
-    Block *lastStartBlock = findLastDMAStartBlock(body, endBlock);
-    Block *dmaBlock = dmaBuilder.createBlock(endBlock);
-    Block *bdBlock = dmaBuilder.createBlock(endBlock);
-    if (!lastStartBlock && &body.front() != dmaBlock)
-      dmaBlock->moveBefore(&body.front());
-    dmaBuilder.setInsertionPointToStart(dmaBlock);
-    DMAStartOp::create(dmaBuilder, op.getLoc(), DMAChannelDir::MM2S,
-                       op.getComputeMm2sChannel(), /*repeat_count=*/0, bdBlock,
-                       endBlock);
-    if (lastStartBlock)
-      lastStartBlock->getTerminator()->setSuccessor(dmaBlock, 1);
-    dmaBuilder.setInsertionPointToStart(bdBlock);
-    UseLockOp::create(dmaBuilder, op.getLoc(), resources.srcLocks.full.getResult(),
-                      LockAction::AcquireGreaterEqual, 1);
-    DMABDOp::create(dmaBuilder, op.getLoc(), resources.srcBuffer.getResult(), 0,
-                    len);
-    UseLockOp::create(dmaBuilder, op.getLoc(),
-                      resources.srcLocks.empty.getResult(),
-                      LockAction::Release, 1);
-    NextBDOp::create(dmaBuilder, op.getLoc(), bdBlock);
-  }
-
-  {
-    Region &body = memOp.getBody();
-    Block *endBlock = findEndBlock(body);
-    assert(endBlock && "expected aie.end block");
-
-    OpBuilder dmaBuilder(memOp.getContext());
-    Block *lastStartBlock = findLastDMAStartBlock(body, endBlock);
-    Block *dmaBlock = dmaBuilder.createBlock(endBlock);
-    Block *bdBlock = dmaBuilder.createBlock(endBlock);
-    if (!lastStartBlock && &body.front() != dmaBlock)
-      dmaBlock->moveBefore(&body.front());
-    dmaBuilder.setInsertionPointToStart(dmaBlock);
-    DMAStartOp::create(dmaBuilder, op.getLoc(), DMAChannelDir::S2MM,
-                       op.getComputeS2mmChannel(), /*repeat_count=*/0, bdBlock,
-                       endBlock);
-    if (lastStartBlock)
-      lastStartBlock->getTerminator()->setSuccessor(dmaBlock, 1);
-    dmaBuilder.setInsertionPointToStart(bdBlock);
-    UseLockOp::create(dmaBuilder, op.getLoc(),
-                      resources.dstLocks.empty.getResult(),
-                      LockAction::AcquireGreaterEqual, 1);
-    DMABDOp::create(dmaBuilder, op.getLoc(), resources.dstBuffer.getResult(), 0,
-                    len);
-    UseLockOp::create(dmaBuilder, op.getLoc(), resources.dstLocks.full.getResult(),
-                      LockAction::Release, 1);
-    NextBDOp::create(dmaBuilder, op.getLoc(), bdBlock);
-  }
+  createComputeDMAChannel(memOp, op, resources.srcBuffers, DMAChannelDir::MM2S,
+                          op.getComputeMm2sChannel(), len);
+  createComputeDMAChannel(memOp, op, resources.dstBuffers, DMAChannelDir::S2MM,
+                          op.getComputeS2mmChannel(), len);
 }
 
 static void createMemTileDMAChannel(MemTileDMAOp dmaOp, MemTileRowStoreOp op,
@@ -337,6 +377,121 @@ static void createMemTileDMA(DeviceOp device, MemTileRowStoreOp op,
                           op.getMemtileEgressChannel(), partCount, elemCount);
 }
 
+static Value getPortCounterSlot(OpBuilder &builder, Location loc,
+                                ObjectFifoPort port) {
+  return arith::ConstantIndexOp::create(
+      builder, loc, port == ObjectFifoPort::Produce ? 0 : 1);
+}
+
+static Value loadPortCounter(OpBuilder &builder, Location loc, BufferOp nextIndices,
+                             ObjectFifoPort port) {
+  return memref::LoadOp::create(builder, loc, nextIndices.getResult(),
+                                ValueRange{getPortCounterSlot(builder, loc, port)});
+}
+
+static void initializePortCounters(CoreOp core, BufferOp nextIndices) {
+  OpBuilder builder(core.getContext());
+  builder.setInsertionPointToStart(&core.getBody().front());
+  Value c0 = arith::ConstantIndexOp::create(builder, core.getLoc(), 0);
+  Value c1 = arith::ConstantIndexOp::create(builder, core.getLoc(), 1);
+  Value zero =
+      arith::ConstantOp::create(builder, core.getLoc(), builder.getI32IntegerAttr(0));
+  memref::StoreOp::create(builder, core.getLoc(), zero, nextIndices.getResult(),
+                          ValueRange{c0});
+  memref::StoreOp::create(builder, core.getLoc(), zero, nextIndices.getResult(),
+                          ValueRange{c1});
+}
+
+static void updatePortCounter(OpBuilder &builder, Location loc, BufferOp nextIndices,
+                              ObjectFifoPort port, int count) {
+  Value slot = getPortCounterSlot(builder, loc, port);
+  Value oldCounter =
+      memref::LoadOp::create(builder, loc, nextIndices.getResult(), ValueRange{slot});
+  Value one = arith::ConstantOp::create(builder, loc, builder.getI32IntegerAttr(1));
+  Value size =
+      arith::ConstantOp::create(builder, loc, builder.getI32IntegerAttr(count));
+  Value sum = arith::AddIOp::create(builder, loc, oldCounter, one);
+  Value isGreaterEqual = arith::CmpIOp::create(builder, loc,
+                                               arith::CmpIPredicate::sge, sum,
+                                               size);
+  Value newCounter = arith::SelectOp::create(
+      builder, loc, isGreaterEqual,
+      arith::SubIOp::create(builder, loc, sum, size), sum);
+  memref::StoreOp::create(builder, loc, newCounter, nextIndices.getResult(),
+                          ValueRange{slot});
+}
+
+static void createAcquireSwitch(OpBuilder &builder, Location loc,
+                                Value switchIndex,
+                                ArrayRef<ComputeBufferResources> buffers,
+                                ObjectFifoPort port, Value acquireResult) {
+  SmallVector<int64_t, 4> caseValues;
+  for (int i = 0; i < static_cast<int>(buffers.size()); ++i)
+    caseValues.push_back(i);
+  auto cases = DenseI64ArrayAttr::get(builder.getContext(), caseValues);
+  auto switchOp = scf::IndexSwitchOp::create(
+      builder, loc, TypeRange{acquireResult.getType()}, switchIndex, cases,
+      buffers.size());
+
+  builder.createBlock(&switchOp.getDefaultRegion());
+  builder.setInsertionPointToStart(&switchOp.getDefaultBlock());
+  UseLockOp::create(
+      builder, loc,
+      port == ObjectFifoPort::Produce
+          ? getLockResult(buffers.front().locks.empty)
+          : getLockResult(buffers.front().locks.full),
+      LockAction::AcquireGreaterEqual, 1);
+  scf::YieldOp::create(builder, loc, getBufferResult(buffers.front()));
+
+  for (auto [index, buffer] : llvm::enumerate(buffers)) {
+    builder.createBlock(&switchOp.getCaseRegions()[index]);
+    builder.setInsertionPointToStart(&switchOp.getCaseBlock(index));
+    UseLockOp::create(
+        builder, loc,
+        port == ObjectFifoPort::Produce ? getLockResult(buffer.locks.empty)
+                                        : getLockResult(buffer.locks.full),
+        LockAction::AcquireGreaterEqual, 1);
+    scf::YieldOp::create(builder, loc, getBufferResult(buffer));
+  }
+
+  acquireResult.replaceAllUsesWith(switchOp.getResult(0));
+}
+
+static scf::IndexSwitchOp
+createReleaseSwitch(OpBuilder &builder, Location loc, Value switchIndex,
+                    ArrayRef<ComputeBufferResources> buffers,
+                    ObjectFifoPort port) {
+  SmallVector<int64_t, 4> caseValues;
+  for (int i = 0; i < static_cast<int>(buffers.size()); ++i)
+    caseValues.push_back(i);
+  auto cases = DenseI64ArrayAttr::get(builder.getContext(), caseValues);
+  auto switchOp = scf::IndexSwitchOp::create(builder, loc, TypeRange{}, switchIndex,
+                                             cases, buffers.size());
+
+  builder.createBlock(&switchOp.getDefaultRegion());
+  builder.setInsertionPointToStart(&switchOp.getDefaultBlock());
+  UseLockOp::create(
+      builder, loc,
+      port == ObjectFifoPort::Produce
+          ? getLockResult(buffers.front().locks.full)
+          : getLockResult(buffers.front().locks.empty),
+      LockAction::Release, 1);
+  scf::YieldOp::create(builder, loc);
+
+  for (auto [index, buffer] : llvm::enumerate(buffers)) {
+    builder.createBlock(&switchOp.getCaseRegions()[index]);
+    builder.setInsertionPointToStart(&switchOp.getCaseBlock(index));
+    UseLockOp::create(
+        builder, loc,
+        port == ObjectFifoPort::Produce ? getLockResult(buffer.locks.full)
+                                        : getLockResult(buffer.locks.empty),
+        LockAction::Release, 1);
+    scf::YieldOp::create(builder, loc);
+  }
+
+  return switchOp;
+}
+
 static void rewriteCoreAccesses(DeviceOp device, MemTileRowStoreOp rowStore,
                                 RowStoreResources &resources) {
   SmallVector<MemTileRowStoreAcquireOp> acquires;
@@ -351,32 +506,72 @@ static void rewriteCoreAccesses(DeviceOp device, MemTileRowStoreOp rowStore,
       releases.push_back(release);
   });
 
+  if (resources.nextIndices) {
+    SmallVector<CoreOp, 1> touchedCores;
+    device.walk([&](CoreOp core) {
+      if (core.getTile() == rowStore.getComputeTile())
+        touchedCores.push_back(core);
+    });
+    for (auto core : touchedCores)
+      initializePortCounters(core, *resources.nextIndices);
+  }
+
   for (auto acquire : acquires) {
     OpBuilder builder(acquire);
-    if (acquire.getPort() == ObjectFifoPort::Produce) {
-      UseLockOp::create(builder, acquire.getLoc(),
-                        resources.srcLocks.empty.getResult(),
-                        LockAction::AcquireGreaterEqual, 1);
-      acquire.getBuffer().replaceAllUsesWith(resources.srcBuffer.getResult());
-    } else {
-      UseLockOp::create(builder, acquire.getLoc(),
-                        resources.dstLocks.full.getResult(),
-                        LockAction::AcquireGreaterEqual, 1);
-      acquire.getBuffer().replaceAllUsesWith(resources.dstBuffer.getResult());
+    auto &buffers = acquire.getPort() == ObjectFifoPort::Produce
+                        ? resources.srcBuffers
+                        : resources.dstBuffers;
+    if (buffers.size() == 1) {
+      auto &buffer = buffers.front();
+      if (acquire.getPort() == ObjectFifoPort::Produce) {
+        UseLockOp::create(builder, acquire.getLoc(), buffer.locks.empty.getResult(),
+                          LockAction::AcquireGreaterEqual, 1);
+      } else {
+        UseLockOp::create(builder, acquire.getLoc(), buffer.locks.full.getResult(),
+                          LockAction::AcquireGreaterEqual, 1);
+      }
+      acquire.getBuffer().replaceAllUsesWith(buffer.buffer.getResult());
+      continue;
     }
+
+    Value switchIndexAsInteger =
+        loadPortCounter(builder, acquire.getLoc(), *resources.nextIndices,
+                        acquire.getPort());
+    Value switchIndex = arith::IndexCastOp::create(builder, acquire.getLoc(),
+                                                   builder.getIndexType(),
+                                                   switchIndexAsInteger);
+    createAcquireSwitch(builder, acquire.getLoc(), switchIndex, buffers,
+                        acquire.getPort(), acquire.getBuffer());
   }
 
   for (auto release : releases) {
     OpBuilder builder(release);
-    if (release.getPort() == ObjectFifoPort::Produce) {
-      UseLockOp::create(builder, release.getLoc(),
-                        resources.srcLocks.full.getResult(),
-                        LockAction::Release, 1);
-    } else {
-      UseLockOp::create(builder, release.getLoc(),
-                        resources.dstLocks.empty.getResult(),
-                        LockAction::Release, 1);
+    auto &buffers = release.getPort() == ObjectFifoPort::Produce
+                        ? resources.srcBuffers
+                        : resources.dstBuffers;
+    if (buffers.size() == 1) {
+      auto &buffer = buffers.front();
+      if (release.getPort() == ObjectFifoPort::Produce) {
+        UseLockOp::create(builder, release.getLoc(), buffer.locks.full.getResult(),
+                          LockAction::Release, 1);
+      } else {
+        UseLockOp::create(builder, release.getLoc(), buffer.locks.empty.getResult(),
+                          LockAction::Release, 1);
+      }
+      continue;
     }
+
+    Value switchIndexAsInteger =
+        loadPortCounter(builder, release.getLoc(), *resources.nextIndices,
+                        release.getPort());
+    Value switchIndex = arith::IndexCastOp::create(builder, release.getLoc(),
+                                                   builder.getIndexType(),
+                                                   switchIndexAsInteger);
+    auto switchOp = createReleaseSwitch(builder, release.getLoc(), switchIndex,
+                                        buffers, release.getPort());
+    builder.setInsertionPointAfter(switchOp);
+    updatePortCounter(builder, release.getLoc(), *resources.nextIndices,
+                      release.getPort(), buffers.size());
   }
 
   for (auto acquire : llvm::reverse(acquires))
@@ -389,7 +584,8 @@ struct AIELowerMemtileRowStoresPass
     : xilinx::AIE::impl::AIELowerMemtileRowStoresBase<
           AIELowerMemtileRowStoresPass> {
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<AIEDialect>();
+    registry.insert<AIEDialect, arith::ArithDialect, memref::MemRefDialect,
+                    scf::SCFDialect>();
   }
 
   void runOnOperation() override {
