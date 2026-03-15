@@ -1,0 +1,1461 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>AIE Design Visualization</title>
+    <style>
+      :root {
+        --bg: #f5f3ed;
+        --panel: #fffaf1;
+        --grid: #c8c0b1;
+        --text: #1d1a16;
+        --used-stroke: #201a14;
+        --core: #3d8f63;
+        --mem: #d46a2e;
+        --shim-noc: #3276b1;
+        --shim-pl: #8b5aa8;
+        --unknown: #88827a;
+        --route: #a41f34;
+        --route-faint: rgba(62, 62, 62, 0.25);
+        --dma-highlight: #126b8a;
+      }
+
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 320px minmax(0, 1fr) 360px;
+        min-height: 100vh;
+      }
+
+      .sidebar {
+        box-sizing: border-box;
+        padding: 20px;
+        background: var(--panel);
+        border-right: 1px solid #d8cfbf;
+      }
+
+      .viewer {
+        padding: 20px;
+        overflow: auto;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+      }
+
+      .selection-pane {
+        box-sizing: border-box;
+        padding: 20px;
+        background: var(--panel);
+        border-left: 1px solid #d8cfbf;
+      }
+
+      h1, h2, h3 {
+        margin: 0 0 12px;
+        font-weight: 700;
+      }
+
+      .controls,
+      .details,
+      .legend {
+        margin-bottom: 18px;
+      }
+
+      .selection-pane .details {
+        margin-bottom: 0;
+      }
+
+      .toggle-group {
+        margin-top: 14px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.7);
+        border: 1px solid #d8cfbf;
+      }
+
+      label,
+      select,
+      input,
+      button {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        font: inherit;
+      }
+
+      input,
+      select,
+      button {
+        margin-top: 6px;
+        padding: 10px 12px;
+        border: 1px solid #c8c0b1;
+        background: white;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .toggle {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: auto;
+        margin: 8px 0;
+      }
+
+      .toggle input {
+        width: auto;
+        margin: 0;
+        padding: 0;
+      }
+
+      .hint {
+        font-size: 13px;
+        line-height: 1.4;
+        color: #5e564e;
+      }
+
+      .legend-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 8px 0;
+      }
+
+      .swatch {
+        width: 16px;
+        height: 16px;
+        border: 1px solid rgba(0, 0, 0, 0.25);
+      }
+
+      svg {
+        display: block;
+        background: white;
+        border: 1px solid #d8cfbf;
+      }
+
+      .tile-label {
+        font-size: 12px;
+        text-anchor: middle;
+        dominant-baseline: middle;
+        pointer-events: none;
+      }
+
+      .tile rect {
+        cursor: pointer;
+      }
+
+      pre {
+        margin: 0;
+        padding: 12px;
+        background: white;
+        border: 1px solid #d8cfbf;
+        overflow: auto;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .details-panel {
+        display: grid;
+        gap: 10px;
+      }
+
+      .details-panel .hint {
+        margin: 0;
+      }
+
+      .details-section {
+        border: 1px solid #d8cfbf;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .details-section > summary {
+        cursor: pointer;
+        padding: 10px 12px;
+        font-weight: 600;
+        list-style: none;
+      }
+
+      .details-section > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .details-section > summary::before {
+        content: "▸";
+        display: inline-block;
+        width: 1em;
+        color: #6a6258;
+      }
+
+      .details-section[open] > summary::before {
+        content: "▾";
+      }
+
+      .details-section > pre,
+      .details-section > .section-body {
+        margin: 0 12px 12px;
+      }
+
+      .core-card {
+        margin: 0 12px 12px;
+        border: 1px solid #d8cfbf;
+        background: white;
+      }
+
+      .core-card > summary {
+        cursor: pointer;
+        padding: 10px 12px;
+        font-weight: 600;
+        list-style: none;
+      }
+
+      .core-card > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .core-card > summary::before {
+        content: "▸";
+        display: inline-block;
+        width: 1em;
+        color: #6a6258;
+      }
+
+      .core-card[open] > summary::before {
+        content: "▾";
+      }
+
+      .core-card pre {
+        margin: 0 12px 12px;
+      }
+
+      @media (max-width: 1400px) {
+        .layout {
+          grid-template-columns: 320px minmax(0, 1fr);
+        }
+
+        .selection-pane {
+          grid-column: 1 / -1;
+          border-left: 0;
+          border-top: 1px solid #d8cfbf;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="controls">
+          <h1>AIE Design Vis</h1>
+          <p class="hint">
+            Load JSON produced by <code>aie-translate --aie-design-to-json</code>.
+          </p>
+          <label>
+            Design JSON
+            <input id="fileInput" type="file" accept=".json,application/json" />
+          </label>
+          <label>
+            Route
+            <select id="routeSelect">
+              <option value="__all__">All routes</option>
+            </select>
+          </label>
+          <label>
+            Packet flow
+            <select id="packetFlowSelect">
+              <option value="__all__">All packet flows</option>
+            </select>
+          </label>
+          <label>
+            DMA
+            <select id="dmaSelect">
+              <option value="__all__">All DMAs</option>
+            </select>
+          </label>
+          <label>
+            Group
+            <select id="groupSelect">
+              <option value="__all__">All groups</option>
+            </select>
+          </label>
+          <label>
+            Flow kind
+            <select id="flowKindSelect">
+              <option value="all">All flow kinds</option>
+              <option value="circuit">Circuit only</option>
+              <option value="packet">Packet only</option>
+            </select>
+          </label>
+          <label>
+            Tile filter
+            <input id="tileFilter" type="text" placeholder="col,row" />
+          </label>
+          <label>
+            Symbol filter
+            <input id="symbolFilter" type="text" placeholder="buffer, lock, stream, dma" />
+          </label>
+          <div class="toggle-group">
+            <h2>Layers</h2>
+            <label class="toggle"><input id="toggleRoutes" type="checkbox" checked />Circuit routes</label>
+            <label class="toggle"><input id="toggleSwitchboxes" type="checkbox" checked />Switchbox counts</label>
+            <label class="toggle"><input id="toggleResources" type="checkbox" checked />Buffer/lock/DMA counts</label>
+            <label class="toggle"><input id="togglePacketFlows" type="checkbox" checked />Packet endpoints</label>
+          </div>
+          <button id="resetView">Reset Selection</button>
+        </div>
+
+        <div class="legend">
+          <h2>Legend</h2>
+          <div class="legend-row"><span class="swatch" style="background: var(--core)"></span><span>Core tile</span></div>
+          <div class="legend-row"><span class="swatch" style="background: var(--mem)"></span><span>Mem tile</span></div>
+          <div class="legend-row"><span class="swatch" style="background: var(--shim-noc)"></span><span>Shim NoC tile</span></div>
+          <div class="legend-row"><span class="swatch" style="background: var(--shim-pl)"></span><span>Shim PL tile</span></div>
+        </div>
+      </aside>
+      <main class="viewer">
+        <svg id="canvas" width="1200" height="800" viewBox="0 0 1200 800"></svg>
+      </main>
+      <aside class="selection-pane">
+        <div class="details">
+          <h2>Selection</h2>
+          <div id="details" class="details-panel">
+            <p class="hint">No design loaded.</p>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <script>
+      const state = {
+        design: null,
+        selectedTile: null,
+        selectedRoute: "__all__",
+        selectedPacketFlow: "__all__",
+        selectedDMA: "__all__",
+        selectedGroup: "__all__",
+        flowKind: "all",
+        tileFilter: "",
+        symbolFilter: "",
+        layers: {
+          routes: true,
+          switchboxes: true,
+          resources: true,
+          packetFlows: true,
+        },
+      };
+
+      const TILE = 64;
+      const GAP = 18;
+      const MARGIN = 50;
+
+      const colorForKind = (kind) => {
+        switch (kind) {
+          case "core": return "var(--core)";
+          case "mem": return "var(--mem)";
+          case "shim_noc": return "var(--shim-noc)";
+          case "shim_pl": return "var(--shim-pl)";
+          default: return "var(--unknown)";
+        }
+      };
+
+      const svg = document.getElementById("canvas");
+      const viewerPane = document.querySelector(".viewer");
+      const details = document.getElementById("details");
+      const routeSelect = document.getElementById("routeSelect");
+      const packetFlowSelect = document.getElementById("packetFlowSelect");
+      const dmaSelect = document.getElementById("dmaSelect");
+      const groupSelect = document.getElementById("groupSelect");
+      const flowKindSelect = document.getElementById("flowKindSelect");
+      const tileFilterInput = document.getElementById("tileFilter");
+      const symbolFilterInput = document.getElementById("symbolFilter");
+      const fileInput = document.getElementById("fileInput");
+      const toggleRoutes = document.getElementById("toggleRoutes");
+      const toggleSwitchboxes = document.getElementById("toggleSwitchboxes");
+      const toggleResources = document.getElementById("toggleResources");
+      const togglePacketFlows = document.getElementById("togglePacketFlows");
+
+      function tileKey(col, row) {
+        return `${col},${row}`;
+      }
+
+      function selectedGroup(design) {
+        if (!design || state.selectedGroup === "__all__")
+          return null;
+        return (design.groups || []).find((group) => group.id === state.selectedGroup) || null;
+      }
+
+      function groupHasTile(group, tile) {
+        return (group.tiles || []).some((entry) => entry.col === tile.col && entry.row === tile.row);
+      }
+
+      function groupHasNamedResource(group, field, name) {
+        return (group[field] || []).includes(name);
+      }
+
+      function filterGroups(design) {
+        const tileFilter = parseTileFilter(state.tileFilter);
+        const query = normalizeQuery(state.symbolFilter);
+        return (design.groups || []).filter((group) => {
+          if (state.selectedGroup !== "__all__" && group.id !== state.selectedGroup)
+            return false;
+          if (tileFilter && !(group.tiles || []).some((tile) =>
+            tile.col === tileFilter.col && tile.row === tileFilter.row))
+            return false;
+          if (query && !matchesText(group.id, query) &&
+              !matchesText(group.kind, query) &&
+              !matchesText(group.name, query) &&
+              !(group.streams || []).some((value) => matchesText(value, query)) &&
+              !(group.buffers || []).some((value) => matchesText(value, query)) &&
+              !(group.locks || []).some((value) => matchesText(value, query)) &&
+              !(group.dmas || []).some((value) => matchesText(value, query)) &&
+              !(group.packet_flows || []).some((value) => matchesText(value, query)))
+            return false;
+          return true;
+        });
+      }
+
+      function normalizeQuery(query) {
+        return String(query || "").trim().toLowerCase();
+      }
+
+      function clearElement(element) {
+        while (element.firstChild)
+          element.removeChild(element.firstChild);
+      }
+
+      function setDetailsMessage(message) {
+        clearElement(details);
+        const paragraph = document.createElement("p");
+        paragraph.className = "hint";
+        paragraph.textContent = message;
+        details.appendChild(paragraph);
+      }
+
+      function appendJSONSection(parent, title, payload, open = false) {
+        const section = document.createElement("details");
+        section.className = "details-section";
+        section.open = open;
+
+        const summary = document.createElement("summary");
+        summary.textContent = title;
+        section.appendChild(summary);
+
+        const pre = document.createElement("pre");
+        pre.textContent = typeof payload === "string"
+          ? payload
+          : JSON.stringify(payload, null, 2);
+        section.appendChild(pre);
+        parent.appendChild(section);
+        return section;
+      }
+
+      function appendCoreSection(parent, cores) {
+        const section = document.createElement("details");
+        section.className = "details-section";
+        const summary = document.createElement("summary");
+        summary.textContent = `Core Programs (${cores.length})`;
+        section.appendChild(summary);
+
+        if (!cores.length) {
+          const hint = document.createElement("p");
+          hint.className = "hint section-body";
+          hint.textContent = "No core program is defined on this tile.";
+          section.appendChild(hint);
+          parent.appendChild(section);
+          return;
+        }
+
+        for (const core of cores) {
+          const card = document.createElement("details");
+          card.className = "core-card";
+
+          const cardSummary = document.createElement("summary");
+          cardSummary.textContent = `${core.id} (${core.operation_count} ops)`;
+          card.appendChild(cardSummary);
+
+          const meta = document.createElement("pre");
+          meta.textContent = JSON.stringify({
+            id: core.id,
+            col: core.col,
+            row: core.row,
+            stack_size: core.stack_size,
+            elf_file: core.elf_file || null,
+            link_with: core.link_with || null,
+            dynamic_objfifo_lowering: core.dynamic_objfifo_lowering ?? null,
+            is_empty: core.is_empty,
+            operation_count: core.operation_count,
+            operations: core.operations || [],
+          }, null, 2);
+          card.appendChild(meta);
+
+          const body = document.createElement("pre");
+          body.textContent = core.body || "";
+          card.appendChild(body);
+
+          section.appendChild(card);
+        }
+
+        parent.appendChild(section);
+      }
+
+      function matchesText(value, query) {
+        if (!query)
+          return true;
+        return String(value ?? "").toLowerCase().includes(query);
+      }
+
+      function parseTileFilter(value) {
+        const match = /^\s*(\d+)\s*,\s*(\d+)\s*$/.exec(String(value || ""));
+        if (!match)
+          return null;
+        return {
+          col: Number.parseInt(match[1], 10),
+          row: Number.parseInt(match[2], 10),
+        };
+      }
+
+      function tileMatchesCoordinateFilter(tile, tileFilter) {
+        return !tileFilter || (tile.col === tileFilter.col && tile.row === tileFilter.row);
+      }
+
+      function switchboxMap(design) {
+        const map = new Map();
+        for (const item of design.switchboxes || [])
+          map.set(tileKey(item.col, item.row), item);
+        return map;
+      }
+
+      function countByTile(items) {
+        const map = new Map();
+        for (const item of items || []) {
+          const key = tileKey(item.col, item.row);
+          map.set(key, (map.get(key) || 0) + 1);
+        }
+        return map;
+      }
+
+      function routeTouchesTile(route, tile) {
+        for (const hop of route || []) {
+          if (!Array.isArray(hop) || hop.length < 1)
+            continue;
+          const coord = hop[0];
+          if (Array.isArray(coord) && coord[0] === tile.col && coord[1] === tile.row)
+            return true;
+        }
+        return false;
+      }
+
+      function packetFlowTouchesTile(packetFlow, tile) {
+        const src = packetFlow.source;
+        if (src && src.col === tile.col && src.row === tile.row)
+          return true;
+        for (const dst of packetFlow.destinations || []) {
+          if (dst.col === tile.col && dst.row === tile.row)
+            return true;
+        }
+        return false;
+      }
+
+      function routeTouchesCoordinate(route, tileFilter) {
+        if (!tileFilter)
+          return true;
+        return routeTouchesTile(route, tileFilter);
+      }
+
+      function packetFlowTouchesCoordinate(packetFlow, tileFilter) {
+        if (!tileFilter)
+          return true;
+        return packetFlowTouchesTile(packetFlow, tileFilter);
+      }
+
+      function dmaTouchesCoordinate(dma, tileFilter) {
+        return !tileFilter || (dma.col === tileFilter.col && dma.row === tileFilter.row);
+      }
+
+      function packetFlowIndex() {
+        if (state.selectedPacketFlow === "__all__")
+          return null;
+        const index = Number.parseInt(state.selectedPacketFlow.replace("packet-", ""), 10);
+        return Number.isNaN(index) ? null : index;
+      }
+
+      function dmaIndex() {
+        if (state.selectedDMA === "__all__")
+          return null;
+        const index = Number.parseInt(state.selectedDMA.replace("dma-", ""), 10);
+        return Number.isNaN(index) ? null : index;
+      }
+
+      function circuitFlowVisible() {
+        return state.flowKind !== "packet";
+      }
+
+      function packetFlowVisible() {
+        return state.flowKind !== "circuit";
+      }
+
+      function streamMatchesQuery(stream, query) {
+        if (!query)
+          return true;
+        if (matchesText(stream.id, query) ||
+            matchesText(stream.kind, query) ||
+            matchesText(stream.provenance?.status, query) ||
+            matchesText(stream.provenance?.method, query))
+          return true;
+        for (const hop of stream.route || []) {
+          const coord = Array.isArray(hop) ? hop[0] : null;
+          const dirs = Array.isArray(hop) ? hop[1] : null;
+          if (Array.isArray(coord) && matchesText(`${coord[0]},${coord[1]}`, query))
+            return true;
+          for (const dir of dirs || []) {
+            if (matchesText(dir, query))
+              return true;
+          }
+        }
+        return false;
+      }
+
+      function packetFlowMatchesQuery(packetFlow, query) {
+        if (!query)
+          return true;
+        if (matchesText(packetFlow.packet_id, query) ||
+            matchesText(packetFlow.keep_pkt_header, query) ||
+            matchesText(packetFlow.priority_route, query))
+          return true;
+        if (packetFlow.source) {
+          if (matchesText(`${packetFlow.source.col},${packetFlow.source.row}`, query) ||
+              matchesText(packetFlow.source.bundle, query) ||
+              matchesText(packetFlow.source.channel, query))
+            return true;
+        }
+        for (const dst of packetFlow.destinations || []) {
+          if (matchesText(`${dst.col},${dst.row}`, query) ||
+              matchesText(dst.bundle, query) ||
+              matchesText(dst.channel, query))
+            return true;
+        }
+        return false;
+      }
+
+      function bufferMatchesQuery(buffer, query) {
+        if (!query)
+          return true;
+        return matchesText(buffer.name, query) ||
+          matchesText(buffer.type, query) ||
+          matchesText(buffer.address, query) ||
+          matchesText(buffer.mem_bank, query) ||
+          matchesText(`${buffer.col},${buffer.row}`, query);
+      }
+
+      function lockMatchesQuery(lock, query) {
+        if (!query)
+          return true;
+        return matchesText(lock.name, query) ||
+          matchesText(lock.lock_id, query) ||
+          matchesText(lock.init, query) ||
+          matchesText(`${lock.col},${lock.row}`, query);
+      }
+
+      function dmaMatchesQuery(dma, query) {
+        if (!query)
+          return true;
+        if (matchesText(dma.kind, query) || matchesText(`${dma.col},${dma.row}`, query))
+          return true;
+        for (const channel of dma.channels || []) {
+          if (matchesText(channel.direction, query) ||
+              matchesText(channel.channel_index, query) ||
+              matchesText(channel.repeat_count, query) ||
+              matchesText(channel.dest, query))
+            return true;
+        }
+        for (const block of dma.bd_blocks || []) {
+          if (matchesText(block.id, query) ||
+              matchesText(block.next, query) ||
+              matchesText(block.terminator, query))
+            return true;
+          for (const lock of block.locks || []) {
+            if (matchesText(lock.lock, query) ||
+                matchesText(lock.action, query) ||
+                matchesText(lock.value, query))
+              return true;
+          }
+          const bd = block.dma_bd;
+          if (!bd)
+            continue;
+          if (matchesText(bd.buffer, query) ||
+              matchesText(bd.buffer_type, query) ||
+              matchesText(bd.bd_id, query) ||
+              matchesText(bd.next_bd_id, query) ||
+              matchesText(bd.offset, query) ||
+              matchesText(bd.length, query) ||
+              matchesText(bd.packet, query))
+            return true;
+        }
+        return false;
+      }
+
+      function coreMatchesQuery(core, query) {
+        if (!query)
+          return true;
+        if (matchesText(core.id, query) ||
+            matchesText(`${core.col},${core.row}`, query) ||
+            matchesText(core.stack_size, query) ||
+            matchesText(core.elf_file, query) ||
+            matchesText(core.link_with, query) ||
+            matchesText(core.operation_count, query) ||
+            matchesText(core.body, query))
+          return true;
+        return (core.operations || []).some((op) => matchesText(op, query));
+      }
+
+      function filteredBuffers(design) {
+        const query = normalizeQuery(state.symbolFilter);
+        const tileFilter = parseTileFilter(state.tileFilter);
+        const group = selectedGroup(design);
+        return (design.buffers || []).filter((buffer) =>
+          tileMatchesCoordinateFilter(buffer, tileFilter) &&
+          (!group || groupHasNamedResource(group, "buffers", buffer.name)) &&
+          bufferMatchesQuery(buffer, query),
+        );
+      }
+
+      function filteredLocks(design) {
+        const query = normalizeQuery(state.symbolFilter);
+        const tileFilter = parseTileFilter(state.tileFilter);
+        const group = selectedGroup(design);
+        return (design.locks || []).filter((lock) =>
+          tileMatchesCoordinateFilter(lock, tileFilter) &&
+          (!group || groupHasNamedResource(group, "locks", lock.name)) &&
+          lockMatchesQuery(lock, query),
+        );
+      }
+
+      function filteredStreams(design) {
+        const query = normalizeQuery(state.symbolFilter);
+        const tileFilter = parseTileFilter(state.tileFilter);
+        const group = selectedGroup(design);
+        if (!circuitFlowVisible())
+          return [];
+        return (design.streams || []).filter((stream) =>
+          (state.selectedRoute === "__all__" || stream.id === state.selectedRoute) &&
+          (!group || (stream.group_candidates || []).includes(group.id)) &&
+          routeTouchesCoordinate(stream.route, tileFilter) &&
+          streamMatchesQuery(stream, query),
+        );
+      }
+
+      function filteredPacketFlows(design) {
+        const query = normalizeQuery(state.symbolFilter);
+        const tileFilter = parseTileFilter(state.tileFilter);
+        const selectedIndex = packetFlowIndex();
+        const group = selectedGroup(design);
+        if (!packetFlowVisible())
+          return [];
+        return (design.packet_flows || []).filter((packetFlow, index) =>
+          (selectedIndex === null || index === selectedIndex) &&
+          (!group || groupHasNamedResource(group, "packet_flows", packetFlow.id)) &&
+          packetFlowTouchesCoordinate(packetFlow, tileFilter) &&
+          packetFlowMatchesQuery(packetFlow, query),
+        );
+      }
+
+      function filteredDMAs(design) {
+        const query = normalizeQuery(state.symbolFilter);
+        const tileFilter = parseTileFilter(state.tileFilter);
+        const selectedIndex = dmaIndex();
+        const group = selectedGroup(design);
+        return (design.dmas || []).filter((dma, index) =>
+          (selectedIndex === null || index === selectedIndex) &&
+          (!group || groupHasNamedResource(group, "dmas", dma.id)) &&
+          dmaTouchesCoordinate(dma, tileFilter) &&
+          dmaMatchesQuery(dma, query),
+        );
+      }
+
+      function filteredCores(design) {
+        const query = normalizeQuery(state.symbolFilter);
+        const tileFilter = parseTileFilter(state.tileFilter);
+        const group = selectedGroup(design);
+        return (design.cores || []).filter((core) =>
+          tileMatchesCoordinateFilter(core, tileFilter) &&
+          (!group || groupHasTile(group, core)) &&
+          coreMatchesQuery(core, query),
+        );
+      }
+
+      function expandGroup(design, group, visibleResources = null) {
+        if (!group)
+          return null;
+        const buffers = visibleResources?.buffers || filteredBuffers(design);
+        const locks = visibleResources?.locks || filteredLocks(design);
+        const streams = visibleResources?.streams || filteredStreams(design);
+        const packetFlows = visibleResources?.packetFlows || filteredPacketFlows(design);
+        const dmas = visibleResources?.dmas || filteredDMAs(design);
+        return {
+          id: group.id,
+          kind: group.kind,
+          name: group.name,
+          tiles: group.tiles || [],
+          buffers: buffers.filter((item) => groupHasNamedResource(group, "buffers", item.name)),
+          locks: locks.filter((item) => groupHasNamedResource(group, "locks", item.name)),
+          dmas: dmas.filter((item) => groupHasNamedResource(group, "dmas", item.id)),
+          streams: streams.filter((item) => (group.streams || []).includes(item.id)),
+          packetFlows: packetFlows.filter((item) => groupHasNamedResource(group, "packet_flows", item.id)),
+        };
+      }
+
+      function tileMatchesSymbolFilter(tile, design, query) {
+        if (!query)
+          return true;
+        if (matchesText(tile.kind, query) ||
+            matchesText(`${tile.col},${tile.row}`, query) ||
+            matchesText(tile.used ? "used" : "unused", query))
+          return true;
+        for (const name of tile.buffers || []) {
+          if (matchesText(name, query))
+            return true;
+        }
+        for (const name of tile.locks || []) {
+          if (matchesText(name, query))
+            return true;
+        }
+        if ((design.buffers || []).some((item) =>
+          item.col === tile.col && item.row === tile.row && bufferMatchesQuery(item, query)))
+          return true;
+        if ((design.locks || []).some((item) =>
+          item.col === tile.col && item.row === tile.row && lockMatchesQuery(item, query)))
+          return true;
+        if ((design.dmas || []).some((item) =>
+          item.col === tile.col && item.row === tile.row && dmaMatchesQuery(item, query)))
+          return true;
+        if ((design.cores || []).some((item) =>
+          item.col === tile.col && item.row === tile.row && coreMatchesQuery(item, query)))
+          return true;
+        if (circuitFlowVisible() && (design.streams || []).some((item) =>
+          routeTouchesTile(item.route, tile) && streamMatchesQuery(item, query)))
+          return true;
+        if (packetFlowVisible() && (design.packet_flows || []).some((item) =>
+          packetFlowTouchesTile(item, tile) && packetFlowMatchesQuery(item, query)))
+          return true;
+        return false;
+      }
+
+      function tileMatchesActiveFilters(tile, design) {
+        const tileFilter = parseTileFilter(state.tileFilter);
+        const query = normalizeQuery(state.symbolFilter);
+        const group = selectedGroup(design);
+        if (!tileMatchesCoordinateFilter(tile, tileFilter))
+          return false;
+        if (group && !groupHasTile(group, tile))
+          return false;
+        if (!tileMatchesSymbolFilter(tile, design, query))
+          return false;
+        const visibleStreams = filteredStreams(design);
+        const visiblePacketFlows = filteredPacketFlows(design);
+        const visibleDMAs = filteredDMAs(design);
+        if (circuitFlowVisible() &&
+            state.selectedRoute !== "__all__" &&
+            !visibleStreams.some((item) => routeTouchesTile(item.route, tile)))
+          return false;
+        if (packetFlowVisible() &&
+            state.selectedPacketFlow !== "__all__" &&
+            !visiblePacketFlows.some((item) => packetFlowTouchesTile(item, tile)))
+          return false;
+        if (state.selectedDMA !== "__all__" &&
+            !visibleDMAs.some((item) => item.col === tile.col && item.row === tile.row))
+          return false;
+        return true;
+      }
+
+      function packetEndpointMaps(packetFlows) {
+        const sources = new Map();
+        const destinations = new Map();
+        for (const packetFlow of packetFlows || []) {
+          if (packetFlow.source) {
+            const key = tileKey(packetFlow.source.col, packetFlow.source.row);
+            sources.set(key, (sources.get(key) || 0) + 1);
+          }
+          for (const dst of packetFlow.destinations || []) {
+            const key = tileKey(dst.col, dst.row);
+            destinations.set(key, (destinations.get(key) || 0) + 1);
+          }
+        }
+        return { sources, destinations };
+      }
+
+      function tileCenter(tile, rows) {
+        const x = MARGIN + tile.col * (TILE + GAP) + TILE / 2;
+        const y = MARGIN + (rows - 1 - tile.row) * (TILE + GAP) + TILE / 2;
+        return { x, y };
+      }
+
+      function buildPolylinePoints(route, design) {
+        const points = [];
+        const rows = design.device.rows;
+        for (const hop of route) {
+          if (!Array.isArray(hop) || hop.length < 2)
+            continue;
+          const coord = hop[0];
+          const dirs = hop[1];
+          if (!Array.isArray(coord) || !Array.isArray(dirs))
+            continue;
+          const current = { col: coord[0], row: coord[1] };
+          const start = tileCenter(current, rows);
+          if (dirs.length === 0) {
+            points.push([start.x, start.y, start.x, start.y]);
+            continue;
+          }
+          for (const dir of dirs) {
+            let next = null;
+            if (dir === "North") next = { col: current.col, row: current.row + 1 };
+            if (dir === "South") next = { col: current.col, row: current.row - 1 };
+            if (dir === "East") next = { col: current.col + 1, row: current.row };
+            if (dir === "West") next = { col: current.col - 1, row: current.row };
+            if (!next) continue;
+            const end = tileCenter(next, rows);
+            points.push([start.x, start.y, end.x, end.y]);
+          }
+        }
+        return points;
+      }
+
+      function appendBadge(parent, x, y, fill, text) {
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", x);
+        circle.setAttribute("cy", y);
+        circle.setAttribute("r", 9);
+        circle.setAttribute("fill", fill);
+        circle.setAttribute("stroke", "rgba(0, 0, 0, 0.25)");
+        circle.setAttribute("stroke-width", "1");
+        parent.appendChild(circle);
+
+        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        label.setAttribute("x", x);
+        label.setAttribute("y", y + 1);
+        label.setAttribute("class", "tile-label");
+        label.setAttribute("font-size", "9");
+        label.setAttribute("fill", "white");
+        label.textContent = text;
+        parent.appendChild(label);
+      }
+
+      function fitSvgToViewer(width, height) {
+        const availableWidth = Math.max(320, viewerPane.clientWidth - 40);
+        const availableHeight = Math.max(320, viewerPane.clientHeight - 40);
+        const scale = 0.8 * Math.min(availableWidth / width, availableHeight / height);
+        svg.style.width = `${Math.max(240, Math.floor(width * scale))}px`;
+        svg.style.height = `${Math.max(240, Math.floor(height * scale))}px`;
+      }
+
+      function render() {
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+        if (!state.design) {
+          setDetailsMessage("No design loaded.");
+          return;
+        }
+
+        const design = state.design;
+        const rows = design.device.rows;
+        const cols = design.device.columns;
+        const visibleCores = filteredCores(design);
+        const visibleBuffers = filteredBuffers(design);
+        const visibleLocks = filteredLocks(design);
+        const visibleStreams = filteredStreams(design);
+        const visiblePacketFlows = filteredPacketFlows(design);
+        const visibleDMAs = filteredDMAs(design);
+        const visibleGroups = filterGroups(design);
+        const swMap = switchboxMap(design);
+        const bufferCounts = countByTile(visibleBuffers);
+        const lockCounts = countByTile(visibleLocks);
+        const dmaCounts = countByTile(visibleDMAs);
+        const packetCounts = packetEndpointMaps(visiblePacketFlows);
+        const highlightedDMAs = visibleDMAs;
+
+        const width = MARGIN * 2 + cols * TILE + Math.max(0, cols - 1) * GAP;
+        const height = MARGIN * 2 + rows * TILE + Math.max(0, rows - 1) * GAP;
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        svg.setAttribute("width", width);
+        svg.setAttribute("height", height);
+        fitSvgToViewer(width, height);
+
+        const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        title.setAttribute("x", MARGIN);
+        title.setAttribute("y", 28);
+        title.setAttribute("font-size", "20");
+        title.setAttribute("font-weight", "700");
+        title.textContent = `${design.device.kind} (${cols} x ${rows})`;
+        svg.appendChild(title);
+
+        if (state.layers.routes) {
+          const routeLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+          svg.appendChild(routeLayer);
+
+          for (const stream of visibleStreams) {
+            const isSelected = state.selectedRoute === stream.id;
+            const points = buildPolylinePoints(stream.route || [], design);
+            for (const [x1, y1, x2, y2] of points) {
+              const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+              line.setAttribute("x1", x1);
+              line.setAttribute("y1", y1);
+              line.setAttribute("x2", x2);
+              line.setAttribute("y2", y2);
+              line.setAttribute("stroke", isSelected ? "var(--route)" : "var(--route-faint)");
+              line.setAttribute("stroke-width", isSelected ? "5" : "2");
+              line.setAttribute("stroke-linecap", "round");
+              routeLayer.appendChild(line);
+            }
+          }
+        }
+
+        const tileLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        svg.appendChild(tileLayer);
+
+        for (const tile of design.tiles || []) {
+          const tileVisible = tileMatchesActiveFilters(tile, design);
+          const { x, y } = tileCenter(tile, rows);
+          const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+          g.setAttribute("class", "tile");
+
+          const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          rect.setAttribute("x", x - TILE / 2);
+          rect.setAttribute("y", y - TILE / 2);
+          rect.setAttribute("width", TILE);
+          rect.setAttribute("height", TILE);
+          rect.setAttribute("rx", 8);
+          rect.setAttribute("fill", colorForKind(tile.kind));
+          rect.setAttribute("fill-opacity", tileVisible ? (tile.used ? "0.95" : "0.2") : "0.08");
+          rect.setAttribute("stroke", state.selectedTile &&
+            state.selectedTile.col === tile.col &&
+            state.selectedTile.row === tile.row ? "var(--route)" : "var(--used-stroke)");
+          rect.setAttribute("stroke-width", state.selectedTile &&
+            state.selectedTile.col === tile.col &&
+            state.selectedTile.row === tile.row ? "4" : "1.5");
+          rect.setAttribute("stroke-opacity", tileVisible ? "1" : "0.18");
+          rect.addEventListener("click", () => {
+            state.selectedTile = tile;
+            renderDetails();
+            render();
+          });
+          g.appendChild(rect);
+
+          const hasHighlightedDMA = highlightedDMAs.some(
+            (item) => item.col === tile.col && item.row === tile.row,
+          );
+          if (hasHighlightedDMA) {
+            const dmaRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            dmaRect.setAttribute("x", x - TILE / 2 + 4);
+            dmaRect.setAttribute("y", y - TILE / 2 + 4);
+            dmaRect.setAttribute("width", TILE - 8);
+            dmaRect.setAttribute("height", TILE - 8);
+            dmaRect.setAttribute("rx", 6);
+            dmaRect.setAttribute("fill", "none");
+            dmaRect.setAttribute("stroke", "var(--dma-highlight)");
+            dmaRect.setAttribute("stroke-width", "2.5");
+            dmaRect.setAttribute("stroke-dasharray", "6 4");
+            dmaRect.setAttribute("stroke-opacity", tileVisible ? "1" : "0.35");
+            g.appendChild(dmaRect);
+          }
+
+          const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          label.setAttribute("x", x);
+          label.setAttribute("y", y - 8);
+          label.setAttribute("class", "tile-label");
+          label.setAttribute("fill-opacity", tileVisible ? "1" : "0.45");
+          label.textContent = `${tile.col},${tile.row}`;
+          g.appendChild(label);
+
+          const short = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          short.setAttribute("x", x);
+          short.setAttribute("y", y + 12);
+          short.setAttribute("class", "tile-label");
+          short.setAttribute("font-weight", "700");
+          short.setAttribute("fill-opacity", tileVisible ? "1" : "0.45");
+          short.textContent =
+            tile.kind === "core" ? "C" :
+            tile.kind === "mem" ? "M" :
+            tile.kind === "shim_noc" ? "D" :
+            tile.kind === "shim_pl" ? "P" : "?";
+          g.appendChild(short);
+
+          const sb = swMap.get(tileKey(tile.col, tile.row));
+          if (state.layers.switchboxes && sb && tile.used) {
+            const meta = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            meta.setAttribute("x", x);
+            meta.setAttribute("y", y + 26);
+            meta.setAttribute("class", "tile-label");
+            meta.setAttribute("font-size", "10");
+            meta.setAttribute("fill-opacity", tileVisible ? "1" : "0.45");
+            meta.textContent = `S:${sb.source_count} D:${sb.destination_count}`;
+            g.appendChild(meta);
+          }
+
+          const key = tileKey(tile.col, tile.row);
+          const bufferCount = bufferCounts.get(key) || 0;
+          const lockCount = lockCounts.get(key) || 0;
+          const dmaCount = dmaCounts.get(key) || 0;
+          if (state.layers.resources && (bufferCount || lockCount || dmaCount)) {
+            const resources = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            resources.setAttribute("x", x);
+            resources.setAttribute("y", y + 38);
+            resources.setAttribute("class", "tile-label");
+            resources.setAttribute("font-size", "9");
+            resources.setAttribute("fill-opacity", tileVisible ? "1" : "0.45");
+            resources.textContent = `B:${bufferCount} L:${lockCount} D:${dmaCount}`;
+            g.appendChild(resources);
+          }
+
+          const packetSourceCount = packetCounts.sources.get(key) || 0;
+          const packetDestCount = packetCounts.destinations.get(key) || 0;
+          if (state.layers.packetFlows && packetSourceCount) {
+            appendBadge(g, x - TILE / 2 + 11, y - TILE / 2 + 11, "#a41f34", `S${packetSourceCount}`);
+          }
+          if (state.layers.packetFlows && packetDestCount) {
+            appendBadge(g, x + TILE / 2 - 11, y - TILE / 2 + 11, "#2a7a5e", `D${packetDestCount}`);
+          }
+
+          tileLayer.appendChild(g);
+        }
+
+        renderDetails();
+      }
+
+      function renderDetails() {
+        if (!state.design) {
+          setDetailsMessage("No design loaded.");
+          return;
+        }
+        clearElement(details);
+        const visibleTiles = (state.design.tiles || []).filter((tile) =>
+          tileMatchesActiveFilters(tile, state.design));
+        const visibleCores = filteredCores(state.design);
+        const visibleBuffers = filteredBuffers(state.design);
+        const visibleLocks = filteredLocks(state.design);
+        const visibleStreams = filteredStreams(state.design);
+        const visiblePacketFlows = filteredPacketFlows(state.design);
+        const visibleDMAs = filteredDMAs(state.design);
+        const visibleGroups = filterGroups(state.design);
+        const expandedGroup = expandGroup(state.design, selectedGroup(state.design), {
+          buffers: visibleBuffers,
+          locks: visibleLocks,
+          streams: visibleStreams,
+          packetFlows: visiblePacketFlows,
+          dmas: visibleDMAs,
+        });
+        if (!state.selectedTile) {
+          const route = state.selectedRoute === "__all__"
+            ? null
+            : visibleStreams.find((item) => item.id === state.selectedRoute) || null;
+          const packetFlow = state.selectedPacketFlow === "__all__"
+            ? null
+            : visiblePacketFlows[0] || null;
+          const dma = state.selectedDMA === "__all__"
+            ? null
+            : visibleDMAs[0] || null;
+          const group = state.selectedGroup === "__all__"
+            ? null
+            : visibleGroups[0] || null;
+          appendJSONSection(details, "Overview", {
+            device: state.design.device,
+            metadata: state.design.metadata,
+            filters: {
+              group: state.selectedGroup,
+              flowKind: state.flowKind,
+              tile: state.tileFilter,
+              symbol: state.symbolFilter,
+            },
+            selectedRoute: state.selectedRoute,
+            selectedPacketFlow: state.selectedPacketFlow,
+            selectedDMA: state.selectedDMA,
+            layers: state.layers,
+            visibleCounts: {
+              tiles: visibleTiles.length,
+              cores: visibleCores.length,
+              buffers: visibleBuffers.length,
+              locks: visibleLocks.length,
+              streams: visibleStreams.length,
+              packetFlows: visiblePacketFlows.length,
+              dmas: visibleDMAs.length,
+              groups: visibleGroups.length,
+            },
+          }, true);
+          if (route)
+            appendJSONSection(details, `Selected Route: ${route.id}`, route);
+          if (packetFlow)
+            appendJSONSection(details,
+              `Selected Packet Flow: ${packetFlow.id}`, packetFlow);
+          if (dma)
+            appendJSONSection(details, `Selected DMA: ${dma.id}`, dma);
+          if (expandedGroup || group)
+            appendJSONSection(details,
+              `Selected Group: ${(expandedGroup || group).id ?? state.selectedGroup}`,
+              expandedGroup || group);
+          appendJSONSection(details, "Visible Groups", expandedGroup
+            ? visibleGroups.map((item) => item.id === expandedGroup.id ? expandedGroup : item)
+            : visibleGroups);
+          appendJSONSection(details, "Visible Packet Flows", visiblePacketFlows);
+          return;
+        }
+
+        const tile = state.selectedTile;
+        const sw = (state.design.switchboxes || []).find(
+          (item) => item.col === tile.col && item.row === tile.row,
+        );
+        const cores = visibleCores.filter(
+          (item) => item.col === tile.col && item.row === tile.row,
+        );
+        const buffers = visibleBuffers.filter(
+          (item) => item.col === tile.col && item.row === tile.row,
+        );
+        const locks = visibleLocks.filter(
+          (item) => item.col === tile.col && item.row === tile.row,
+        );
+        const dmas = visibleDMAs.filter(
+          (item) => item.col === tile.col && item.row === tile.row,
+        );
+        const streams = visibleStreams.filter(
+          (item) => routeTouchesTile(item.route, tile),
+        );
+        const packetFlows = visiblePacketFlows.filter(
+          (item) => packetFlowTouchesTile(item, tile),
+        );
+        const groups = visibleGroups.filter((item) => groupHasTile(item, tile));
+        const expandedGroups = groups.map((item) => expandGroup(state.design, item, {
+          buffers: visibleBuffers,
+          locks: visibleLocks,
+          streams: visibleStreams,
+          packetFlows: visiblePacketFlows,
+          dmas: visibleDMAs,
+        }));
+        appendJSONSection(details, `Tile ${tile.col},${tile.row} Summary`, {
+          tile,
+          matchesActiveFilters: tileMatchesActiveFilters(tile, state.design),
+          activeGroup: expandedGroup,
+          coreCount: cores.length,
+          bufferCount: buffers.length,
+          lockCount: locks.length,
+          dmaCount: dmas.length,
+          streamCount: streams.length,
+          packetFlowCount: packetFlows.length,
+          groupCount: expandedGroups.length,
+        }, true);
+        appendCoreSection(details, cores);
+        if (sw)
+          appendJSONSection(details, "Switchbox", sw);
+        appendJSONSection(details, `Buffers (${buffers.length})`, buffers);
+        appendJSONSection(details, `Locks (${locks.length})`, locks);
+        appendJSONSection(details, `DMAs (${dmas.length})`, dmas);
+        appendJSONSection(details, `Streams (${streams.length})`, streams);
+        appendJSONSection(details, `Packet Flows (${packetFlows.length})`, packetFlows);
+        appendJSONSection(details, `Groups (${expandedGroups.length})`, expandedGroups);
+        appendJSONSection(details, "Raw Selection JSON", {
+          tile,
+          matchesActiveFilters: tileMatchesActiveFilters(tile, state.design),
+          activeGroup: expandedGroup,
+          cores,
+          switchbox: sw || null,
+          buffers,
+          locks,
+          dmas,
+          streams,
+          packetFlows,
+          groups: expandedGroups,
+        });
+      }
+
+      function loadDesign(design) {
+        state.design = design;
+        state.selectedTile = null;
+        state.selectedRoute = "__all__";
+        state.selectedPacketFlow = "__all__";
+        state.selectedDMA = "__all__";
+        state.selectedGroup = "__all__";
+        state.flowKind = "all";
+        state.tileFilter = "";
+        state.symbolFilter = "";
+
+        routeSelect.innerHTML = "";
+        const all = document.createElement("option");
+        all.value = "__all__";
+        all.textContent = "All routes";
+        routeSelect.appendChild(all);
+        for (const stream of design.streams || []) {
+          const option = document.createElement("option");
+          option.value = stream.id;
+          const provenance = stream.provenance?.status
+            ? ` [${stream.provenance.status}]`
+            : "";
+          option.textContent = `${stream.id}${provenance}`;
+          routeSelect.appendChild(option);
+        }
+
+        packetFlowSelect.innerHTML = "";
+        const allPackets = document.createElement("option");
+        allPackets.value = "__all__";
+        allPackets.textContent = "All packet flows";
+        packetFlowSelect.appendChild(allPackets);
+        for (const [index, packetFlow] of (design.packet_flows || []).entries()) {
+          const option = document.createElement("option");
+          option.value = `packet-${index}`;
+          const src = packetFlow.source
+            ? `${packetFlow.source.col},${packetFlow.source.row}`
+            : "?,?";
+          option.textContent = `pkt ${packetFlow.packet_id} @ ${src}`;
+          packetFlowSelect.appendChild(option);
+        }
+
+        dmaSelect.innerHTML = "";
+        const allDMAs = document.createElement("option");
+        allDMAs.value = "__all__";
+        allDMAs.textContent = "All DMAs";
+        dmaSelect.appendChild(allDMAs);
+        for (const [index, dma] of (design.dmas || []).entries()) {
+          const option = document.createElement("option");
+          option.value = `dma-${index}`;
+          const channel = (dma.channels || [])[0];
+          const dir = channel ? channel.direction : "?";
+          const chan = channel ? channel.channel_index : "?";
+          option.textContent = `${dma.kind} ${dir}:${chan} @ ${dma.col},${dma.row}`;
+          dmaSelect.appendChild(option);
+        }
+
+        groupSelect.innerHTML = "";
+        const allGroups = document.createElement("option");
+        allGroups.value = "__all__";
+        allGroups.textContent = "All groups";
+        groupSelect.appendChild(allGroups);
+        for (const group of design.groups || []) {
+          const option = document.createElement("option");
+          option.value = group.id;
+          option.textContent = `${group.kind}: ${group.name}`;
+          groupSelect.appendChild(option);
+        }
+
+        groupSelect.value = state.selectedGroup;
+        flowKindSelect.value = state.flowKind;
+        tileFilterInput.value = state.tileFilter;
+        symbolFilterInput.value = state.symbolFilter;
+
+        render();
+      }
+
+      routeSelect.addEventListener("change", (event) => {
+        state.selectedRoute = event.target.value;
+        render();
+      });
+
+      packetFlowSelect.addEventListener("change", (event) => {
+        state.selectedPacketFlow = event.target.value;
+        render();
+      });
+
+      dmaSelect.addEventListener("change", (event) => {
+        state.selectedDMA = event.target.value;
+        render();
+      });
+
+      groupSelect.addEventListener("change", (event) => {
+        state.selectedGroup = event.target.value;
+        render();
+      });
+
+      flowKindSelect.addEventListener("change", (event) => {
+        state.flowKind = event.target.value;
+        render();
+      });
+
+      tileFilterInput.addEventListener("input", (event) => {
+        state.tileFilter = event.target.value;
+        const filter = parseTileFilter(state.tileFilter);
+        if (filter && state.design) {
+          const match = (state.design.tiles || []).find((tile) =>
+            tile.col === filter.col && tile.row === filter.row);
+          if (match)
+            state.selectedTile = match;
+        }
+        render();
+      });
+
+      symbolFilterInput.addEventListener("input", (event) => {
+        state.symbolFilter = event.target.value;
+        render();
+      });
+
+      toggleRoutes.addEventListener("change", (event) => {
+        state.layers.routes = event.target.checked;
+        render();
+      });
+
+      toggleSwitchboxes.addEventListener("change", (event) => {
+        state.layers.switchboxes = event.target.checked;
+        render();
+      });
+
+      toggleResources.addEventListener("change", (event) => {
+        state.layers.resources = event.target.checked;
+        render();
+      });
+
+      togglePacketFlows.addEventListener("change", (event) => {
+        state.layers.packetFlows = event.target.checked;
+        render();
+      });
+
+      document.getElementById("resetView").addEventListener("click", () => {
+        state.selectedTile = null;
+        state.selectedRoute = "__all__";
+        state.selectedPacketFlow = "__all__";
+        state.selectedDMA = "__all__";
+        state.selectedGroup = "__all__";
+        state.flowKind = "all";
+        state.tileFilter = "";
+        state.symbolFilter = "";
+        routeSelect.value = "__all__";
+        packetFlowSelect.value = "__all__";
+        dmaSelect.value = "__all__";
+        groupSelect.value = "__all__";
+        flowKindSelect.value = "all";
+        tileFilterInput.value = "";
+        symbolFilterInput.value = "";
+        state.layers.routes = true;
+        state.layers.switchboxes = true;
+        state.layers.resources = true;
+        state.layers.packetFlows = true;
+        toggleRoutes.checked = true;
+        toggleSwitchboxes.checked = true;
+        toggleResources.checked = true;
+        togglePacketFlows.checked = true;
+        render();
+      });
+
+      window.addEventListener("resize", () => {
+        if (state.design)
+          render();
+      });
+
+      fileInput.addEventListener("change", async (event) => {
+        const [file] = event.target.files;
+        if (!file) return;
+        const text = await file.text();
+        loadDesign(JSON.parse(text));
+      });
+
+      const params = new URLSearchParams(window.location.search);
+      const jsonPath = params.get("json");
+      if (jsonPath) {
+        fetch(jsonPath)
+          .then((response) => response.json())
+          .then(loadDesign)
+          .catch((error) => {
+            setDetailsMessage(`Failed to load ${jsonPath}\n${error}`);
+          });
+      } else {
+        render();
+      }
+    </script>
+  </body>
+</html>
