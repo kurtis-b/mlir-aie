@@ -3,7 +3,7 @@
 ## Status
 
 The frozen encoder repros in
-`/home/agi-demo/iron/operators/encoder_pipeline/shim_drain_bd_repro/README.md`
+`<iron-repo>/operators/encoder_pipeline/shim_drain_bd_repro/README.md`
 now compile cleanly through `aiecc` with the current compiler tree.
 
 The earlier shim-drain compaction plan turned out to be the wrong diagnosis for
@@ -72,9 +72,9 @@ That assignment keeps even-bank demand under `24` BDs and odd-bank demand under
 
 The implemented regression tests are:
 
-- [good-7.mlir](/home/agi-demo/mlir-aie/test/bd-chains-and-dma-tasks/assign-runtime-sequence-bd-ids/good-7.mlir)
+- `test/bd-chains-and-dma-tasks/assign-runtime-sequence-bd-ids/good-7.mlir`
   for channel-aware runtime-sequence BD assignment on memtiles
-- [memtile_channel_bd_aware_assignment.mlir](/home/agi-demo/mlir-aie/test/Passes/assign-bd-ids/memtile_channel_bd_aware_assignment.mlir)
+- `test/Passes/assign-bd-ids/memtile_channel_bd_aware_assignment.mlir`
   for the reduced encoder-style memtile pressure pattern that previously failed
   in `aie-assign-bd-ids`
 
@@ -103,7 +103,7 @@ using:
 
 ```bash
 build/bin/aiecc --verbose --no-compile --no-link --no-xchesscc --no-xbridge \
-  /home/agi-demo/iron/operators/encoder_pipeline/shim_drain_bd_repro/...
+  <iron-repo>/operators/encoder_pipeline/shim_drain_bd_repro/...
 ```
 
 ### Scope check

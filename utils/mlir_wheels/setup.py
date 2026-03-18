@@ -257,8 +257,8 @@ llvm_url = f"https://github.com/llvm/llvm-project/commit/{commit_hash}"
 setup(
     name="mlir" if check_env("ENABLE_RTTI", 1) else "mlir-no-rtti",
     version=version,
-    author="Maksim Levental",
-    author_email="maksim.levental@gmail.com",
+    author="<maintainer>",
+    author_email="maintainer@example.com",
     description=f"MLIR distribution as wheel. Created at {now} build of {llvm_url}",
     long_description=f"MLIR distribution as wheel. Created at {now} build of [llvm/llvm-project/{commit_hash}]({llvm_url})",
     long_description_content_type="text/markdown",
