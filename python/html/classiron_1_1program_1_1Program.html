@@ -21,7 +21,7 @@
  <tbody>
  <tr id="projectrow">
   <td id="projectalign">
-   <div id="projectname">IRON<span id="projectnumber">&#160;5eeb3fa4a6569bd994261e4319d4a1e8f1caf668</span>
+   <div id="projectname">IRON<span id="projectnumber">&#160;a38a925ea394e5508ab9aacbd9d4150636aad5d6</span>
    </div>
   </td>
  </tr>
@@ -135,8 +135,8 @@ Protected Attributes</h2></td></tr>
 </div><div class="memdoc">
 <pre class="fragment">A Program represents all design information needed to run the design on a device.
 
-ctx.module.operation.verify() is called within this function to verify the correctness
-of the MLIR module.
+Note: MLIR verification (``ctx.module.operation.verify()``) is performed inside
+:meth:`resolve_program`, not during construction.
 
 Args:
     device (Device): The device used to generate the final MLIR for the design.
