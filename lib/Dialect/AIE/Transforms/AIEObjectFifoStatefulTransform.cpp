@@ -1821,10 +1821,10 @@ struct AIEObjectFifoStatefulTransformPass
     return (objFifoName + "_shim_alloc").str();
   }
 
-  int estimateDMAChannelBdCount(ObjectFifoCreateOp op) {
+  int estimateDMAChannelBdCount(ObjectFifoCreateOp op, ObjectFifoState &state) {
     TileOp tileOp = op.getProducerTileOp();
     if (tileOp.isShimTile())
-      return externalBuffersPerFifo[op].size();
+      return state.externalBuffersPerFifo[op].size();
 
     size_t numBlocks = op.size();
     if (numBlocks == 0)
@@ -1840,8 +1840,8 @@ struct AIEObjectFifoStatefulTransformPass
     ObjectFifoCreateOp target = op;
     int joinDistribFactor = 1;
     if (auto linkOp = getOptionalLinkOp(op)) {
-      if (objFifoLinks.find(*linkOp) != objFifoLinks.end()) {
-        target = objFifoLinks[*linkOp];
+      if (state.objFifoLinks.find(*linkOp) != state.objFifoLinks.end()) {
+        target = state.objFifoLinks[*linkOp];
         if (linkOp->getRepeatCount().has_value() &&
             linkOp->getInputObjectFifos()[0] == op)
           repeatCount *= linkOp->getRepeatCount().value();
@@ -1915,7 +1915,7 @@ struct AIEObjectFifoStatefulTransformPass
 
       if (shouldProcessProducer) {
         bool requiresAdjacentTileAccessChannels = crossTileInfos.at(producer);
-        int numBds = estimateDMAChannelBdCount(producer);
+        int numBds = estimateDMAChannelBdCount(producer, state);
         int channelIndex = dmaAnalysis.getDMAChannelIndex(
             producer.getProducerTileOp(), DMAChannelDir::MM2S,
             requiresAdjacentTileAccessChannels, numBds);
@@ -1931,7 +1931,7 @@ struct AIEObjectFifoStatefulTransformPass
 
         if (shouldProcessConsumer) {
           bool requiresAdjacentTileAccessChannels = crossTileInfos.at(consumer);
-          int numBds = estimateDMAChannelBdCount(consumer);
+          int numBds = estimateDMAChannelBdCount(consumer, state);
           int channelIndex = dmaAnalysis.getDMAChannelIndex(
               consumer.getProducerTileOp(), DMAChannelDir::S2MM,
               requiresAdjacentTileAccessChannels, numBds);
