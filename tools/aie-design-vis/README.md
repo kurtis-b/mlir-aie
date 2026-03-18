@@ -51,10 +51,18 @@ The initial Phase 1 pieces now exist:
 
 The current viewer can:
 
+- choose a directory of `.mlir` design files when served through
+  [server.py](/home/agi-demo/mlir-aie/tools/aie-design-vis/server.py)
+- generate a fresh visualization when a different design file is selected
 - load exported design JSON
 - render the tile grid
+- export the current filtered diagram as standalone `SVG`
+- export the current filtered diagram as rasterized `PNG`
 - scale the array view to the visible viewer pane automatically
 - color tiles by kind and usage
+- render a board-style frame with row/column guides and summary pills
+- use stronger route styling, provenance-aware route coloring, and selected-route labels
+- emphasize selected groups and DMA containers directly in the diagram
 - show routed stream segments
 - filter by route
 - filter by packet flow
@@ -126,3 +134,42 @@ still not a full provenance model.
 
 The next planned step is still stronger provenance for cases that cannot be
 disambiguated by DMA channel ownership plus tile membership alone.
+
+## Running The Tool
+
+For the full experience, including on-demand generation from a directory of
+MLIR designs, start the local server:
+
+```bash
+cd /home/agi-demo/mlir-aie/tools/aie-design-vis
+python3 server.py --port 8000
+```
+
+Then open:
+
+```text
+http://localhost:8000/index.html
+```
+
+The viewer can then:
+
+- choose a directory of `.mlir` files with the built-in directory picker
+- list the design files in that directory
+- regenerate the visualization whenever a different design file is chosen
+
+Static JSON loading still works through the `Design JSON` file picker and the
+existing `?json=...` query parameter.
+
+## Exporting
+
+The toolbar exposes:
+
+- `Export SVG`
+  - downloads a standalone version of the currently rendered diagram
+  - keeps the current design, route, packet-flow, DMA, group, tile, and symbol
+    filters
+- `Export PNG`
+  - rasterizes the same filtered diagram to a higher-resolution PNG
+
+The exported image is the current diagram state, not the raw input design. That
+means selection highlights and active filters are preserved in the output.

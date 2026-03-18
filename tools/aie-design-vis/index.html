@@ -9,6 +9,9 @@
         --panel: #fffaf1;
         --grid: #c8c0b1;
         --text: #1d1a16;
+        --board-bg: #fffdf8;
+        --board-ribbon: #f1e4cf;
+        --board-stroke: #d5c5b4;
         --used-stroke: #201a14;
         --core: #3d8f63;
         --mem: #d46a2e;
@@ -16,14 +19,23 @@
         --shim-pl: #8b5aa8;
         --unknown: #88827a;
         --route: #a41f34;
+        --route-resolved: #a41f34;
+        --route-ambiguous: #c47b18;
+        --route-fallback: #5f647c;
         --route-faint: rgba(62, 62, 62, 0.25);
         --dma-highlight: #126b8a;
+        --group-row-store: #6f4aa8;
+        --group-objectfifo: #236f7b;
+        --group-packet-flow: #b35322;
+        --group-flow: #526a9b;
       }
 
       body {
         margin: 0;
         font-family: ui-sans-serif, system-ui, sans-serif;
-        background: var(--bg);
+        background:
+          radial-gradient(circle at top left, rgba(255, 255, 255, 0.9), transparent 38%),
+          linear-gradient(180deg, #f7f3eb 0%, #efe9de 100%);
         color: var(--text);
       }
 
@@ -46,6 +58,9 @@
         display: flex;
         align-items: flex-start;
         justify-content: center;
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.7), transparent 55%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(242, 236, 225, 0.65));
       }
 
       .selection-pane {
@@ -100,6 +115,21 @@
         cursor: pointer;
       }
 
+      .action-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .action-row button {
+        margin-top: 0;
+      }
+
+      .export-note {
+        margin-top: 10px;
+      }
+
       .toggle {
         display: flex;
         align-items: center;
@@ -135,8 +165,10 @@
 
       svg {
         display: block;
-        background: white;
+        background: transparent;
         border: 1px solid #d8cfbf;
+        border-radius: 28px;
+        box-shadow: 0 18px 48px rgba(44, 32, 18, 0.12);
       }
 
       .tile-label {
@@ -252,7 +284,22 @@
         <div class="controls">
           <h1>AIE Design Vis</h1>
           <p class="hint">
-            Load JSON produced by <code>aie-translate --aie-design-to-json</code>.
+            Load exported JSON directly, or choose a directory of MLIR design
+            files and generate the visualization on demand.
+          </p>
+          <label>
+            Design Directory
+            <button id="chooseDirectory" type="button" disabled>Choose directory</button>
+            <input id="directoryPicker" type="file" webkitdirectory directory multiple accept=".mlir" hidden />
+          </label>
+          <label>
+            Design File
+            <select id="designFileSelect" disabled>
+              <option value="__none__">Choose a design directory first</option>
+            </select>
+          </label>
+          <p id="designDirectoryStatus" class="hint">
+            Checking design-generation backend availability...
           </p>
           <label>
             Design JSON
@@ -305,7 +352,12 @@
             <label class="toggle"><input id="toggleResources" type="checkbox" checked />Buffer/lock/DMA counts</label>
             <label class="toggle"><input id="togglePacketFlows" type="checkbox" checked />Packet endpoints</label>
           </div>
-          <button id="resetView">Reset Selection</button>
+          <div class="action-row">
+            <button id="resetView" type="button">Reset</button>
+            <button id="exportSvg" type="button">Export SVG</button>
+            <button id="exportPng" type="button">Export PNG</button>
+          </div>
+          <p class="hint export-note">Exports the currently filtered diagram, including selection highlights.</p>
         </div>
 
         <div class="legend">
@@ -332,6 +384,10 @@
     <script>
       const state = {
         design: null,
+        designSource: "none",
+        backendAvailable: false,
+        directoryFiles: new Map(),
+        selectedDesignFile: "__none__",
         selectedTile: null,
         selectedRoute: "__all__",
         selectedPacketFlow: "__all__",
@@ -348,9 +404,26 @@
         },
       };
 
+      const ROUTE_COLORS = {
+        resolved: "#a41f34",
+        ambiguous: "#c47b18",
+        fallback: "#5f647c",
+        selected: "#7e1326",
+      };
+
+      const GROUP_COLORS = {
+        row_store: "#6f4aa8",
+        objectfifo: "#236f7b",
+        packet_flow: "#b35322",
+        flow: "#526a9b",
+      };
+
       const TILE = 64;
       const GAP = 18;
-      const MARGIN = 50;
+      const MARGIN_X = 50;
+      const TOP_MARGIN = 84;
+      const BOTTOM_MARGIN = 50;
+      const VIEW_SCALE = 0.968;
 
       const colorForKind = (kind) => {
         switch (kind) {
@@ -361,6 +434,34 @@
           default: return "var(--unknown)";
         }
       };
+
+      function groupAccentColor(groupKind) {
+        return GROUP_COLORS[groupKind] || "#55606e";
+      }
+
+      function routeColorForStream(stream, isSelected = false) {
+        if (isSelected)
+          return ROUTE_COLORS.selected;
+        switch (stream.provenance?.status) {
+          case "ambiguous":
+            return ROUTE_COLORS.ambiguous;
+          case "fallback":
+            return ROUTE_COLORS.fallback;
+          case "resolved":
+          default:
+            return ROUTE_COLORS.resolved;
+        }
+      }
+
+      function kindShortLabel(kind) {
+        switch (kind) {
+          case "core": return "C";
+          case "mem": return "M";
+          case "shim_noc": return "D";
+          case "shim_pl": return "P";
+          default: return "?";
+        }
+      }
 
       const svg = document.getElementById("canvas");
       const viewerPane = document.querySelector(".viewer");
@@ -373,10 +474,16 @@
       const tileFilterInput = document.getElementById("tileFilter");
       const symbolFilterInput = document.getElementById("symbolFilter");
       const fileInput = document.getElementById("fileInput");
+      const directoryPicker = document.getElementById("directoryPicker");
+      const chooseDirectoryButton = document.getElementById("chooseDirectory");
+      const designFileSelect = document.getElementById("designFileSelect");
+      const designDirectoryStatus = document.getElementById("designDirectoryStatus");
       const toggleRoutes = document.getElementById("toggleRoutes");
       const toggleSwitchboxes = document.getElementById("toggleSwitchboxes");
       const toggleResources = document.getElementById("toggleResources");
       const togglePacketFlows = document.getElementById("togglePacketFlows");
+      const exportSvgButton = document.getElementById("exportSvg");
+      const exportPngButton = document.getElementById("exportPng");
 
       function tileKey(col, row) {
         return `${col},${row}`;
@@ -425,6 +532,151 @@
       function clearElement(element) {
         while (element.firstChild)
           element.removeChild(element.firstChild);
+      }
+
+      function exportBaseName() {
+        const raw = String(
+          state.designSource ||
+          state.design?.metadata?.source_file ||
+          state.design?.metadata?.module ||
+          "aie_design",
+        );
+        const stem = raw.split("/").pop().replace(/\.[^.]+$/, "");
+        return stem.replace(/[^a-zA-Z0-9._-]+/g, "_") || "aie_design";
+      }
+
+      function downloadBlob(filename, blob) {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+
+      function inlineComputedStyles(sourceNode, targetNode) {
+        if (sourceNode.nodeType !== Node.ELEMENT_NODE || targetNode.nodeType !== Node.ELEMENT_NODE)
+          return;
+        const computed = window.getComputedStyle(sourceNode);
+        const props = [
+          "fill",
+          "fill-opacity",
+          "fill-rule",
+          "stroke",
+          "stroke-width",
+          "stroke-opacity",
+          "stroke-dasharray",
+          "stroke-linecap",
+          "stroke-linejoin",
+          "opacity",
+          "filter",
+          "font",
+          "font-family",
+          "font-size",
+          "font-weight",
+          "font-style",
+          "letter-spacing",
+          "text-anchor",
+          "dominant-baseline",
+          "paint-order",
+          "marker-start",
+          "marker-end",
+          "vector-effect",
+          "visibility",
+          "display",
+        ];
+        const styleText = props
+          .map((prop) => `${prop}: ${computed.getPropertyValue(prop)};`)
+          .join(" ");
+        if (styleText.trim())
+          targetNode.setAttribute("style", styleText);
+        const sourceChildren = Array.from(sourceNode.children);
+        const targetChildren = Array.from(targetNode.children);
+        for (let index = 0; index < sourceChildren.length; index += 1)
+          inlineComputedStyles(sourceChildren[index], targetChildren[index]);
+      }
+
+      function serializeSvgForExport() {
+        const clone = svg.cloneNode(true);
+        clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+        inlineComputedStyles(svg, clone);
+        const serializer = new XMLSerializer();
+        return `<?xml version="1.0" encoding="UTF-8"?>\n${serializer.serializeToString(clone)}`;
+      }
+
+      function exportCurrentSvg() {
+        if (!state.design) {
+          setDirectoryStatus("Load a design before exporting.", true);
+          return;
+        }
+        const payload = serializeSvgForExport();
+        downloadBlob(`${exportBaseName()}.svg`, new Blob([payload], { type: "image/svg+xml;charset=utf-8" }));
+        setDirectoryStatus(`Exported ${exportBaseName()}.svg.`);
+      }
+
+      async function exportCurrentPng() {
+        if (!state.design) {
+          setDirectoryStatus("Load a design before exporting.", true);
+          return;
+        }
+        const serialized = serializeSvgForExport();
+        const svgBlob = new Blob([serialized], { type: "image/svg+xml;charset=utf-8" });
+        const svgUrl = URL.createObjectURL(svgBlob);
+        try {
+          const image = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error("Failed to rasterize SVG for PNG export."));
+            img.src = svgUrl;
+          });
+          const viewBox = svg.viewBox.baseVal;
+          const scale = 2;
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.ceil(viewBox.width * scale);
+          canvas.height = Math.ceil(viewBox.height * scale);
+          const ctx = canvas.getContext("2d");
+          ctx.scale(scale, scale);
+          ctx.drawImage(image, 0, 0);
+          const pngBlob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+          downloadBlob(`${exportBaseName()}.png`, pngBlob);
+          setDirectoryStatus(`Exported ${exportBaseName()}.png.`);
+        } finally {
+          URL.revokeObjectURL(svgUrl);
+        }
+      }
+
+      function setDirectoryStatus(message, isError = false) {
+        designDirectoryStatus.textContent = message;
+        designDirectoryStatus.style.color = isError ? "#8b1e2d" : "";
+      }
+
+      function resetDesignFileOptions(placeholder = "Choose a design directory first") {
+        designFileSelect.innerHTML = "";
+        const option = document.createElement("option");
+        option.value = "__none__";
+        option.textContent = placeholder;
+        designFileSelect.appendChild(option);
+        designFileSelect.value = "__none__";
+        designFileSelect.disabled = true;
+      }
+
+      function populateDesignFileOptions(files) {
+        designFileSelect.innerHTML = "";
+        const placeholder = document.createElement("option");
+        placeholder.value = "__none__";
+        placeholder.textContent = "Select a design file";
+        designFileSelect.appendChild(placeholder);
+        for (const file of files) {
+          const option = document.createElement("option");
+          option.value = file.key;
+          option.textContent = file.key;
+          designFileSelect.appendChild(option);
+        }
+        designFileSelect.disabled = files.length === 0;
+        designFileSelect.value = "__none__";
       }
 
       function setDetailsMessage(message) {
@@ -888,8 +1140,8 @@
       }
 
       function tileCenter(tile, rows) {
-        const x = MARGIN + tile.col * (TILE + GAP) + TILE / 2;
-        const y = MARGIN + (rows - 1 - tile.row) * (TILE + GAP) + TILE / 2;
+        const x = MARGIN_X + tile.col * (TILE + GAP) + TILE / 2;
+        const y = TOP_MARGIN + (rows - 1 - tile.row) * (TILE + GAP) + TILE / 2;
         return { x, y };
       }
 
@@ -931,6 +1183,7 @@
         circle.setAttribute("fill", fill);
         circle.setAttribute("stroke", "rgba(0, 0, 0, 0.25)");
         circle.setAttribute("stroke-width", "1");
+        circle.setAttribute("pointer-events", "none");
         parent.appendChild(circle);
 
         const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -939,14 +1192,191 @@
         label.setAttribute("class", "tile-label");
         label.setAttribute("font-size", "9");
         label.setAttribute("fill", "white");
+        label.setAttribute("pointer-events", "none");
         label.textContent = text;
         parent.appendChild(label);
+      }
+
+      function appendDefs(parent) {
+        const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+
+        const tileShadow = document.createElementNS("http://www.w3.org/2000/svg", "filter");
+        tileShadow.setAttribute("id", "tileShadow");
+        tileShadow.innerHTML = '<feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="rgba(33, 25, 16, 0.22)" />';
+        defs.appendChild(tileShadow);
+
+        const routeGlow = document.createElementNS("http://www.w3.org/2000/svg", "filter");
+        routeGlow.setAttribute("id", "routeGlow");
+        routeGlow.innerHTML = '<feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="rgba(127, 30, 44, 0.35)" />';
+        defs.appendChild(routeGlow);
+
+        const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+        marker.setAttribute("id", "routeArrow");
+        marker.setAttribute("viewBox", "0 0 10 10");
+        marker.setAttribute("refX", "8");
+        marker.setAttribute("refY", "5");
+        marker.setAttribute("markerWidth", "8");
+        marker.setAttribute("markerHeight", "8");
+        marker.setAttribute("orient", "auto-start-reverse");
+        const markerPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        markerPath.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
+        markerPath.setAttribute("fill", ROUTE_COLORS.selected);
+        marker.appendChild(markerPath);
+        defs.appendChild(marker);
+
+        parent.appendChild(defs);
+      }
+
+      function appendPill(parent, x, y, text, fill, foreground = "#2f2418") {
+        const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        const width = Math.max(58, text.length * 7.2 + 22);
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", x);
+        rect.setAttribute("y", y);
+        rect.setAttribute("width", width);
+        rect.setAttribute("height", 24);
+        rect.setAttribute("rx", 12);
+        rect.setAttribute("fill", fill);
+        rect.setAttribute("stroke", "rgba(39, 30, 20, 0.12)");
+        group.appendChild(rect);
+        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        label.setAttribute("x", x + width / 2);
+        label.setAttribute("y", y + 15);
+        label.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
+        label.setAttribute("font-size", "11");
+        label.setAttribute("font-weight", "700");
+        label.setAttribute("text-anchor", "middle");
+        label.setAttribute("fill", foreground);
+        label.textContent = text;
+        group.appendChild(label);
+        parent.appendChild(group);
+        return width;
+      }
+
+      function appendBoardChrome(parent, design, width, height, visibleCounts) {
+        const backdrop = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        backdrop.setAttribute("x", 8);
+        backdrop.setAttribute("y", 8);
+        backdrop.setAttribute("width", width - 16);
+        backdrop.setAttribute("height", height - 16);
+        backdrop.setAttribute("rx", 26);
+        backdrop.setAttribute("fill", "var(--board-bg)");
+        backdrop.setAttribute("stroke", "var(--board-stroke)");
+        backdrop.setAttribute("stroke-width", "1.5");
+        parent.appendChild(backdrop);
+
+        const ribbon = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        ribbon.setAttribute("x", 18);
+        ribbon.setAttribute("y", 18);
+        ribbon.setAttribute("width", width - 36);
+        ribbon.setAttribute("height", 42);
+        ribbon.setAttribute("rx", 16);
+        ribbon.setAttribute("fill", "var(--board-ribbon)");
+        parent.appendChild(ribbon);
+
+        const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        title.setAttribute("x", 34);
+        title.setAttribute("y", 45);
+        title.setAttribute("font-size", "20");
+        title.setAttribute("font-weight", "700");
+        title.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
+        title.setAttribute("fill", "#231911");
+        title.textContent = `${design.device.kind} array`;
+        parent.appendChild(title);
+
+        let pillX = 240;
+        pillX += appendPill(parent, pillX, 27, `${design.device.columns} cols`, "#f8efe1");
+        pillX += 8;
+        pillX += appendPill(parent, pillX, 27, `${design.device.rows} rows`, "#f8efe1");
+        pillX += 8;
+        pillX += appendPill(parent, pillX, 27, `${visibleCounts.tiles} visible tiles`, "#f8efe1");
+        pillX += 8;
+        appendPill(parent, pillX, 27, `${visibleCounts.streams} routes`, "#f8efe1");
+      }
+
+      function appendAxisLabels(parent, rows, cols) {
+        for (let col = 0; col < cols; col += 1) {
+          const x = MARGIN_X + col * (TILE + GAP) + TILE / 2;
+          const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          label.setAttribute("x", x);
+          label.setAttribute("y", TOP_MARGIN - 20);
+          label.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
+          label.setAttribute("font-size", "11");
+          label.setAttribute("font-weight", "700");
+          label.setAttribute("text-anchor", "middle");
+          label.setAttribute("fill", "#5a5148");
+          label.textContent = `c${col}`;
+          parent.appendChild(label);
+        }
+        for (let row = 0; row < rows; row += 1) {
+          const y = TOP_MARGIN + (rows - 1 - row) * (TILE + GAP) + TILE / 2 + 4;
+          const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          label.setAttribute("x", MARGIN_X - 26);
+          label.setAttribute("y", y);
+          label.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
+          label.setAttribute("font-size", "11");
+          label.setAttribute("font-weight", "700");
+          label.setAttribute("text-anchor", "middle");
+          label.setAttribute("fill", "#5a5148");
+          label.textContent = `r${row}`;
+          parent.appendChild(label);
+        }
+      }
+
+      function appendGuideGrid(parent, rows, cols) {
+        for (let col = 0; col < cols; col += 1) {
+          const x = MARGIN_X + col * (TILE + GAP) + TILE / 2;
+          const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          line.setAttribute("x1", x);
+          line.setAttribute("y1", TOP_MARGIN - 8);
+          line.setAttribute("x2", x);
+          line.setAttribute("y2", TOP_MARGIN + rows * TILE + Math.max(0, rows - 1) * GAP + 8);
+          line.setAttribute("stroke", "rgba(118, 104, 89, 0.12)");
+          line.setAttribute("stroke-dasharray", "4 7");
+          parent.appendChild(line);
+        }
+        for (let row = 0; row < rows; row += 1) {
+          const y = TOP_MARGIN + (rows - 1 - row) * (TILE + GAP) + TILE / 2;
+          const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          line.setAttribute("x1", MARGIN_X - 6);
+          line.setAttribute("y1", y);
+          line.setAttribute("x2", MARGIN_X + cols * TILE + Math.max(0, cols - 1) * GAP + 8);
+          line.setAttribute("y2", y);
+          line.setAttribute("stroke", "rgba(118, 104, 89, 0.12)");
+          line.setAttribute("stroke-dasharray", "4 7");
+          parent.appendChild(line);
+        }
+      }
+
+      function appendRouteLabel(parent, x, y, text, fill) {
+        const width = Math.max(64, text.length * 6.9 + 18);
+        const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", x);
+        rect.setAttribute("y", y);
+        rect.setAttribute("width", width);
+        rect.setAttribute("height", 22);
+        rect.setAttribute("rx", 11);
+        rect.setAttribute("fill", fill);
+        rect.setAttribute("opacity", "0.92");
+        group.appendChild(rect);
+        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        label.setAttribute("x", x + width / 2);
+        label.setAttribute("y", y + 14);
+        label.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
+        label.setAttribute("font-size", "10");
+        label.setAttribute("font-weight", "700");
+        label.setAttribute("text-anchor", "middle");
+        label.setAttribute("fill", "white");
+        label.textContent = text;
+        group.appendChild(label);
+        parent.appendChild(group);
       }
 
       function fitSvgToViewer(width, height) {
         const availableWidth = Math.max(320, viewerPane.clientWidth - 40);
         const availableHeight = Math.max(320, viewerPane.clientHeight - 40);
-        const scale = 0.8 * Math.min(availableWidth / width, availableHeight / height);
+        const scale = VIEW_SCALE * Math.min(availableWidth / width, availableHeight / height);
         svg.style.width = `${Math.max(240, Math.floor(width * scale))}px`;
         svg.style.height = `${Math.max(240, Math.floor(height * scale))}px`;
       }
@@ -969,27 +1399,34 @@
         const visiblePacketFlows = filteredPacketFlows(design);
         const visibleDMAs = filteredDMAs(design);
         const visibleGroups = filterGroups(design);
+        const visibleTileCount = (design.tiles || []).filter((tile) =>
+          tileMatchesActiveFilters(tile, design)).length;
         const swMap = switchboxMap(design);
+        const coreCounts = countByTile(visibleCores);
         const bufferCounts = countByTile(visibleBuffers);
         const lockCounts = countByTile(visibleLocks);
         const dmaCounts = countByTile(visibleDMAs);
         const packetCounts = packetEndpointMaps(visiblePacketFlows);
         const highlightedDMAs = visibleDMAs;
 
-        const width = MARGIN * 2 + cols * TILE + Math.max(0, cols - 1) * GAP;
-        const height = MARGIN * 2 + rows * TILE + Math.max(0, rows - 1) * GAP;
+        const width = MARGIN_X * 2 + cols * TILE + Math.max(0, cols - 1) * GAP;
+        const height = TOP_MARGIN + BOTTOM_MARGIN + rows * TILE + Math.max(0, rows - 1) * GAP;
         svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
         svg.setAttribute("width", width);
         svg.setAttribute("height", height);
         fitSvgToViewer(width, height);
 
-        const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        title.setAttribute("x", MARGIN);
-        title.setAttribute("y", 28);
-        title.setAttribute("font-size", "20");
-        title.setAttribute("font-weight", "700");
-        title.textContent = `${design.device.kind} (${cols} x ${rows})`;
-        svg.appendChild(title);
+        appendDefs(svg);
+
+        appendBoardChrome(svg, design, width, height, {
+          tiles: visibleTileCount,
+          streams: visibleStreams.length,
+        });
+
+        const guideLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        svg.appendChild(guideLayer);
+        appendGuideGrid(guideLayer, rows, cols);
+        appendAxisLabels(svg, rows, cols);
 
         if (state.layers.routes) {
           const routeLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
@@ -998,16 +1435,46 @@
           for (const stream of visibleStreams) {
             const isSelected = state.selectedRoute === stream.id;
             const points = buildPolylinePoints(stream.route || [], design);
+            const routeColor = routeColorForStream(stream, isSelected);
             for (const [x1, y1, x2, y2] of points) {
               const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
               line.setAttribute("x1", x1);
               line.setAttribute("y1", y1);
               line.setAttribute("x2", x2);
               line.setAttribute("y2", y2);
-              line.setAttribute("stroke", isSelected ? "var(--route)" : "var(--route-faint)");
-              line.setAttribute("stroke-width", isSelected ? "5" : "2");
+              line.setAttribute("stroke", isSelected ? routeColor : "var(--route-faint)");
+              line.setAttribute("stroke-width", isSelected ? "5.5" : "2.4");
+              line.setAttribute("stroke-opacity", isSelected ? "0.98" : "0.55");
+              if (!isSelected)
+                line.setAttribute("stroke-dasharray", "6 8");
               line.setAttribute("stroke-linecap", "round");
+              if (isSelected) {
+                line.setAttribute("marker-end", "url(#routeArrow)");
+                line.setAttribute("filter", "url(#routeGlow)");
+              }
               routeLayer.appendChild(line);
+            }
+            if (isSelected && points.length) {
+              const [startX, startY] = points[0];
+              const [, , endX, endY] = points[points.length - 1];
+              const start = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+              start.setAttribute("cx", startX);
+              start.setAttribute("cy", startY);
+              start.setAttribute("r", "6");
+              start.setAttribute("fill", routeColor);
+              start.setAttribute("stroke", "white");
+              start.setAttribute("stroke-width", "2");
+              routeLayer.appendChild(start);
+              const end = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+              end.setAttribute("cx", endX);
+              end.setAttribute("cy", endY);
+              end.setAttribute("r", "6");
+              end.setAttribute("fill", "white");
+              end.setAttribute("stroke", routeColor);
+              end.setAttribute("stroke-width", "3");
+              routeLayer.appendChild(end);
+              const provenance = stream.provenance?.status ? ` ${stream.provenance.status}` : "";
+              appendRouteLabel(routeLayer, startX + 8, startY - 30, `${stream.id}${provenance}`, routeColor);
             }
           }
         }
@@ -1017,9 +1484,19 @@
 
         for (const tile of design.tiles || []) {
           const tileVisible = tileMatchesActiveFilters(tile, design);
+          const activeGroup = selectedGroup(design);
+          const groupAccent = activeGroup && groupHasTile(activeGroup, tile)
+            ? groupAccentColor(activeGroup.kind)
+            : null;
           const { x, y } = tileCenter(tile, rows);
           const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
           g.setAttribute("class", "tile");
+          g.style.cursor = "pointer";
+          g.addEventListener("click", () => {
+            state.selectedTile = tile;
+            renderDetails();
+            render();
+          });
 
           const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
           rect.setAttribute("x", x - TILE / 2);
@@ -1029,6 +1506,8 @@
           rect.setAttribute("rx", 8);
           rect.setAttribute("fill", colorForKind(tile.kind));
           rect.setAttribute("fill-opacity", tileVisible ? (tile.used ? "0.95" : "0.2") : "0.08");
+          if (tileVisible && tile.used)
+            rect.setAttribute("filter", "url(#tileShadow)");
           rect.setAttribute("stroke", state.selectedTile &&
             state.selectedTile.col === tile.col &&
             state.selectedTile.row === tile.row ? "var(--route)" : "var(--used-stroke)");
@@ -1036,12 +1515,35 @@
             state.selectedTile.col === tile.col &&
             state.selectedTile.row === tile.row ? "4" : "1.5");
           rect.setAttribute("stroke-opacity", tileVisible ? "1" : "0.18");
-          rect.addEventListener("click", () => {
-            state.selectedTile = tile;
-            renderDetails();
-            render();
-          });
           g.appendChild(rect);
+
+          const innerRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          innerRect.setAttribute("x", x - TILE / 2 + 6);
+          innerRect.setAttribute("y", y - TILE / 2 + 6);
+          innerRect.setAttribute("width", TILE - 12);
+          innerRect.setAttribute("height", TILE - 12);
+          innerRect.setAttribute("rx", 6);
+          innerRect.setAttribute("fill", "rgba(255, 255, 255, 0.12)");
+          innerRect.setAttribute("stroke", "rgba(255, 255, 255, 0.35)");
+          innerRect.setAttribute("stroke-width", "1");
+          innerRect.setAttribute("stroke-opacity", tileVisible ? "1" : "0.18");
+          innerRect.setAttribute("pointer-events", "none");
+          g.appendChild(innerRect);
+
+          if (groupAccent) {
+            const groupRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            groupRect.setAttribute("x", x - TILE / 2 + 2);
+            groupRect.setAttribute("y", y - TILE / 2 + 2);
+            groupRect.setAttribute("width", TILE - 4);
+            groupRect.setAttribute("height", TILE - 4);
+            groupRect.setAttribute("rx", 7);
+            groupRect.setAttribute("fill", "none");
+            groupRect.setAttribute("stroke", groupAccent);
+            groupRect.setAttribute("stroke-width", "2.5");
+            groupRect.setAttribute("stroke-opacity", tileVisible ? "0.95" : "0.25");
+            groupRect.setAttribute("pointer-events", "none");
+            g.appendChild(groupRect);
+          }
 
           const hasHighlightedDMA = highlightedDMAs.some(
             (item) => item.col === tile.col && item.row === tile.row,
@@ -1058,6 +1560,7 @@
             dmaRect.setAttribute("stroke-width", "2.5");
             dmaRect.setAttribute("stroke-dasharray", "6 4");
             dmaRect.setAttribute("stroke-opacity", tileVisible ? "1" : "0.35");
+            dmaRect.setAttribute("pointer-events", "none");
             g.appendChild(dmaRect);
           }
 
@@ -1065,7 +1568,10 @@
           label.setAttribute("x", x);
           label.setAttribute("y", y - 8);
           label.setAttribute("class", "tile-label");
+          label.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
+          label.setAttribute("font-size", "11");
           label.setAttribute("fill-opacity", tileVisible ? "1" : "0.45");
+          label.setAttribute("pointer-events", "none");
           label.textContent = `${tile.col},${tile.row}`;
           g.appendChild(label);
 
@@ -1073,23 +1579,23 @@
           short.setAttribute("x", x);
           short.setAttribute("y", y + 12);
           short.setAttribute("class", "tile-label");
+          short.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
+          short.setAttribute("font-size", "16");
           short.setAttribute("font-weight", "700");
           short.setAttribute("fill-opacity", tileVisible ? "1" : "0.45");
-          short.textContent =
-            tile.kind === "core" ? "C" :
-            tile.kind === "mem" ? "M" :
-            tile.kind === "shim_noc" ? "D" :
-            tile.kind === "shim_pl" ? "P" : "?";
+          short.setAttribute("pointer-events", "none");
+          short.textContent = kindShortLabel(tile.kind);
           g.appendChild(short);
 
           const sb = swMap.get(tileKey(tile.col, tile.row));
           if (state.layers.switchboxes && sb && tile.used) {
             const meta = document.createElementNS("http://www.w3.org/2000/svg", "text");
             meta.setAttribute("x", x);
-            meta.setAttribute("y", y + 26);
+            meta.setAttribute("y", y + 28);
             meta.setAttribute("class", "tile-label");
             meta.setAttribute("font-size", "10");
             meta.setAttribute("fill-opacity", tileVisible ? "1" : "0.45");
+            meta.setAttribute("pointer-events", "none");
             meta.textContent = `S:${sb.source_count} D:${sb.destination_count}`;
             g.appendChild(meta);
           }
@@ -1098,15 +1604,33 @@
           const bufferCount = bufferCounts.get(key) || 0;
           const lockCount = lockCounts.get(key) || 0;
           const dmaCount = dmaCounts.get(key) || 0;
+          const coreCount = coreCounts.get(key) || 0;
           if (state.layers.resources && (bufferCount || lockCount || dmaCount)) {
             const resources = document.createElementNS("http://www.w3.org/2000/svg", "text");
             resources.setAttribute("x", x);
-            resources.setAttribute("y", y + 38);
+            resources.setAttribute("y", y + 41);
             resources.setAttribute("class", "tile-label");
+            resources.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
             resources.setAttribute("font-size", "9");
             resources.setAttribute("fill-opacity", tileVisible ? "1" : "0.45");
+            resources.setAttribute("pointer-events", "none");
             resources.textContent = `B:${bufferCount} L:${lockCount} D:${dmaCount}`;
             g.appendChild(resources);
+          }
+
+          const usedDot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          usedDot.setAttribute("cx", x - TILE / 2 + 12);
+          usedDot.setAttribute("cy", y + TILE / 2 - 12);
+          usedDot.setAttribute("r", "5");
+          usedDot.setAttribute("fill", tile.used ? "#f7f3ec" : "rgba(255,255,255,0.35)");
+          usedDot.setAttribute("stroke", tile.used ? "#33271d" : "rgba(68,54,39,0.28)");
+          usedDot.setAttribute("stroke-width", "1.2");
+          usedDot.setAttribute("opacity", tileVisible ? "1" : "0.35");
+          usedDot.setAttribute("pointer-events", "none");
+          g.appendChild(usedDot);
+
+          if (coreCount) {
+            appendBadge(g, x + TILE / 2 - 12, y + TILE / 2 - 12, "#274f41", `K${coreCount}`);
           }
 
           const packetSourceCount = packetCounts.sources.get(key) || 0;
@@ -1343,6 +1867,47 @@
         render();
       }
 
+      async function renderDirectoryDesign(fileKey) {
+        if (!state.backendAvailable)
+          throw new Error("The design-generation backend is unavailable. Start tools/aie-design-vis/server.py.");
+        const file = state.directoryFiles.get(fileKey);
+        if (!file)
+          throw new Error(`Could not find ${fileKey} in the selected directory.`);
+        const mlirText = await file.text();
+        const response = await fetch("/api/render-design", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: fileKey,
+            mlir_text: mlirText,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.design)
+          throw new Error(payload.error || `Failed to generate visualization for ${fileKey}.`);
+        state.designSource = fileKey;
+        loadDesign(payload.design);
+        setDirectoryStatus(`Generated visualization for ${fileKey} via ${payload.generation.pipeline}.`);
+      }
+
+      async function detectBackend() {
+        try {
+          const response = await fetch("/api/health");
+          if (!response.ok)
+            throw new Error(`status ${response.status}`);
+          state.backendAvailable = true;
+          chooseDirectoryButton.disabled = false;
+          setDirectoryStatus("Choose a directory of MLIR design files to generate visualizations on demand.");
+        } catch (error) {
+          state.backendAvailable = false;
+          chooseDirectoryButton.disabled = true;
+          resetDesignFileOptions("Run server.py to enable directory generation");
+          setDirectoryStatus("Dynamic MLIR generation is unavailable. Start tools/aie-design-vis/server.py and reload the page.", true);
+        }
+      }
+
       routeSelect.addEventListener("change", (event) => {
         state.selectedRoute = event.target.value;
         render();
@@ -1405,6 +1970,16 @@
         render();
       });
 
+      exportSvgButton.addEventListener("click", () => {
+        exportCurrentSvg();
+      });
+
+      exportPngButton.addEventListener("click", () => {
+        exportCurrentPng().catch((error) => {
+          setDirectoryStatus(String(error), true);
+        });
+      });
+
       document.getElementById("resetView").addEventListener("click", () => {
         state.selectedTile = null;
         state.selectedRoute = "__all__";
@@ -1441,11 +2016,65 @@
         const [file] = event.target.files;
         if (!file) return;
         const text = await file.text();
+        state.designSource = file.name;
         loadDesign(JSON.parse(text));
+        setDirectoryStatus(`Loaded exported JSON from ${file.name}.`);
+      });
+
+      chooseDirectoryButton.addEventListener("click", () => {
+        if (!state.backendAvailable)
+          return;
+        directoryPicker.click();
+      });
+
+      directoryPicker.addEventListener("change", async (event) => {
+        const files = Array.from(event.target.files || [])
+          .filter((file) => file.name.endsWith(".mlir"))
+          .sort((lhs, rhs) => (lhs.webkitRelativePath || lhs.name).localeCompare(rhs.webkitRelativePath || rhs.name));
+        directoryPicker.value = "";
+        state.directoryFiles = new Map(
+          files.map((file) => [file.webkitRelativePath || file.name, file]),
+        );
+        state.selectedDesignFile = "__none__";
+        if (!files.length) {
+          resetDesignFileOptions("No .mlir files found in that directory");
+          setDirectoryStatus("The selected directory did not contain any .mlir files.", true);
+          return;
+        }
+        populateDesignFileOptions(
+          files.map((file) => ({
+            key: file.webkitRelativePath || file.name,
+          })),
+        );
+        setDirectoryStatus(`Found ${files.length} MLIR design file(s). Select one to generate the visualization.`);
+        if (files.length === 1) {
+          const only = files[0].webkitRelativePath || files[0].name;
+          designFileSelect.value = only;
+          state.selectedDesignFile = only;
+          try {
+            await renderDirectoryDesign(only);
+          } catch (error) {
+            setDirectoryStatus(String(error), true);
+          }
+        }
+      });
+
+      designFileSelect.addEventListener("change", async (event) => {
+        const fileKey = event.target.value;
+        if (fileKey === "__none__" || fileKey === state.selectedDesignFile)
+          return;
+        state.selectedDesignFile = fileKey;
+        setDirectoryStatus(`Generating visualization for ${fileKey}...`);
+        try {
+          await renderDirectoryDesign(fileKey);
+        } catch (error) {
+          setDirectoryStatus(String(error), true);
+        }
       });
 
       const params = new URLSearchParams(window.location.search);
       const jsonPath = params.get("json");
+      detectBackend();
       if (jsonPath) {
         fetch(jsonPath)
           .then((response) => response.json())
